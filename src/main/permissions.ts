@@ -1,4 +1,4 @@
-import { app, dialog, type BrowserWindow, type Session } from 'electron'
+import { app, dialog, type BrowserWindow, type Session, type WebContents } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
@@ -76,6 +76,8 @@ export class SitePermissions {
   private store: Store = {}
   /** Open prompts, so a site asking twice gets one dialog. */
   private pending = new Map<string, Promise<boolean>>()
+  /** What you blocked on pages whose decisions aren't remembered, for as long as the page lives. */
+  private blockedOnPage = new WeakMap<WebContents, Set<string>>()
 
   constructor(private window: () => BrowserWindow | null) {
     if (!existsSync(storePath())) return
@@ -88,12 +90,12 @@ export class SitePermissions {
 
   /** Denies by default; asks for what's in ASK and remembers the answer for the profile. */
   attach(sess: Session, profileId: string, profileName: string) {
-    sess.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    sess.setPermissionRequestHandler((wc, permission, callback, details) => {
       const origin = originOf(details.requestingUrl)
       if (ALWAYS.has(permission) || isExtension(origin)) return callback(true)
       const wanted = expand(permission, details as { mediaTypes?: string[]; externalURL?: string })
       if (!wanted.every((p) => describe(p))) return callback(false)
-      void this.ask(profileId, profileName, origin, wanted).then(callback)
+      void this.ask(wc, profileId, profileName, origin, wanted).then(callback)
     })
     sess.setPermissionCheckHandler((_wc, permission, requestingOrigin, details) => {
       const origin = originOf(requestingOrigin)
@@ -123,26 +125,32 @@ export class SitePermissions {
     this.save()
   }
 
-  private async ask(profileId: string, profileName: string, origin: string, wanted: string[]): Promise<boolean> {
+  private async ask(wc: WebContents, profileId: string, profileName: string, origin: string, wanted: string[]): Promise<boolean> {
     const remembers = isRememberable(origin)
     const decided = (remembers && this.store[profileId]?.[origin]) || {}
-    if (wanted.some((p) => decided[p] === false)) return false
+    const blocked = this.blockedOnPage.get(wc)
+    if (wanted.some((p) => decided[p] === false || blocked?.has(p))) return false
     const open = wanted.filter((p) => decided[p] !== true)
     if (!open.length) return true
 
-    const key = `${profileId} ${origin} ${open.join(',')}`
-    let prompt = remembers ? this.pending.get(key) : undefined
+    // Pages that share the "null" origin get one prompt per page, not one shared between them.
+    const key = `${profileId} ${remembers ? origin : `page ${wc.id}`} ${open.join(',')}`
+    let prompt = this.pending.get(key)
     if (!prompt) {
       prompt = this.prompt(profileName, origin, open, remembers).then(({ allow, remember }) => {
         if (remember) {
           const site = ((this.store[profileId] ??= {})[origin] ??= {})
           for (const p of open) site[p] = allow
           this.save()
+        } else if (!remembers && !allow) {
+          let set = this.blockedOnPage.get(wc)
+          if (!set) this.blockedOnPage.set(wc, (set = new Set()))
+          for (const p of open) set.add(p)
         }
         return allow
       })
       prompt.finally(() => this.pending.delete(key))
-      if (remembers) this.pending.set(key, prompt)
+      this.pending.set(key, prompt)
     }
     return prompt
   }
@@ -156,7 +164,8 @@ export class SitePermissions {
       message: `${host} wants to ${list}`,
       detail: `In the ${profileName} profile.`,
       buttons: ['Block', 'Allow'],
-      defaultId: 1,
+      // Enter blocks for pages jbrow can't name, so a page can't count on you pressing it.
+      defaultId: remembers ? 1 : 0,
       cancelId: 0,
       ...(remembers && { checkboxLabel: 'Remember for this site', checkboxChecked: true }),
     }
