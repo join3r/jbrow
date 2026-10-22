@@ -27,8 +27,12 @@ let filter = 'all'
 let scope: { key: string; name: string } | null = null
 let lastFront: FrontApp | null = null
 let hiddenAt = 0
-// The PiP window's "back to tab" brings jbrow back.
-const miniPlayer = new MiniPlayer(() => void panel.show())
+// The PiP window's "back to tab" brings jbrow back. A page can make its video leave PiP while
+// playing too, so it only counts if a click just made jbrow the frontmost app: showing the
+// panel takes keyboard focus from whatever you're typing in.
+const miniPlayer = new MiniPlayer(async () => {
+  if ((await frontmostApp())?.pid === process.pid) void panel.show()
+})
 /** Display names of apps seen by the app hotkey, keyed by bundle ID. */
 const appNames = new Map<string, string>()
 
