@@ -1,0 +1,27 @@
+{
+  "name": "jbrow",
+  "productName": "jbrow",
+  "version": "0.1.0",
+  "description": "A browser that isn't there until you call it.",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "author": "Vladimir 'join3r' Schmotzer",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node scripts/patch-deps.mjs && node build.mjs",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && JBROW_DEBUG=1 electron .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "electron-chrome-extensions": "4.9.0",
+    "electron-chrome-web-store": "0.13.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.3.4",
+    "@types/node": "22.19.0",
+    "electron": "44.7.0",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  }
+}

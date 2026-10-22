@@ -1,0 +1,148 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src * data: crx:"
+    />
+    <title>jbrow</title>
+    <link rel="stylesheet" href="ui.css" />
+  </head>
+  <body>
+    <div id="root" class="panel" data-style="materialize">
+      <header id="toolbar">
+        <div class="side-tools">
+          <div id="filter" class="seg" role="group" aria-label="Show profile"></div>
+          <button id="newTab" class="icon" data-icon="plus" title="New tab (⌘T, right-click for a profile)" aria-label="New tab"></button>
+        </div>
+        <div class="tools">
+          <button id="back" class="icon" data-icon="back" title="Back (⌘[)" aria-label="Back"></button>
+          <button id="forward" class="icon" data-icon="forward" title="Forward (⌘])" aria-label="Forward"></button>
+          <button id="reload" class="icon" title="Reload (⌘R)" aria-label="Reload"></button>
+          <div class="omni">
+            <input id="omnibox" autocomplete="off" spellcheck="false" aria-label="Address bar" placeholder="Search or type a tab name" />
+            <div id="privateMask" class="private-mask" hidden><span data-icon="eyeOff"></span>Private</div>
+            <div id="suggest" class="suggest" hidden></div>
+          </div>
+          <div id="pinnedActions" class="pinned-actions"></div>
+          <div class="ext">
+            <button id="extButton" class="icon" data-icon="puzzle" title="Extensions" aria-label="Extensions" aria-expanded="false"></button>
+            <div id="extPop" class="pop" hidden>
+              <div id="extHead" class="pop-head"></div>
+              <browser-action-list id="actions" alignment="bottom left"></browser-action-list>
+              <div id="extEmpty" class="pop-empty" hidden>No extensions in this profile yet.</div>
+              <div class="pop-sep"></div>
+              <button id="addExtension" class="pop-item"><span data-icon="folderPlus"></span>Add from folder…</button>
+              <button id="openStore" class="pop-item"><span data-icon="store"></span>Chrome Web Store</button>
+            </div>
+          </div>
+          <button id="pin" class="icon" data-icon="pin" title="Pin: stay visible when clicking elsewhere (⇧⌘P)" aria-label="Pin" aria-pressed="false"></button>
+          <button id="settingsButton" class="icon" data-icon="settings" title="Settings (⌘,)" aria-label="Settings" aria-pressed="false"></button>
+        </div>
+      </header>
+      <aside id="sidebar">
+        <div id="scope" class="scope" hidden></div>
+        <nav id="threads" aria-label="Threads"></nav>
+        <div id="rulesPop" class="pop rules-pop" hidden>
+          <div id="rulesHead" class="pop-head"></div>
+          <p class="pop-help">
+            A thread about to be archived moves into this folder instead when one of its addresses contains a pattern.
+            One per line; <code>*</code> matches anything, as for private addresses.
+          </p>
+          <textarea id="folderRules" rows="4" spellcheck="false" placeholder="github.com/acme&#10;*.atlassian.net"></textarea>
+        </div>
+        <div id="toast" class="toast" hidden></div>
+      </aside>
+      <main id="content">
+        <img id="snapshot" alt="" hidden />
+        <section id="blank" class="blank" hidden>
+          <h1>Where to?</h1>
+          <p>Type in the address bar to search, open a site, or find any open tab.</p>
+          <div class="blank-profile">
+            <span>Opens in</span>
+            <div id="blankProfile" class="seg" role="group" aria-label="Profile for this tab"></div>
+          </div>
+          <dl class="keys">
+            <div><dt>⌘T</dt><dd>New tab</dd></div>
+            <div><dt>⇧⌘N</dt><dd>New tab in the other profile</dd></div>
+            <div><dt>⌘1–9</dt><dd>Jump to a thread</dd></div>
+            <div><dt>⌃Tab</dt><dd>Previous tab</dd></div>
+            <div><dt>⌘W</dt><dd>Close tab</dd></div>
+            <div><dt>⇧⌘P</dt><dd>Pin the window</dd></div>
+          </dl>
+        </section>
+        <section id="settings" class="settings" hidden tabindex="-1" aria-label="Settings">
+          <header class="set-head">
+            <h1>Settings</h1>
+            <button id="closeSettings" class="icon" data-icon="close" title="Close (Esc)" aria-label="Close settings"></button>
+          </header>
+
+          <h2>Summon animation</h2>
+          <div class="field">
+            <span class="label">Style</span>
+            <div id="animStyle" class="seg" role="group" aria-label="Animation style">
+              <button data-value="materialize">Materialize</button>
+              <button data-value="slide">Slide</button>
+              <button data-value="scale">Scale</button>
+              <button data-value="fade">Fade</button>
+              <button data-value="off">Off</button>
+            </div>
+          </div>
+          <div class="field">
+            <label class="label" for="animSpeed">Duration</label>
+            <input id="animSpeed" type="range" min="80" max="400" step="10" />
+            <output id="animSpeedOut" for="animSpeed"></output>
+          </div>
+          <div class="field">
+            <span class="label">Feel</span>
+            <div id="animEase" class="seg" role="group" aria-label="Animation feel">
+              <button data-value="spring">Spring</button>
+              <button data-value="snappy">Snappy</button>
+              <button data-value="smooth">Smooth</button>
+            </div>
+          </div>
+          <div class="field">
+            <span class="label"></span>
+            <button id="animPreview" class="chip">Preview</button>
+          </div>
+
+          <h2>Archiving</h2>
+          <div class="field">
+            <span class="label">After</span>
+            <div id="archiveAfter" class="seg" role="group" aria-label="Archive threads unseen for">
+              <button data-value="1">1 day</button>
+              <button data-value="3">3 days</button>
+              <button data-value="7">1 week</button>
+              <button data-value="30">1 month</button>
+              <button data-value="0">Never</button>
+            </div>
+          </div>
+          <p class="help">
+            Threads you haven't opened for this long close and leave the sidebar. Type in the address bar to find and
+            reopen them. Kept threads never archive, and a folder in Kept can catch threads by address before they do:
+            right-click the folder and choose <b>Auto-file rules</b>.
+          </p>
+
+          <h2>Private addresses</h2>
+          <p class="help">
+            Addresses that contain one of these show as <b>Private</b> in the address bar and the tab list until you click
+            the address bar. One per line; <code>*</code> matches anything, so <code>*.corp.example</code> covers every
+            site under corp.example.
+          </p>
+          <textarea id="privateUrls" rows="5" spellcheck="false" placeholder="*.corp.example&#10;grafana.internal"></textarea>
+
+          <h2>Screen sharing</h2>
+          <label class="check">
+            <input id="hideCapture" type="checkbox" />
+            <span>Hide jbrow from screen sharing and screenshots. While this is on, nobody watching your screen sees
+              jbrow at all, private addresses included.</span>
+          </label>
+
+          <p class="help foot">Hotkeys, profiles and linked apps are in <button id="openSettingsFile" class="link">settings.json</button>; those need a restart.</p>
+        </section>
+      </main>
+    </div>
+    <script src="ui.js"></script>
+  </body>
+</html>
