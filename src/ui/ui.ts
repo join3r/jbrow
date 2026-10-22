@@ -108,7 +108,7 @@ function render() {
     reload.setAttribute('aria-label', S.nav.loading ? 'Stop' : 'Reload')
   }
   $('pin').setAttribute('aria-pressed', String(S.pinned))
-  $('pin').title = S.pinned ? 'Pinned: stays visible when clicking elsewhere (⇧⌘P)' : 'Pin: stay visible when clicking elsewhere (⇧⌘P)'
+  $('pin').title = S.pinned ? 'Pinned: a regular window with a Dock icon (⇧⌘P)' : 'Pin: keep as a regular window with a Dock icon (⇧⌘P)'
   if (document.activeElement !== omnibox) showAddress()
   $('extHead').textContent = `Extensions · ${p?.name ?? ''}`
   $('newTab').title = `New tab${S.filter !== 'all' ? ` in ${profile(S.filter)?.name ?? S.filter}` : ''} (⌘T)`

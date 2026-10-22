@@ -279,7 +279,7 @@ function onKey(input: Electron.Input): boolean {
       return true
     }
     if (key === 'p') {
-      panel.pinned = !panel.pinned
+      panel.setPinned(!panel.pinned)
       pushState()
       return true
     }
@@ -510,7 +510,7 @@ function wireIpc() {
     pushState()
   })
   on('pin', () => {
-    panel.pinned = !panel.pinned
+    panel.setPinned(!panel.pinned)
     pushState()
   })
   on<{ profile: string }>('set-profile', ({ profile }) => {
@@ -687,3 +687,7 @@ app.on('will-quit', () => {
 })
 // jbrow has no windows to close; it quits only from the menu bar item.
 app.on('window-all-closed', () => {})
+// Pinned, jbrow has a Dock icon; clicking it or ⌘Tabbing to jbrow brings the window back.
+app.on('activate', () => {
+  if (panel?.pinned && !panel.visible) void panel.show()
+})

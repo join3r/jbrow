@@ -1,4 +1,4 @@
-import { BrowserWindow, screen, type Rectangle } from 'electron'
+import { app, BrowserWindow, screen, type Rectangle } from 'electron'
 import path from 'node:path'
 import type { AnimMessage } from '../shared/types'
 import type { Settings } from './settings'
@@ -65,6 +65,29 @@ export class Panel {
     this.applyContentProtection()
     void this.win.loadFile(path.join(__dirname, 'ui', 'index.html'))
     this.win.on('resize', () => this.hooks.setPageVisible(this.pageVisible()))
+    // A panel never activates jbrow on its own, so a pinned one does it when clicked.
+    this.win.on('focus', () => this.pinned && app.focus({ steal: true }))
+  }
+
+  /**
+   * Pinned, jbrow acts like a regular app window: normal window level, one Space, a Dock icon,
+   * and clicking it makes jbrow the frontmost app. Tools that work on the frontmost window,
+   * like Stem's window peek, skip floating panels and apps without a Dock icon.
+   */
+  setPinned(on: boolean) {
+    if (on === this.pinned || this.win.isDestroyed()) return
+    this.pinned = on
+    this.win.setAlwaysOnTop(!on, 'floating')
+    this.win.setVisibleOnAllWorkspaces(!on, { visibleOnFullScreen: !on })
+    if (on) {
+      void app.dock?.show().then(() => {
+        if (this.visible && !this.win.isDestroyed()) app.focus({ steal: true })
+      })
+    } else {
+      app.dock?.hide()
+      // Leaving the Dock deactivates jbrow; keep the panel in front and focused.
+      if (this.visible) this.win.focus()
+    }
   }
 
   /** Where the active page goes, in window coordinates. */

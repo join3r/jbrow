@@ -31,7 +31,7 @@ right-click menu, ⌘Q, or Ctrl+C in the terminal.
 | ⌃Tab | Previous tab |
 | ⌘W | Close tab |
 | ⌘L | Address bar |
-| ⇧⌘P | Pin (stay visible when clicking elsewhere) |
+| ⇧⌘P | Pin: a regular window with a Dock icon, which stays put when you click elsewhere |
 | ⌘, | Settings |
 | ⌥⌘I | DevTools for the page |
 
