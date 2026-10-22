@@ -90,7 +90,15 @@ function render() {
 
   const p = active && profile(active.profile)
   $<HTMLButtonElement>('back').disabled = !S.nav.canGoBack
-  $<HTMLButtonElement>('forward').disabled = !S.nav.canGoForward
+  // Forward is rarely possible, so it only takes room when it is.
+  $('forward').hidden = !S.nav.canGoForward
+  const pill = $('profilePill')
+  pill.hidden = !p || S.profiles.length < 2
+  if (p) {
+    pill.textContent = p.name
+    pill.style.setProperty('--pc', p.color || 'var(--muted)')
+    pill.title = `This tab is in the ${p.name} profile`
+  }
   const reload = $('reload')
   const reloadIcon = S.nav.loading ? 'close' : 'reload'
   if (reload.dataset.icon !== reloadIcon) {

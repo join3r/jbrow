@@ -17,12 +17,17 @@
           <button id="newTab" class="icon" data-icon="plus" title="New tab (⌘T, right-click for a profile)" aria-label="New tab"></button>
         </div>
         <div class="tools">
-          <button id="back" class="icon" data-icon="back" title="Back (⌘[)" aria-label="Back"></button>
-          <button id="forward" class="icon" data-icon="forward" title="Forward (⌘])" aria-label="Forward"></button>
-          <button id="reload" class="icon" title="Reload (⌘R)" aria-label="Reload"></button>
+          <div class="nav">
+            <button id="back" class="icon sm" data-icon="back" title="Back (⌘[)" aria-label="Back"></button>
+            <button id="forward" class="icon sm" data-icon="forward" title="Forward (⌘])" aria-label="Forward" hidden></button>
+          </div>
           <div class="omni">
-            <input id="omnibox" autocomplete="off" spellcheck="false" aria-label="Address bar" placeholder="Search or type a tab name" />
-            <div id="privateMask" class="private-mask" hidden><span data-icon="eyeOff"></span>Private</div>
+            <span id="profilePill" class="profile-pill" hidden></span>
+            <div class="omni-field">
+              <input id="omnibox" autocomplete="off" spellcheck="false" aria-label="Address bar" placeholder="Search or type a tab name" />
+              <div id="privateMask" class="private-mask" hidden><span data-icon="eyeOff"></span>Private</div>
+            </div>
+            <button id="reload" class="icon sm" title="Reload (⌘R)" aria-label="Reload"></button>
             <div id="suggest" class="suggest" hidden></div>
           </div>
           <div id="pinnedActions" class="pinned-actions"></div>
