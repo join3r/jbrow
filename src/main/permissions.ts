@@ -44,11 +44,32 @@ function originOf(url: string): string {
 /** Extensions already listed what they use when you installed them. */
 const isExtension = (origin: string) => origin.startsWith('chrome-extension://')
 
-/** Camera and microphone arrive as one "media" request; jbrow asks and remembers them separately. */
-function expand(permission: string, mediaTypes: readonly string[] | undefined): string[] {
+/**
+ * Only http(s) sites get remembered decisions. Others (data:, file:, sandboxed frames, whose
+ * origin is "null") would share one entry with every page like them, so they're asked each time.
+ */
+const isRememberable = (origin: string) => /^https?:\/\//.test(origin)
+
+/**
+ * Camera and microphone arrive as one "media" request; jbrow asks and remembers them separately.
+ * Opening another app is asked and remembered per link scheme, so allowing zoommtg: doesn't allow
+ * every other app too.
+ */
+function expand(permission: string, details: { mediaTypes?: string[]; externalURL?: string }): string[] {
+  if (permission === 'openExternal') {
+    const scheme = details.externalURL?.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase()
+    return scheme ? [`openExternal:${scheme}`] : ['openExternal']
+  }
   if (permission !== 'media') return [permission]
-  const types = mediaTypes?.length ? mediaTypes : ['audio', 'video']
+  const types = details.mediaTypes?.length ? details.mediaTypes : ['audio', 'video']
   return types.map((t) => (t === 'video' ? 'camera' : 'microphone'))
+}
+
+/** What the prompt says the site wants to do. */
+function describe(permission: string): string | undefined {
+  const [base, scheme] = permission.split(':')
+  if (base === 'openExternal' && scheme) return `open ${scheme}: links in another app`
+  return ASK[permission]
 }
 
 export class SitePermissions {
@@ -70,13 +91,14 @@ export class SitePermissions {
     sess.setPermissionRequestHandler((_wc, permission, callback, details) => {
       const origin = originOf(details.requestingUrl)
       if (ALWAYS.has(permission) || isExtension(origin)) return callback(true)
-      const wanted = expand(permission, (details as { mediaTypes?: string[] }).mediaTypes)
-      if (!wanted.every((p) => p in ASK)) return callback(false)
+      const wanted = expand(permission, details as { mediaTypes?: string[]; externalURL?: string })
+      if (!wanted.every((p) => describe(p))) return callback(false)
       void this.ask(profileId, profileName, origin, wanted).then(callback)
     })
     sess.setPermissionCheckHandler((_wc, permission, requestingOrigin, details) => {
       const origin = originOf(requestingOrigin)
       if (ALWAYS.has(permission) || isExtension(origin)) return true
+      if (!isRememberable(origin)) return false
       const granted = this.store[profileId]?.[origin] ?? {}
       if (permission === 'media') {
         const type = (details as { mediaType?: string }).mediaType
@@ -102,15 +124,16 @@ export class SitePermissions {
   }
 
   private async ask(profileId: string, profileName: string, origin: string, wanted: string[]): Promise<boolean> {
-    const decided = this.store[profileId]?.[origin] ?? {}
+    const remembers = isRememberable(origin)
+    const decided = (remembers && this.store[profileId]?.[origin]) || {}
     if (wanted.some((p) => decided[p] === false)) return false
     const open = wanted.filter((p) => decided[p] !== true)
     if (!open.length) return true
 
     const key = `${profileId} ${origin} ${open.join(',')}`
-    let prompt = this.pending.get(key)
+    let prompt = remembers ? this.pending.get(key) : undefined
     if (!prompt) {
-      prompt = this.prompt(profileName, origin, open).then(({ allow, remember }) => {
+      prompt = this.prompt(profileName, origin, open, remembers).then(({ allow, remember }) => {
         if (remember) {
           const site = ((this.store[profileId] ??= {})[origin] ??= {})
           for (const p of open) site[p] = allow
@@ -119,15 +142,15 @@ export class SitePermissions {
         return allow
       })
       prompt.finally(() => this.pending.delete(key))
-      this.pending.set(key, prompt)
+      if (remembers) this.pending.set(key, prompt)
     }
     return prompt
   }
 
-  private async prompt(profileName: string, origin: string, permissions: string[]) {
-    const what = permissions.map((p) => ASK[p])
+  private async prompt(profileName: string, origin: string, permissions: string[], remembers: boolean) {
+    const what = permissions.map(describe)
     const list = what.length > 1 ? `${what.slice(0, -1).join(', ')} and ${what.at(-1)}` : what[0]
-    const host = origin.replace(/^https?:\/\//, '')
+    const host = remembers ? origin.replace(/^https?:\/\//, '') : 'This page'
     const options: Electron.MessageBoxOptions = {
       type: 'question',
       message: `${host} wants to ${list}`,
@@ -135,13 +158,12 @@ export class SitePermissions {
       buttons: ['Block', 'Allow'],
       defaultId: 1,
       cancelId: 0,
-      checkboxLabel: 'Remember for this site',
-      checkboxChecked: true,
+      ...(remembers && { checkboxLabel: 'Remember for this site', checkboxChecked: true }),
     }
     const win = this.window()
     const { response, checkboxChecked } =
       win && !win.isDestroyed() ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options)
-    return { allow: response === 1, remember: checkboxChecked }
+    return { allow: response === 1, remember: remembers && checkboxChecked }
   }
 
   private save() {
