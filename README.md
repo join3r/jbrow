@@ -42,6 +42,9 @@ The profile filter at the top of the sidebar shows each profile's color, the sam
 on its tabs. A new tab says which profile it opens in and lets you switch; right-click **+** for a
 new tab in a specific profile.
 
+Threads opened from an app with ⌥⇧Space get their own section in the sidebar, under the app's name
+and icon (linked apps share one). Kept threads stay in Kept.
+
 Right-click a tab to rename it, keep it, move it to a folder, open it in another profile, copy its
 link or close it. Its close
 button shows on hover.
@@ -57,7 +60,7 @@ whole thread back. Archived threads are forgotten after 90 days.
 
 ## Settings
 
-The settings screen (⌘, or the sliders icon) covers the summon animation, archiving, private
+The settings screen (⌘, or the sliders icon) covers the summon animation, archiving, apps, private
 addresses, screen sharing and extension shortcuts, and changes there apply right away. Private addresses: any address that contains
 one of your patterns (`*` matches anything, e.g. `*.corp.example`) shows as **Private** in the
 address bar, the tab list tooltips and the address suggestions until you click the address bar.
@@ -68,7 +71,9 @@ on first run. Restart jbrow after editing the file by hand (menu bar item, **Res
 
 - `profiles`: names and colors. Each profile has its own logins, cookies and extensions.
 - `appProfiles`: default profile per app bundle ID, for links from and new tabs in that app's view.
-- `linkedApps`: groups of bundle IDs that share one set of tabs for ⌥⇧Space.
+  Set it under **Apps** in settings.
+- `linkedApps`: groups of bundle IDs that share one set of tabs for ⌥⇧Space. Under **Apps**,
+  right-click an app to link or unlink it; its threads move along right away.
 - `animation`: `style` (materialize, slide, scale, fade, off), `durationMs`, `ease` (spring, snappy, smooth).
 - `unpackedExtensions`: extension folders to load per profile, e.g. Stem.
 - `hideFromScreenCapture`: keeps jbrow out of screen shares (on by default). While it's on, private
@@ -120,7 +125,7 @@ The log is at `~/Library/Logs/jbrow/main.log` (menu bar item, **Show log file**)
 - Opening links from other apps (needs a packaged app that declares itself a browser), including
   the quiet background opening for links you didn't click.
 - Undo for archiving (reopening from the address bar is the way back for now).
-- Settings screen entries for hotkeys, profiles and linked apps; those are settings.json only.
+- Settings screen entries for hotkeys and profiles; those are settings.json only.
 - PiP when hiding a playing video.
 - Known rough edges: the native page view can't take part in the CSS animation, so a snapshot of
   the page animates in its place; and the panel opens at a fixed fraction of the screen.

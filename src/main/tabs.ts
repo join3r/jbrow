@@ -34,6 +34,7 @@ export interface CreateOptions {
   parent?: string
   scope?: string
   scopeName?: string
+  app?: string
   activate?: boolean
   /** A guest WebContents Chromium already created for window.open. */
   webContents?: WebContents
@@ -143,6 +144,7 @@ export class Tabs {
       parent: opts.parent,
       scope: opts.parent ? undefined : opts.scope,
       scopeName: opts.parent ? undefined : opts.scopeName,
+      app: opts.parent ? undefined : opts.app,
       url: opts.url ?? '',
       title: '',
       createdAt: now,
@@ -163,6 +165,7 @@ export class Tabs {
       cur.profile = opts.profile
       cur.scope = opts.scope
       cur.scopeName = opts.scopeName
+      cur.app = opts.app
       this.changed()
       return cur
     }
@@ -357,6 +360,7 @@ export class Tabs {
       if (!rec.parent) {
         child.scope = rec.scope
         child.scopeName = rec.scopeName
+        child.app = rec.app
         child.kept = rec.kept
         child.folder = rec.folder
       }
@@ -411,11 +415,13 @@ export class Tabs {
       rec.folder = undefined
       rec.scope = undefined
       rec.scopeName = undefined
+      rec.app = undefined
     } else {
       if (rec.parent) {
         const root = rootOf(this.records, rec)
         rec.scope = root.scope
         rec.scopeName = root.scopeName
+        rec.app = root.app
       }
       rec.parent = undefined
       rec.kept = kept || undefined
@@ -423,6 +429,23 @@ export class Tabs {
     }
     this.changed()
     return null
+  }
+
+  /**
+   * Moves threads to new app scopes, open and archived alike, after apps are linked or
+   * unlinked. `to` gives a thread's scope and the name to use if that differs from its own.
+   */
+  rescope(to: (rec: TabRecord) => { scope: string; scopeName: string }) {
+    let changed = false
+    for (const rec of [...this.records, ...this.archived]) {
+      if (!rec.scope) continue
+      const next = to(rec)
+      if (!next || next.scope === rec.scope) continue
+      rec.scope = next.scope
+      rec.scopeName = next.scopeName
+      changed = true
+    }
+    if (changed) this.changed()
   }
 
   // ---------- folders ----------

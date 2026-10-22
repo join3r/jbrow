@@ -1,7 +1,7 @@
 import { urlMatcher } from '../shared/patterns'
-import { childrenOf, displayName, numberedThreads, sections, type FolderView, type ThreadView } from '../shared/threads'
+import { childrenOf, displayName, numberedThreads, sections, type AppView, type FolderView, type ThreadView } from '../shared/threads'
 import { shortcutFromKey, shortcutLabel } from '../shared/shortcuts'
-import type { AnimMessage, ExtensionShortcut, Prefs, Profile, UiState, UiTab } from '../shared/types'
+import type { AnimMessage, AppEntry, ExtensionShortcut, Prefs, Profile, UiState, UiTab } from '../shared/types'
 
 declare global {
   interface Window {
@@ -182,9 +182,12 @@ function renderThreads() {
   const renameInput = document.getElementById('ren') as HTMLInputElement | null
   const draft = renameInput ? { value: renameInput.value, start: renameInput.selectionStart, end: renameInput.selectionEnd } : null
 
-  const s = sections(S.tabs, { filter: S.filter, scope: S.scope?.key ?? null, activeId: S.activeId, now: S.now, folders: S.folders })
+  const appNames = Object.fromEntries(Object.entries(S.apps).map(([k, l]) => [k, l.name]))
+  const s = sections(S.tabs, { filter: S.filter, scope: S.scope?.key ?? null, activeId: S.activeId, now: S.now, folders: S.folders, appNames })
   const numbered = new Map(numberedThreads(s).map((v, i) => [v.root.id, i + 1]))
   const block = (v: ThreadView<UiTab>) => row(v.root, 0, v, numbered.get(v.root.id))
+  // Under its app's heading a thread doesn't need the app's name again.
+  const appBlock = (v: ThreadView<UiTab>) => row(v.root, 0, v, numbered.get(v.root.id), false)
   // While filtered to a profile or an app, folders with nothing to show stay out of the way.
   const narrowed = S.filter !== 'all' || !!S.scope
   const folders = s.folders.filter((f) => f.threads.length || !narrowed)
@@ -193,6 +196,7 @@ function renderThreads() {
   if (!folders.length && !s.kept.length) html += `<div class="empty">Drag a thread here to keep it</div>`
   html += `<div class="head" data-head="today">Today</div>`
   html += s.today.length ? s.today.map(block).join('') : `<div class="empty">Nothing here yet</div>`
+  html += s.apps.map((a) => appSection(a, appBlock)).join('')
   if (s.earlier.length) html += `<div class="head" data-head="today">Earlier · unseen 12 h+</div><div class="earlier">${s.earlier.map(block).join('')}</div>`
   threadsEl.innerHTML = html
 
@@ -204,6 +208,14 @@ function renderThreads() {
     } else input.select()
     input.focus()
   }
+}
+
+function appSection(a: AppView<UiTab>, block: (v: ThreadView<UiTab>) => string): string {
+  const icons = (S?.apps[a.scope]?.icons ?? []).map((src) => `<img src="${esc(src)}" alt="">`).join('')
+  let html = `<div class="head app-head" title="${esc(a.name)}">${icons ? `<span class="app-icons">${icons}</span>` : ''}<span>${esc(a.name)}</span></div>`
+  html += a.threads.map(block).join('')
+  if (a.earlier.length) html += `<div class="earlier">${a.earlier.map(block).join('')}</div>`
+  return html
 }
 
 function folderRow(v: FolderView<UiTab>, block: (v: ThreadView<UiTab>) => string): string {
@@ -224,13 +236,13 @@ const toggleFolder = (id: string) => {
   if (f) send('folder', { id, collapsed: !f.collapsed })
 }
 
-function row(t: UiTab, depth: number, thread: ThreadView<UiTab> | null, number?: number): string {
+function row(t: UiTab, depth: number, thread: ThreadView<UiTab> | null, number?: number, showApp = true): string {
   if (!S) return ''
   const kids = childrenOf(S.tabs, t.id)
   const open = thread ? thread.all.some((x) => x.id === S!.activeId) : true
   const target = thread && !open ? thread.last.id : t.id
   const count = thread && !open && thread.all.length > 1 ? String(thread.all.length) : ''
-  const app = depth === 0 && t.scopeName && !S.scope ? t.scopeName : ''
+  const app = showApp && depth === 0 && t.scope && !S.scope ? (S.apps[t.scope]?.name ?? t.scopeName ?? '') : ''
   const meta = [app, count].filter(Boolean).join(' · ')
   const key = number ? `⌘${number}` : ''
   const fav = t.favicon ? `<img class="fav" src="${esc(t.favicon)}" alt="">` : `<span class="fav none"></span>`
@@ -448,7 +460,7 @@ threadsEl.addEventListener('dragstart', (e) => {
 })
 threadsEl.addEventListener('dragover', (e) => {
   if (!dragId) return
-  const t = (e.target as HTMLElement).closest<HTMLElement>('.row, .head')
+  const t = (e.target as HTMLElement).closest<HTMLElement>('.row, .head:not(.app-head)')
   if (!t) return
   e.preventDefault()
   if (!t.classList.contains('dz')) {
@@ -459,7 +471,7 @@ threadsEl.addEventListener('dragover', (e) => {
 threadsEl.addEventListener('drop', (e) => {
   if (!dragId) return
   e.preventDefault()
-  const t = (e.target as HTMLElement).closest<HTMLElement>('.row, .head')
+  const t = (e.target as HTMLElement).closest<HTMLElement>('.row, .head:not(.app-head)')
   const id = dragId
   dragId = null
   threadsEl.querySelectorAll('.dz').forEach((x) => x.classList.remove('dz'))
@@ -581,6 +593,7 @@ function setSettings(open: boolean) {
     settingsEl.focus()
     renderSettings(true)
     send('shortcuts')
+    send('apps')
   } else {
     stopRecording()
     savePrivateUrls()
@@ -642,6 +655,54 @@ hideCapture.addEventListener('change', () => sendPrefs({ hideFromScreenCapture: 
 $('openSettingsFile').addEventListener('click', () => send('open-settings-file'))
 $('settingsButton').addEventListener('click', () => setSettings(!!settingsEl.hidden))
 $('closeSettings').addEventListener('click', () => setSettings(false))
+// ---------- apps ----------
+
+const appListEl = $('appList')
+let appList: { entries: AppEntry[]; profiles: Profile[] } = { entries: [], profiles: [] }
+
+function renderApps() {
+  const { entries, profiles } = appList
+  if (!entries.length) {
+    appListEl.innerHTML = `<p class="help">No apps yet. Open jbrow with ⌥⇧Space from an app, or add one.</p>`
+    return
+  }
+  const options = [{ id: '', name: 'Auto', color: '' }, ...profiles]
+  appListEl.innerHTML = entries
+    .map((e) => {
+      const icons = e.apps
+        .map((a) => (a.icon ? `<img src="${esc(a.icon)}" alt="">` : `<span class="no-icon">${esc(a.name.slice(0, 1))}</span>`))
+        .join('')
+      const name = e.apps.map((a) => a.name).join(' + ')
+      const ids = e.apps.map((a) => a.bundleId).join(', ')
+      const count = e.threads ? `<em>${e.threads} ${e.threads === 1 ? 'thread' : 'threads'}</em>` : ''
+      const seg = options
+        .map((p) => {
+          const dot = p.color ? `<span class="dot" style="background:${esc(p.color)}"></span>` : ''
+          const title = p.id ? `New tabs open in ${p.name}` : 'New tabs open in the profile of the tab you were on'
+          return `<button data-app-profile="${esc(p.id)}" aria-pressed="${e.profile === p.id}" title="${esc(title)}">${dot}${esc(p.name)}</button>`
+        })
+        .join('')
+      return `<div class="app-row" data-app="${esc(e.key)}">
+        <span class="app-icons">${icons}</span><span class="app-name" title="${esc(ids)}">${esc(name)}${count}</span>
+        <div class="seg" role="group" aria-label="Profile for ${esc(name)}">${seg}</div>
+      </div>`
+    })
+    .join('')
+}
+
+appListEl.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-app-profile]')
+  const r = b?.closest<HTMLElement>('[data-app]')
+  if (b && r) send('app-profile', { key: r.dataset.app, profile: b.dataset.appProfile })
+})
+appListEl.addEventListener('contextmenu', (e) => {
+  const r = (e.target as HTMLElement).closest<HTMLElement>('[data-app]')
+  if (!r) return
+  e.preventDefault()
+  send('app-menu', { key: r.dataset.app })
+})
+$('addApp').addEventListener('click', () => send('add-app'))
+
 // ---------- extension shortcuts ----------
 
 const shortcutsEl = $('shortcuts')
@@ -760,6 +821,10 @@ window.jbrow.on('run-action', (extensionId: string) => {
   if (pinned && !pinnedEl.hidden) return pinned.click()
   const r = $('extButton').getBoundingClientRect()
   send('action-popup', { extensionId, anchorRect: { x: r.x, y: r.y, width: r.width, height: r.height } })
+})
+window.jbrow.on('apps', (data: typeof appList) => {
+  appList = data
+  renderApps()
 })
 window.jbrow.on('folder-rules', (id: string) => openRules(id))
 

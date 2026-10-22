@@ -18,6 +18,8 @@ export interface TabRecord {
   /** App scope key (bundle ID, or a linked group) this thread belongs to. */
   scope?: string
   scopeName?: string
+  /** Bundle ID of the app the thread was opened from, so it goes back there if that app is unlinked. */
+  app?: string
   /** Empty for a new tab that hasn't navigated yet. */
   url: string
   title: string
@@ -58,6 +60,8 @@ export interface UiState {
   profiles: Profile[]
   filter: string
   scope: { key: string; name: string } | null
+  /** Names and icons of the apps threads belong to, by scope key. */
+  apps: Record<string, AppLabel>
   pinned: boolean
   nav: { canGoBack: boolean; canGoForward: boolean; loading: boolean }
   prefs: Prefs
@@ -94,4 +98,20 @@ export interface ExtensionShortcut {
   shortcut: string
   /** Works while jbrow is hidden. */
   global: boolean
+}
+
+/** How an app scope (one app, or a linked group) shows in the sidebar. */
+export interface AppLabel {
+  name: string
+  /** Data URLs of the apps' icons, one per app in the group. */
+  icons: string[]
+}
+
+/** One row of the Apps list in settings: an app, or apps linked into a group. */
+export interface AppEntry {
+  key: string
+  apps: { bundleId: string; name: string; icon?: string }[]
+  /** Profile for the apps' new tabs; '' lets the current tab decide, null when the apps disagree. */
+  profile: string | null
+  threads: number
 }

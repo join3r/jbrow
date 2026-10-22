@@ -1,7 +1,8 @@
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, MenuItem, nativeImage, Notification, session, shell, Tray } from 'electron'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { numberedThreads, rootOf, sections } from '../shared/threads'
-import type { Prefs, UiState } from '../shared/types'
+import type { AppEntry, AppLabel, Prefs, UiState } from '../shared/types'
+import { AppDirectory, bundleIdOf } from './apps'
 import { ExtensionCommands } from './commands'
 import { frontmostApp, type FrontApp } from './frontmost'
 import { logPath, setupLogging } from './log'
@@ -37,8 +38,14 @@ let hiddenAt = 0
 const miniPlayer = new MiniPlayer(async () => {
   if ((await frontmostApp())?.pid === process.pid) void panel.show()
 })
-/** Display names of apps seen by the app hotkey, keyed by bundle ID. */
-const appNames = new Map<string, string>()
+/** Names and icons of apps, for the sidebar's app sections and the Apps settings. */
+const apps = new AppDirectory(() => {
+  if (!panel) return
+  pushState()
+  sendApps()
+})
+/** Apps added in settings this session that have no profile or link yet, so they don't vanish from the list. */
+const addedApps = new Set<string>()
 
 // JBROW_USER_DATA=/some/dir runs a separate jbrow with its own tabs, profiles and log, next to
 // the one you use. Handy for debugging extensions without touching your real data.
@@ -68,6 +75,7 @@ function state(): UiState {
     profiles: settings.profiles,
     filter,
     scope,
+    apps: appLabels(),
     pinned: panel.pinned,
     nav: tabs.navState(),
     prefs: {
@@ -146,17 +154,28 @@ function newTabProfile(): string {
 }
 
 function scopeFields() {
-  return scope ? { scope: scope.key, scopeName: scope.name } : {}
+  return scope ? { scope: scope.key, scopeName: scope.name, app: lastFront?.bundleId } : {}
 }
 
-function scopeName(front: FrontApp): string {
-  const group = settings.linkedApps.find((g) => g.includes(front.bundleId))
-  if (!group) return front.name
-  return group.map((id) => appNames.get(id) ?? id.split('.').pop() ?? id).join(' + ')
+/** Bundle IDs in a scope key: one app, or a linked group joined with +. */
+const appsIn = (key: string) => key.split('+')
+
+const scopeName = (key: string) => appsIn(key).map((id) => apps.name(id)).join(' + ')
+
+/** Labels for every app scope a thread belongs to. */
+function appLabels(): Record<string, AppLabel> {
+  const keys = new Set(tabs.records.flatMap((t) => (t.scope ? [t.scope] : [])))
+  if (scope) keys.add(scope.key)
+  const labels: Record<string, AppLabel> = {}
+  for (const key of keys) {
+    labels[key] = { name: scopeName(key), icons: appsIn(key).flatMap((id) => apps.icon(id) ?? []) }
+  }
+  return labels
 }
 
 function threadsInView() {
-  return sections(tabs.records, { filter, scope: scope?.key ?? null, activeId: tabs.activeId, now: Date.now(), folders: tabs.folders })
+  const appNames = Object.fromEntries(Object.entries(appLabels()).map(([k, l]) => [k, l.name]))
+  return sections(tabs.records, { filter, scope: scope?.key ?? null, activeId: tabs.activeId, now: Date.now(), folders: tabs.folders, appNames })
 }
 
 /** Archives stale threads, or files them into folders, per settings. */
@@ -165,7 +184,7 @@ const sweep = () => tabs.sweep(settings.archiveAfterDays * DAY_MS)
 /** Most recently seen tab among the threads the sidebar currently shows. */
 function mostRecentInView(): string | undefined {
   const s = threadsInView()
-  const all = [...s.folders.flatMap((f) => f.threads), ...s.kept, ...s.today, ...s.earlier]
+  const all = [...s.folders.flatMap((f) => f.threads), ...s.kept, ...s.today, ...s.apps.flatMap((a) => [...a.threads, ...a.earlier]), ...s.earlier]
   return all.sort((a, b) => b.lastSeen - a.lastSeen)[0]?.last.id
 }
 
@@ -215,12 +234,12 @@ async function onAppHotkey() {
   const front = panel.visible ? null : await frontmostApp()
   if (front && front.pid !== process.pid) {
     lastFront = front
-    appNames.set(front.bundleId, front.name)
+    apps.note(front.bundleId, front.name)
   }
   if (!lastFront) return onHotkey()
   const key = scopeForApp(settings, lastFront.bundleId)
   if (panel.visible && scope?.key === key) return panel.hide()
-  scope = { key, name: scopeName(lastFront) }
+  scope = { key, name: scopeName(key) }
   filter = 'all'
   await summon()
 }
@@ -256,7 +275,7 @@ function switchProfile(id: string, next: string) {
     pushState()
     return
   }
-  tabs.create({ profile: next, url: cur.url, ...(cur.parent ? {} : { scope: cur.scope, scopeName: cur.scopeName }) })
+  tabs.create({ profile: next, url: cur.url, ...(cur.parent ? {} : { scope: cur.scope, scopeName: cur.scopeName, app: cur.app }) })
 }
 
 const profileName = (id: string) => settings.profiles.find((p) => p.id === id)?.name ?? id
@@ -445,6 +464,122 @@ function folderMenu(id: string) {
   ]).popup({ window: panel.win })
 }
 
+// ---------- apps ----------
+
+/** Rows for the Apps list in settings: every app with threads, a profile or a link. */
+function appEntries(): AppEntry[] {
+  const keys = new Set<string>()
+  for (const g of settings.linkedApps) if (g.length > 1) keys.add(scopeForApp(settings, g[0]))
+  for (const id of [...Object.keys(settings.appProfiles), ...addedApps]) keys.add(scopeForApp(settings, id))
+  for (const t of tabs.records) if (t.scope && !t.parent) keys.add(t.scope)
+  return [...keys]
+    .map<AppEntry>((key) => {
+      const ids = appsIn(key)
+      const profiles = new Set(ids.map((id) => settings.appProfiles[id] ?? ''))
+      return {
+        key,
+        apps: ids.map((bundleId) => ({ bundleId, name: apps.name(bundleId), icon: apps.icon(bundleId) })),
+        profile: profiles.size === 1 ? [...profiles][0] : null,
+        threads: tabs.records.filter((t) => t.scope === key && !t.parent).length,
+      }
+    })
+    .sort((a, b) => scopeName(a.key).localeCompare(scopeName(b.key)))
+}
+
+function sendApps() {
+  if (panel.win.isDestroyed()) return
+  panel.win.webContents.send('apps', { entries: appEntries(), profiles: settings.profiles })
+}
+
+function setAppProfile(key: string, profile: string) {
+  for (const id of appsIn(key)) {
+    if (profile && settings.profiles.some((p) => p.id === profile)) settings.appProfiles[id] = profile
+    else delete settings.appProfiles[id]
+  }
+  saveSettings(settings)
+  sendApps()
+}
+
+/**
+ * Saves new app groups and moves threads to match: linked apps share their threads, and an app
+ * taken out of a group takes back the threads opened from it.
+ */
+function setLinkedApps(groups: string[][]) {
+  settings.linkedApps = groups.map((g) => [...new Set(g)]).filter((g) => g.length > 1)
+  saveSettings(settings)
+  rescopeThreads()
+  sendApps()
+}
+
+function rescopeThreads() {
+  tabs.rescope((rec) => {
+    const key = scopeForApp(settings, rec.app ?? appsIn(rec.scope!)[0])
+    return { scope: key, scopeName: scopeName(key) }
+  })
+  if (scope && lastFront) {
+    const key = scopeForApp(settings, lastFront.bundleId)
+    scope = { key, name: scopeName(key) }
+  }
+  pushState()
+}
+
+function linkApps(a: string, b: string) {
+  const members = [...appsIn(a), ...appsIn(b)]
+  setLinkedApps([...settings.linkedApps.map((g) => g.filter((id) => !members.includes(id))), members])
+}
+
+function unlinkApp(bundleId: string) {
+  setLinkedApps(settings.linkedApps.map((g) => g.filter((id) => id !== bundleId)))
+}
+
+function removeApp(key: string) {
+  const ids = appsIn(key)
+  for (const id of ids) {
+    delete settings.appProfiles[id]
+    addedApps.delete(id)
+  }
+  setLinkedApps(settings.linkedApps.map((g) => g.filter((id) => !ids.includes(id))))
+}
+
+async function addApp() {
+  const { canceled, filePaths } = await dialog.showOpenDialog(panel.win, {
+    title: 'Add an app',
+    defaultPath: '/Applications',
+    buttonLabel: 'Add app',
+    properties: ['openFile'],
+    filters: [{ name: 'Apps', extensions: ['app'] }],
+  })
+  const appPath = filePaths[0]
+  if (canceled || !appPath) return
+  const id = await bundleIdOf(appPath)
+  if (!id) return toast("That doesn't look like an app: it has no bundle ID.")
+  apps.note(id, '', appPath)
+  addedApps.add(id)
+  sendApps()
+}
+
+function appMenu(key: string) {
+  const entries = appEntries()
+  const entry = entries.find((e) => e.key === key)
+  if (!entry) return
+  const others = entries.filter((e) => e.key !== key)
+  const items: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'Link with',
+      enabled: others.length > 0,
+      submenu: others.map((o) => ({ label: scopeName(o.key), click: () => linkApps(key, o.key) })),
+    },
+  ]
+  if (entry.apps.length > 1) {
+    for (const a of entry.apps) items.push({ label: `Unlink ${a.name}`, click: () => unlinkApp(a.bundleId) })
+  }
+  items.push(
+    { type: 'separator' },
+    { label: entry.threads ? 'Remove (close its threads first)' : 'Remove', enabled: !entry.threads, click: () => removeApp(key) },
+  )
+  Menu.buildFromTemplate(items).popup({ window: panel.win })
+}
+
 // ---------- extension shortcuts ----------
 
 function sendShortcuts() {
@@ -576,6 +711,10 @@ function wireIpc() {
   on('focus-ui', () => panel.win.webContents.focus())
   on('focus-page', () => focusActive())
   on('shortcuts', () => sendShortcuts())
+  on('apps', () => sendApps())
+  on<{ key: string; profile: string }>('app-profile', ({ key, profile }) => setAppProfile(key, profile))
+  on<{ key: string }>('app-menu', ({ key }) => appMenu(key))
+  on('add-app', () => void addApp())
   on<{ on: boolean }>('recording-shortcut', ({ on: recording }) => (recordingShortcut = recording))
   on<{ profile: string; extensionId: string; name: string; shortcut: string }>('set-shortcut', ({ profile, extensionId, name, shortcut }) => {
     const error = commands.set(profile, extensionId, name, shortcut)
@@ -721,6 +860,10 @@ app.whenReady().then(async () => {
   commands.watch()
 
   tabs.load()
+  // Threads opened from one app carry the name it had in front.
+  for (const t of tabs.records) if (t.scope && !t.scope.includes('+') && t.scopeName) apps.note(t.scope, t.scopeName)
+  // settings.json may have been edited by hand since: put threads where the links now say.
+  rescopeThreads()
   sweep()
   setInterval(sweep, SWEEP_EVERY_MS)
   const first = tabs.active() ?? [...tabs.records].sort((a, b) => b.lastSeen - a.lastSeen)[0]
