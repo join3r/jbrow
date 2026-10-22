@@ -259,6 +259,16 @@ function onKey(input: Electron.Input): boolean {
     return true
   }
   if (!input.meta) return false
+  // Matched by code too, so zoom works on layouts where = and - sit elsewhere or need Shift.
+  const zoom =
+    key === '=' || key === '+' || input.code === 'Equal' || input.code === 'NumpadAdd' ? 1
+    : key === '-' || input.code === 'Minus' || input.code === 'NumpadSubtract' ? -1
+    : key === '0' || input.code === 'Numpad0' ? 0
+    : null
+  if (zoom !== null && !input.alt) {
+    if (wc) wc.setZoomLevel(zoom === 0 ? 0 : Math.min(9, Math.max(-8, wc.getZoomLevel() + zoom * 0.5)))
+    return true
+  }
   if (input.shift) {
     if (key === 'n') {
       const ids = settings.profiles.map((p) => p.id)
