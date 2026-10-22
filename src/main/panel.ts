@@ -1,4 +1,4 @@
-import { app, BrowserWindow, screen, type Rectangle } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, type Rectangle } from 'electron'
 import path from 'node:path'
 import type { AnimMessage } from '../shared/types'
 import type { Settings } from './settings'
@@ -58,6 +58,8 @@ export class Panel {
         preload: path.join(__dirname, 'preload-ui.js'),
         sandbox: true,
         contextIsolation: true,
+        // The show animation is timed by the page; a hidden page mustn't lag when it wakes.
+        backgroundThrottling: false,
       },
     })
     this.win.setAlwaysOnTop(true, 'floating')
@@ -139,6 +141,21 @@ export class Panel {
     })
   }
 
+  /** Resolves when the UI reports `ui:<name>`, or after `ms` if it never does. */
+  private fromUi(name: string, ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const channel = `ui:${name}`
+      const done = () => {
+        clearTimeout(timer)
+        ipcMain.removeListener(channel, listener)
+        resolve()
+      }
+      const listener = (e: Electron.IpcMainEvent) => e.sender === this.win.webContents && done()
+      const timer = setTimeout(done, ms)
+      ipcMain.on(channel, listener)
+    })
+  }
+
   private send(phase: AnimMessage['phase']): AnimMessage {
     const { style, durationMs, ease } = this.settings().animation
     const msg: AnimMessage = { phase, style, durationMs: phase === 'out' ? Math.round(durationMs * 0.7) : durationMs, ease }
@@ -188,15 +205,19 @@ export class Panel {
     this.animating = true
     this.hooks.setPageVisible(false)
     this.placeOnPointerDisplay()
+    // The UI starts its CSS animation on its first frame after showing and says so; the window
+    // fade starts then too, and the live page waits until the UI says the animation has ended.
+    const started = this.fromUi('anim-start', 150)
     const msg = this.send('in')
     const ms = msg.style === 'off' ? 0 : msg.durationMs
+    const ended = this.fromUi('anim-end', ms + 400)
     this.win.setOpacity(ms ? 0 : 1)
     this.win.show()
     this.win.focus()
-    await this.fade(0, 1, ms)
+    if (ms) await started
+    if (run !== this.run || this.win.isDestroyed()) return
+    await Promise.all([this.fade(0, 1, ms), ended])
     debug('shown; focused =', this.win.isFocused(), 'visible =', this.win.isVisible(), 'window =', this.win.getMediaSourceId())
-    // The CSS spring overshoots a little past the window fade; let it settle.
-    await new Promise((r) => setTimeout(r, ms ? 40 : 0))
     if (run !== this.run || this.win.isDestroyed()) return
     this.animating = false
     this.hooks.setPageVisible(this.pageVisible())

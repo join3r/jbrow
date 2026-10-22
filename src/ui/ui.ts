@@ -617,7 +617,7 @@ $('animEase').addEventListener('click', (e) => {
 animSpeed.addEventListener('input', () => ($('animSpeedOut').textContent = `${animSpeed.value} ms`))
 animSpeed.addEventListener('change', () => animPrefs({ durationMs: Number(animSpeed.value) }))
 $('animPreview').addEventListener('click', () => {
-  if (S) playIn({ phase: 'in', ...S.prefs.animation })
+  if (S) playIn({ phase: 'in', ...S.prefs.animation }, false)
 })
 
 let privateTimer: number | undefined
@@ -673,19 +673,41 @@ window.jbrow.on('settings', ({ open }: { open?: boolean }) => setSettings(open ?
 window.jbrow.on('rename-tab', (id: string) => startRename(id))
 window.jbrow.on('folder-rules', (id: string) => openRules(id))
 
-function playIn(m: AnimMessage) {
+let playRun = 0
+
+/**
+ * Starts the show animation on the first frame the window paints, then tells the main process
+ * when it started and ended so the window fade and the live page keep in step with it.
+ * The settings preview passes `report = false`.
+ */
+function playIn(m: AnimMessage, report = true) {
+  const run = ++playRun
   root.dataset.style = m.style
   root.style.setProperty('--dur', `${m.durationMs}ms`)
   root.style.setProperty('--ease', EASE[m.ease])
   root.classList.add('pre')
   root.classList.remove('shown')
   void root.offsetWidth
-  root.classList.remove('pre')
-  root.classList.add('shown')
+  const moves = m.style !== 'fade' && m.style !== 'off' && !matchMedia('(prefers-reduced-motion: reduce)').matches
+  requestAnimationFrame(() => {
+    if (run !== playRun) return
+    root.classList.remove('pre')
+    root.classList.add('shown')
+    if (!report) return
+    send('anim-start')
+    if (!moves) return send('anim-end')
+    const end = (e: TransitionEvent) => {
+      if (e.target !== root || e.propertyName !== 'transform') return
+      root.removeEventListener('transitionend', end)
+      if (run === playRun) send('anim-end')
+    }
+    root.addEventListener('transitionend', end)
+  })
 }
 
 window.jbrow.on('anim', (m: AnimMessage) => {
   if (m.phase === 'in') return playIn(m)
+  playRun++
   root.dataset.style = m.style
   root.style.setProperty('--dur', `${m.durationMs}ms`)
   root.style.setProperty('--ease', 'cubic-bezier(.4,0,1,1)')
