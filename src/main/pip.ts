@@ -17,16 +17,25 @@ const ENTER = `(async () => {
     .sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0]
   if (!v) return false
   await v.requestPictureInPicture()
+  window.__jbrowPip = v
   return true
 })()`
 
 /**
  * Resolves when the video leaves picture-in-picture, with whether it is still playing. The PiP
- * window's close button pauses the video; its "back to tab" button doesn't.
+ * window's close button pauses the video; its "back to tab" button doesn't. Only a real event
+ * on the video jbrow moved counts.
  */
-const WATCH = `new Promise((resolve) =>
-  document.addEventListener('leavepictureinpicture', (e) => setTimeout(() => resolve(!e.target.paused), 150), { once: true }),
-)`
+const WATCH = `new Promise((resolve) => {
+  const v = window.__jbrowPip
+  v.addEventListener('leavepictureinpicture', (e) => setTimeout(() => resolve(e.isTrusted && !v.paused), 150), { once: true })
+})`
+
+/**
+ * A page's own scripts can't reach this world, so they can't fake the events or results the
+ * code above sees. Electron only offers it for the main frame.
+ */
+const WORLD = 1077
 
 const EXIT = `document.pictureInPictureElement ? document.exitPictureInPicture().then(() => true) : false`
 
@@ -37,6 +46,7 @@ const EXIT = `document.pictureInPictureElement ? document.exitPictureInPicture()
  */
 export class MiniPlayer {
   private frame: WebFrameMain | null = null
+  private wc: WebContents | null = null
 
   /** `backToTab` runs when the PiP window's "back to tab" button closes it. */
   constructor(private backToTab: () => void) {}
@@ -52,21 +62,28 @@ export class MiniPlayer {
     const best = sizes.indexOf(Math.max(...sizes))
     if (best < 0 || !sizes[best]) return
     const frame = frames[best]
+    // An iframe runs this among the page's own scripts, which could fake the "back to tab"
+    // signal. Summoning jbrow takes keyboard focus from whatever you're typing in, so an
+    // iframe's video only goes back into the page.
+    const trusted = frame === wc.mainFrame
+    const run = (code: string, gesture = false) =>
+      trusted ? wc.executeJavaScriptInIsolatedWorld(WORLD, [{ code }], gesture) : frame.executeJavaScript(code, gesture)
     try {
       // A user gesture: Chromium only opens PiP in response to one.
-      if (!(await frame.executeJavaScript(ENTER, true))) return
+      if (!(await run(ENTER, true))) return
     } catch (err) {
       debug('enter failed', err)
       return
     }
     debug('entered', frame.url)
     this.frame = frame
-    void (frame.executeJavaScript(WATCH) as Promise<boolean>)
+    this.wc = wc
+    void (run(WATCH) as Promise<boolean>)
       .then((playing) => {
         if (this.frame !== frame) return
         this.frame = null
         debug('left; playing =', playing)
-        if (playing) this.backToTab()
+        if (playing && trusted) this.backToTab()
       })
       .catch(() => {
         if (this.frame === frame) this.frame = null
@@ -74,10 +91,11 @@ export class MiniPlayer {
   }
 
   exit() {
-    const frame = this.frame
+    const { frame, wc } = this
     this.frame = null
-    if (!frame) return
+    if (!frame || !wc || wc.isDestroyed()) return
     debug('exit')
+    // The world doesn't matter here: there's nothing to trust in the result.
     void frame.executeJavaScript(EXIT).catch(() => {})
   }
 }
