@@ -25,6 +25,8 @@ const RESERVED = new Set([
   'Control+Tab',
 ])
 
+const GLOBAL_SUGGESTION = /^Command\+Shift\+[0-9]$/
+
 const EXECUTE_ACTION = new Set(['_execute_action', '_execute_browser_action', '_execute_page_action'])
 
 /** Chrome's key names that differ from Electron's. */
@@ -111,7 +113,8 @@ export class ExtensionCommands {
     const rt = this.runtimes().get(profileId)
     if (!rt) return []
     const overrides = this.settings().extensionShortcuts[profileId] ?? {}
-    const taken = new Set(RESERVED)
+    const { hotkeys } = this.settings()
+    const taken = new Set([...RESERVED, hotkeys.all, hotkeys.app])
     const list: ExtensionShortcut[] = []
     const exts = rt.session.extensions.getAllExtensions()
     // Your shortcuts claim their keys first; a suggestion only gets a key nobody holds yet.
@@ -125,7 +128,10 @@ export class ExtensionCommands {
         if (shortcut === undefined) {
           const suggested = cmd.suggested_key?.mac ?? cmd.suggested_key?.default
           const parsed = suggested ? fromChrome(suggested) : null
-          shortcut = parsed && !taken.has(parsed) ? parsed : ''
+          // As in Chrome, an extension can only suggest ⇧⌘0–9 for a global command, so it can't
+          // take a key from every other app without you choosing it.
+          const allowed = parsed && (!cmd.global || GLOBAL_SUGGESTION.test(parsed))
+          shortcut = allowed && !taken.has(parsed) ? parsed : ''
           if (shortcut) taken.add(shortcut)
         }
         list.push({
