@@ -3,6 +3,7 @@ import { ElectronChromeExtensions, type ChromeExtensionOptions } from 'electron-
 import { installChromeWebStore, installExtension } from 'electron-chrome-web-store'
 import path from 'node:path'
 import type { Profile } from '../shared/types'
+import type { SitePermissions } from './permissions'
 import type { Settings } from './settings'
 
 export interface ProfileRuntime {
@@ -36,6 +37,7 @@ export async function setupProfiles(
   settings: Settings,
   hooks: TabHooks,
   pickShareSource: (callback: (streams: Electron.Streams | null) => void) => void,
+  permissions: SitePermissions,
 ): Promise<Map<string, ProfileRuntime>> {
   const runtimes = new Map<string, ProfileRuntime>()
 
@@ -57,6 +59,8 @@ export async function setupProfiles(
     // screen. The macOS system picker (useSystemPicker) closes and reopens on the first click,
     // so jbrow asks with its own menu instead.
     sess.setDisplayMediaRequestHandler((_request, callback) => pickShareSource(callback))
+    // Electron grants every permission unless told otherwise.
+    permissions.attach(sess, profile.id, profile.name)
 
     // Must be registered before ElectronChromeExtensions, whose preload freezes `chrome`.
     // JBROW_NO_SHIMS=1 turns them off, to compare behavior while debugging.

@@ -5,6 +5,7 @@ import type { Prefs, UiState } from '../shared/types'
 import { frontmostApp, type FrontApp } from './frontmost'
 import { logPath, setupLogging } from './log'
 import { Panel } from './panel'
+import { SitePermissions } from './permissions'
 import { pickShareSource } from './screenshare'
 import { installTestExtensions, loadUnpacked, partitionFor, setupProfiles, type ProfileRuntime, type TabHooks } from './profiles'
 import { loadSettings, saveSettings, scopeForApp, settingsPath, type Settings } from './settings'
@@ -632,6 +633,7 @@ app.whenReady().then(async () => {
     if (onKey(input)) event.preventDefault()
   })
 
+  const permissions = new SitePermissions(() => panel.win)
   tabs = new Tabs({
     window: () => panel.win,
     runtime: (id) => runtimes.get(id),
@@ -641,10 +643,11 @@ app.whenReady().then(async () => {
     onActivated: () => focusActive(),
     onKey,
     searchUrl: () => settings.searchUrl,
+    permissions,
   })
 
   wireIpc()
-  runtimes = await setupProfiles(settings, tabHooks, (callback) => void pickShareSource(panel.win, callback))
+  runtimes = await setupProfiles(settings, tabHooks, (callback) => void pickShareSource(panel.win, callback), permissions)
   // Pin and unpin from the menu an extension's button shows on right-click (see scripts/patch-deps.mjs).
   for (const rt of runtimes.values()) {
     rt.extensions.on('jbrow-action-context-menu', ({ menu, extensionId }: { menu: Menu; extensionId: string }) => {

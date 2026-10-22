@@ -5,6 +5,7 @@ import path from 'node:path'
 import { urlMatcher } from '../shared/patterns'
 import { childrenOf, isRoot, rootOf, subtree } from '../shared/threads'
 import type { Folder, TabRecord, UiTab } from '../shared/types'
+import type { SitePermissions } from './permissions'
 import type { ProfileRuntime } from './profiles'
 
 interface LiveTab {
@@ -24,6 +25,7 @@ export interface TabsDeps {
   /** Return true if jbrow handled the key, so the page doesn't see it. */
   onKey: (input: Electron.Input) => boolean
   searchUrl: () => string
+  permissions: SitePermissions
 }
 
 export interface CreateOptions {
@@ -37,6 +39,9 @@ export interface CreateOptions {
   webContents?: WebContents
   unread?: boolean
 }
+
+/** Links a page hands jbrow to open. Other schemes (file:, javascript:, chrome:) stay where they are. */
+const isWebUrl = (url: string) => /^https?:/i.test(url)
 
 const storePath = () => path.join(app.getPath('userData'), 'tabs.json')
 
@@ -241,9 +246,8 @@ export class Tabs {
             activate: !background,
             unread: background,
           })
-          const live = this.live.get(child.id)!
-          void live.view.webContents.loadURL(details.url).catch(() => {})
-          return live.view.webContents
+          // Chromium navigates the guest itself, under the opener's rules.
+          return this.live.get(child.id)!.view.webContents
         },
       }
     })
@@ -264,10 +268,12 @@ export class Tabs {
   private contextMenu(id: string, wc: WebContents, params: Electron.ContextMenuParams, rt: ProfileRuntime) {
     const items: Electron.MenuItemConstructorOptions[] = []
     if (params.linkURL) {
+      const web = isWebUrl(params.linkURL)
       items.push(
-        { label: 'Open link in this thread', click: () => this.create({ profile: rt.profile.id, parent: id, url: params.linkURL }) },
+        { label: 'Open link in this thread', enabled: web, click: () => this.create({ profile: rt.profile.id, parent: id, url: params.linkURL }) },
         {
           label: 'Open link in background',
+          enabled: web,
           click: () => this.create({ profile: rt.profile.id, parent: id, url: params.linkURL, activate: false, unread: true }),
         },
         { label: 'Copy link', click: () => clipboard.writeText(params.linkURL) },
@@ -281,6 +287,10 @@ export class Tabs {
       { label: 'Forward', enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
       { label: 'Reload', click: () => wc.reload() },
     )
+    const url = wc.getURL()
+    if (this.deps.permissions.has(rt.profile.id, url)) {
+      items.push({ label: 'Reset site permissions', click: () => this.deps.permissions.reset(rt.profile.id, url) })
+    }
     const extensionItems = rt.extensions.getContextMenuItems(wc, params)
     const menu = Menu.buildFromTemplate([
       ...items,
