@@ -6,6 +6,7 @@ import { frontmostApp, type FrontApp } from './frontmost'
 import { logPath, setupLogging } from './log'
 import { Panel } from './panel'
 import { SitePermissions } from './permissions'
+import { MiniPlayer } from './pip'
 import { pickShareSource } from './screenshare'
 import { installTestExtensions, loadUnpacked, partitionFor, setupProfiles, type ProfileRuntime, type TabHooks } from './profiles'
 import { loadSettings, saveSettings, scopeForApp, settingsPath, type Settings } from './settings'
@@ -26,6 +27,8 @@ let filter = 'all'
 let scope: { key: string; name: string } | null = null
 let lastFront: FrontApp | null = null
 let hiddenAt = 0
+// The PiP window's "back to tab" brings jbrow back.
+const miniPlayer = new MiniPlayer(() => void panel.show())
 /** Display names of apps seen by the app hotkey, keyed by bundle ID. */
 const appNames = new Map<string, string>()
 
@@ -622,6 +625,7 @@ app.whenReady().then(async () => {
         return null
       }
     },
+    onHiding: () => void miniPlayer.enter(tabs.activeWebContents()),
     onShown: () => pushState(),
     onHidden: () => {
       hiddenAt = Date.now()
@@ -666,6 +670,12 @@ app.whenReady().then(async () => {
 
   registerHotkeys()
   buildTray()
+  // Back from picture-in-picture whenever jbrow is in front again.
+  panel.win.on('focus', () => miniPlayer.exit())
+  // A pinned jbrow stays on screen behind other apps; its video follows you out anyway.
+  app.on('did-resign-active', () => {
+    if (panel.pinned && panel.visible) void miniPlayer.enter(tabs.activeWebContents())
+  })
   app.on('browser-window-blur', () =>
     panel.checkClickAway(async () => (await frontmostApp())?.pid === process.pid),
   )

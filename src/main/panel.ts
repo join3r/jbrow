@@ -15,6 +15,8 @@ export interface PanelHooks {
   setPageVisible: (visible: boolean) => void
   /** Grab a picture of the active page for the next show animation. */
   capture: () => Promise<{ dataUrl: string; tabId: string } | null>
+  /** The panel starts to hide, with the page still on screen. */
+  onHiding: () => void
   onShown: () => void
   onHidden: () => void
 }
@@ -232,6 +234,7 @@ export class Panel {
     this.animating = true
     this.overlay = false
     this.overlayRun++
+    this.hooks.onHiding()
     // Capture while the page is still on screen, without making hiding wait for it.
     void this.hooks.capture().then((snap) => {
       if (snap && !this.win.isDestroyed()) this.win.webContents.send('snapshot', snap)
