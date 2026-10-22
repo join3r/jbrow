@@ -30,6 +30,8 @@ export interface Settings {
   archiveAfterDays: number
   /** Extension IDs shown as buttons in the toolbar, in this order, whenever the current profile has them. */
   pinnedExtensions: string[]
+  /** Your extension shortcuts, per profile, extension ID and command: Electron accelerators, '' for none. Unlisted commands use the extension's suggestion. */
+  extensionShortcuts: Record<string, Record<string, Record<string, string>>>
 }
 
 const DEFAULTS: Settings = {
@@ -52,6 +54,7 @@ const DEFAULTS: Settings = {
   privateUrls: [],
   archiveAfterDays: 7,
   pinnedExtensions: [],
+  extensionShortcuts: {},
 }
 
 export const settingsPath = () => path.join(app.getPath('userData'), 'settings.json')

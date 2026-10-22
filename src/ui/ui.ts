@@ -1,6 +1,7 @@
 import { urlMatcher } from '../shared/patterns'
 import { childrenOf, displayName, numberedThreads, sections, type FolderView, type ThreadView } from '../shared/threads'
-import type { AnimMessage, Prefs, Profile, UiState, UiTab } from '../shared/types'
+import { shortcutFromKey, shortcutLabel } from '../shared/shortcuts'
+import type { AnimMessage, ExtensionShortcut, Prefs, Profile, UiState, UiTab } from '../shared/types'
 
 declare global {
   interface Window {
@@ -579,7 +580,9 @@ function setSettings(open: boolean) {
     focusUi()
     settingsEl.focus()
     renderSettings(true)
+    send('shortcuts')
   } else {
+    stopRecording()
     savePrivateUrls()
     send('focus-page')
   }
@@ -639,6 +642,82 @@ hideCapture.addEventListener('change', () => sendPrefs({ hideFromScreenCapture: 
 $('openSettingsFile').addEventListener('click', () => send('open-settings-file'))
 $('settingsButton').addEventListener('click', () => setSettings(!!settingsEl.hidden))
 $('closeSettings').addEventListener('click', () => setSettings(false))
+// ---------- extension shortcuts ----------
+
+const shortcutsEl = $('shortcuts')
+let shortcuts: { profiles: Profile[]; commands: ExtensionShortcut[] } = { profiles: [], commands: [] }
+/** The command whose shortcut is being recorded. */
+let recording: ExtensionShortcut | null = null
+const commandKey = (c: ExtensionShortcut) => `${c.profile} ${c.extensionId} ${c.name}`
+
+function renderShortcuts() {
+  const { profiles, commands } = shortcuts
+  const used = profiles.filter((p) => commands.some((c) => c.profile === p.id))
+  if (!used.length) {
+    shortcutsEl.innerHTML = `<p class="help">None of your extensions have commands.</p>`
+    return
+  }
+  let html = ''
+  for (const p of used) {
+    if (used.length > 1) html += `<div class="sc-profile"><span class="dot" style="background:${esc(p.color)}"></span>${esc(p.name)}</div>`
+    let ext = ''
+    for (const c of commands.filter((c) => c.profile === p.id)) {
+      if (c.extensionId !== ext) {
+        ext = c.extensionId
+        html += `<div class="sc-ext">${esc(c.extensionName)}</div>`
+      }
+      const rec = recording && commandKey(recording) === commandKey(c)
+      const label = rec ? 'Press keys…' : c.shortcut ? shortcutLabel(c.shortcut) : 'Not set'
+      html += `<div class="sc-row"><span title="${esc(c.description)}">${esc(c.description)}${c.global ? '<em>works while jbrow is hidden</em>' : ''}</span>
+        <button class="chip sc-key${c.shortcut || rec ? '' : ' none'}" data-cmd="${esc(commandKey(c))}" aria-pressed="${!!rec}">${esc(label)}</button></div>`
+    }
+  }
+  shortcutsEl.innerHTML = html
+}
+
+function stopRecording() {
+  if (!recording) return
+  recording = null
+  send('recording-shortcut', { on: false })
+  renderShortcuts()
+}
+
+function saveShortcut(c: ExtensionShortcut, shortcut: string) {
+  send('set-shortcut', { profile: c.profile, extensionId: c.extensionId, name: c.name, shortcut })
+  stopRecording()
+}
+
+shortcutsEl.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-cmd]')
+  if (!b) return
+  const c = shortcuts.commands.find((c) => commandKey(c) === b.dataset.cmd)
+  if (!c || (recording && commandKey(recording) === commandKey(c))) return stopRecording()
+  recording = c
+  // Until it's done, key presses come here instead of running jbrow's or an extension's shortcuts.
+  send('recording-shortcut', { on: true })
+  renderShortcuts()
+})
+// Capture phase, so Esc cancels recording without also closing settings.
+document.addEventListener(
+  'keydown',
+  (e) => {
+    if (!recording) return
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
+    if (e.key === 'Escape' && plain) return stopRecording()
+    if ((e.key === 'Backspace' || e.key === 'Delete') && plain) return saveShortcut(recording, '')
+    const shortcut = shortcutFromKey({ key: e.key, code: e.code, command: e.metaKey, control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey })
+    // A modifier on its own, or a key without ⌘, ⌃ or ⌥: keep listening.
+    if (shortcut) saveShortcut(recording, shortcut)
+  },
+  true,
+)
+window.addEventListener('blur', stopRecording)
+document.addEventListener('mousedown', (e) => {
+  if (recording && !(e.target as HTMLElement).closest('[data-cmd]')) stopRecording()
+})
+
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || renaming || e.target === omnibox) return
   if (!rulesPop.hidden) closeRules()
@@ -671,6 +750,17 @@ window.jbrow.on('toast', (text: string) => {
 })
 window.jbrow.on('settings', ({ open }: { open?: boolean }) => setSettings(open ?? !!settingsEl.hidden))
 window.jbrow.on('rename-tab', (id: string) => startRename(id))
+window.jbrow.on('shortcuts', (data: typeof shortcuts) => {
+  shortcuts = data
+  renderShortcuts()
+})
+// An extension's popup shortcut: open it from its pinned button, or else from the puzzle icon.
+window.jbrow.on('run-action', (extensionId: string) => {
+  const pinned = [...pinnedEl.children].find((b) => b.id === extensionId) as HTMLElement | undefined
+  if (pinned && !pinnedEl.hidden) return pinned.click()
+  const r = $('extButton').getBoundingClientRect()
+  send('action-popup', { extensionId, anchorRect: { x: r.x, y: r.y, width: r.width, height: r.height } })
+})
 window.jbrow.on('folder-rules', (id: string) => openRules(id))
 
 let playRun = 0

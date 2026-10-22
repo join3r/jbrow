@@ -58,7 +58,7 @@ whole thread back. Archived threads are forgotten after 90 days.
 ## Settings
 
 The settings screen (⌘, or the sliders icon) covers the summon animation, archiving, private
-addresses and screen sharing, and changes there apply right away. Private addresses: any address that contains
+addresses, screen sharing and extension shortcuts, and changes there apply right away. Private addresses: any address that contains
 one of your patterns (`*` matches anything, e.g. `*.corp.example`) shows as **Private** in the
 address bar, the tab list tooltips and the address suggestions until you click the address bar.
 Page titles still show.
@@ -75,6 +75,7 @@ on first run. Restart jbrow after editing the file by hand (menu bar item, **Res
   addresses don't matter for streaming: nobody sees jbrow at all.
 - `privateUrls`: the private address patterns.
 - `pinnedExtensions`: IDs of extensions pinned to the toolbar.
+- `extensionShortcuts`: your extension shortcuts per profile, extension and command (`""` removes one).
 - `archiveAfterDays`: archive threads unseen this many days; 0 turns archiving off.
 
 Tabs, folders and archived threads are in `tabs.json` next to it.
@@ -86,8 +87,13 @@ loads an unpacked extension into that profile and adds it to `unpackedExtensions
 again next launch (adding the same folder again reloads it), and **Chrome Web Store** opens the
 store in that profile. Right-click an extension there and choose **Pin to toolbar** to keep its
 button next to the puzzle icon (it shows whenever the current tab's profile has that extension);
-right-click the pinned button to unpin it. Installed extensions update every 5 hours. See
-[docs/extension-checklist.md](docs/extension-checklist.md) for how your must-have extensions fare
+right-click the pinned button to unpin it. Installed extensions update every 5 hours.
+
+Extension keyboard shortcuts are under **Extension shortcuts** in settings. They work while jbrow is
+open, for the profile of the tab you're on. Shortcuts an extension suggests apply on their own,
+except ones jbrow already uses. Click a shortcut to record a new one.
+
+See [docs/extension-checklist.md](docs/extension-checklist.md) for how your must-have extensions fare
 and what jbrow patches to make them work.
 
 ## Developing

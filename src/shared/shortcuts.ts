@@ -1,0 +1,56 @@
+/**
+ * Keyboard shortcuts as Electron accelerators in one canonical order, e.g. `Command+Shift+L`, so
+ * a shortcut recorded in the UI compares equal to one matched in the main process.
+ */
+
+const MEDIA_KEYS = new Set(['MediaNextTrack', 'MediaPreviousTrack', 'MediaPlayPause', 'MediaStop'])
+
+/** KeyboardEvent.code values for keys that aren't letters or digits. */
+const CODE_KEYS: Record<string, string> = {
+  Comma: ',', Period: '.', Space: 'Space', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+  Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown', Insert: 'Insert', Delete: 'Delete',
+  MediaTrackNext: 'MediaNextTrack', MediaTrackPrevious: 'MediaPreviousTrack', MediaPlayPause: 'MediaPlayPause', MediaStop: 'MediaStop',
+}
+
+export interface Mods {
+  command?: boolean
+  control?: boolean
+  alt?: boolean
+  shift?: boolean
+}
+
+export function canonical(mods: Mods, key: string): string {
+  return [mods.command && 'Command', mods.control && 'Control', mods.alt && 'Alt', mods.shift && 'Shift', key].filter(Boolean).join('+')
+}
+
+/**
+ * The shortcut a key press makes, or null if it can't be one: it needs ⌘, ⌃ or ⌥, as in Chrome,
+ * unless it's a media key. Letters come from the typed key where it's a plain letter, so they
+ * follow your layout (Z on a Slovak keyboard is Z); with Option held the Mac types a symbol
+ * instead, so the key's position decides.
+ */
+export function shortcutFromKey(e: { key: string; code: string } & Mods): string | null {
+  let key: string | undefined
+  if (/^[a-z]$/i.test(e.key)) key = e.key.toUpperCase()
+  else if (/^Key[A-Z]$/.test(e.code)) key = e.code.slice(3)
+  else if (/^Digit[0-9]$/.test(e.code)) key = e.code.slice(5)
+  else key = CODE_KEYS[e.code]
+  if (!key) return null
+  if (!MEDIA_KEYS.has(key) && !e.command && !e.control && !e.alt) return null
+  return canonical(e, key)
+}
+
+const GLYPHS: Record<string, string> = {
+  Command: '⌘', Control: '⌃', Alt: '⌥', Shift: '⇧', Up: '↑', Down: '↓', Left: '←', Right: '→',
+  PageUp: '⇞', PageDown: '⇟', Home: '↖', End: '↘', Delete: '⌦',
+  MediaNextTrack: '⏭', MediaPreviousTrack: '⏮', MediaPlayPause: '⏯', MediaStop: '⏹',
+}
+const MAC_ORDER = ['Control', 'Alt', 'Shift', 'Command']
+
+/** How a Mac menu writes the shortcut, e.g. ⇧⌘L. */
+export function shortcutLabel(shortcut: string): string {
+  const parts = shortcut.split('+')
+  const key = parts.pop()!
+  const mods = MAC_ORDER.filter((m) => parts.includes(m))
+  return [...mods, key].map((p) => GLYPHS[p] ?? p).join('')
+}

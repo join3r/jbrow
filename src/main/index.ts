@@ -2,6 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, M
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { numberedThreads, rootOf, sections } from '../shared/threads'
 import type { Prefs, UiState } from '../shared/types'
+import { ExtensionCommands } from './commands'
 import { frontmostApp, type FrontApp } from './frontmost'
 import { logPath, setupLogging } from './log'
 import { Panel } from './panel'
@@ -22,6 +23,9 @@ let panel: Panel
 let tabs: Tabs
 let runtimes = new Map<string, ProfileRuntime>()
 let tray: Tray | null = null
+let commands: ExtensionCommands
+/** The settings screen is recording a shortcut: key presses go to it, not to jbrow or extensions. */
+let recordingShortcut = false
 
 let filter = 'all'
 let scope: { key: string; name: string } | null = null
@@ -258,7 +262,8 @@ function switchProfile(id: string, next: string) {
 const profileName = (id: string) => settings.profiles.find((p) => p.id === id)?.name ?? id
 
 function onKey(input: Electron.Input): boolean {
-  if (input.type !== 'keyDown') return false
+  if (input.type !== 'keyDown' || recordingShortcut) return false
+  if (commands?.handleKey(tabs.active()?.profile, input)) return true
   const key = input.key.toLowerCase()
   const wc = tabs.activeWebContents()
   if (input.control && key === 'tab') {
@@ -440,6 +445,39 @@ function folderMenu(id: string) {
   ]).popup({ window: panel.win })
 }
 
+// ---------- extension shortcuts ----------
+
+function sendShortcuts() {
+  if (panel.win.isDestroyed()) return
+  panel.win.webContents.send('shortcuts', {
+    profiles: settings.profiles,
+    commands: settings.profiles.flatMap((p) => commands.list(p.id)),
+  })
+}
+
+/**
+ * Opens an extension's popup for its shortcut. The UI clicks the pinned button when there is
+ * one, so the popup hangs off it; otherwise it sends back where the puzzle icon is.
+ */
+async function openActionPopup(profileId: string, extensionId: string) {
+  if (tabs.active()?.profile !== profileId) return
+  if (!panel.visible) await summon()
+  panel.win.webContents.send('run-action', extensionId)
+}
+
+function popupAt(extensionId: string, anchorRect: { x: number; y: number; width: number; height: number }) {
+  const active = tabs.active()
+  const wc = tabs.activeWebContents()
+  const rt = active && runtimes.get(active.profile)
+  if (!rt || !wc) return
+  const browserAction = (rt.extensions as unknown as { api: { browserAction: { activateClick(details: object): void } } }).api.browserAction
+  try {
+    browserAction.activateClick({ eventType: 'click', extensionId, tabId: wc.id, anchorRect, alignment: 'bottom left' })
+  } catch (error) {
+    console.error(`[commands] could not open the popup of ${extensionId}:`, error)
+  }
+}
+
 // ---------- extension hooks ----------
 
 const tabHooks: TabHooks = (profileId) => ({
@@ -537,6 +575,16 @@ function wireIpc() {
   on('hide', () => void panel.hide())
   on('focus-ui', () => panel.win.webContents.focus())
   on('focus-page', () => focusActive())
+  on('shortcuts', () => sendShortcuts())
+  on<{ on: boolean }>('recording-shortcut', ({ on: recording }) => (recordingShortcut = recording))
+  on<{ profile: string; extensionId: string; name: string; shortcut: string }>('set-shortcut', ({ profile, extensionId, name, shortcut }) => {
+    const error = commands.set(profile, extensionId, name, shortcut)
+    if (error) toast(error)
+    sendShortcuts()
+  })
+  on<{ extensionId: string; anchorRect: { x: number; y: number; width: number; height: number } }>('action-popup', ({ extensionId, anchorRect }) =>
+    popupAt(extensionId, anchorRect),
+  )
   // Debug only: wake every extension's service worker so it can be inspected.
   if (process.env.JBROW_DEBUG) {
     on('debug-wake-workers', () => {
@@ -664,6 +712,13 @@ app.whenReady().then(async () => {
       menu.append(new MenuItem({ label: pinned ? 'Unpin from toolbar' : 'Pin to toolbar', click: () => togglePinnedExtension(extensionId) }))
     })
   }
+
+  commands = new ExtensionCommands(() => settings, () => runtimes, {
+    save: () => saveSettings(settings),
+    openPopup: (profileId, extensionId) => void openActionPopup(profileId, extensionId),
+    activeTab: (profileId) => (tabs.active()?.profile === profileId ? (tabs.activeWebContents() ?? undefined) : undefined),
+  })
+  commands.watch()
 
   tabs.load()
   sweep()

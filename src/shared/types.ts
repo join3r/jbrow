@@ -81,3 +81,17 @@ export interface AnimMessage {
   durationMs: number
   ease: 'spring' | 'snappy' | 'smooth'
 }
+
+/** An extension command (chrome.commands) and the shortcut it has in one profile. */
+export interface ExtensionShortcut {
+  profile: string
+  extensionId: string
+  extensionName: string
+  /** The command's name in the manifest, e.g. `_execute_action`. */
+  name: string
+  description: string
+  /** Electron accelerator, e.g. `Command+Shift+L`. Empty when it has none. */
+  shortcut: string
+  /** Works while jbrow is hidden. */
+  global: boolean
+}
