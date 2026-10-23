@@ -1639,7 +1639,12 @@ function playIn(m: AnimMessage, report = true) {
 }
 
 window.jbrow.on('anim', (m: AnimMessage) => {
-  if (m.phase === 'in') return playIn(m)
+  if (m.phase === 'in') {
+    // Hiding drops the overlay in the main process; settings left open needs it back.
+    overlaySent = false
+    syncOverlay()
+    return playIn(m)
+  }
   playRun++
   root.dataset.style = m.style
   root.style.setProperty('--dur', `${m.durationMs}ms`)
