@@ -8,9 +8,10 @@
   "author": "Vladimir 'join3r' Schmotzer",
   "main": "dist/main.js",
   "scripts": {
+    "setup": "node scripts/setup.mjs",
     "build": "node scripts/patch-deps.mjs && node build.mjs",
-    "start": "npm run build && electron .",
-    "dev": "npm run build && JBROW_DEBUG=1 electron .",
+    "start": "npm run setup && electron .",
+    "dev": "npm run setup && JBROW_DEBUG=1 electron .",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
