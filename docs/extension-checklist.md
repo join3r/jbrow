@@ -13,7 +13,7 @@ from the jb menu bar item: right-click, **Install test extensions**.
 | **Bitwarden** | Installs; service worker runs; every API it asks for is present. | Unlock, fill a login, save a new login, use a passkey, copy a password. Desktop-app unlock goes through native messaging (`com.8bit.bitwarden`), which the D.Bridge test shows working. |
 | **SponsorBlock** | Service worker runs. It crashed before the fixes below. | Watch a YouTube video with a known sponsor segment. |
 | **Enhancer for YouTube** | Service worker runs. | Open YouTube and use its controls. Its commands have no keys until you assign them under Settings → Extension shortcuts. |
-| **Video Speed Controller** | Service worker runs. | Change the speed with its in-page keys (S and D). |
+| **Video Speed Controller** | Works: S and D change the speed on YouTube. It did nothing until the content script shim below. | Change the speed with its in-page keys (S and D). |
 | **Consent-O-Matic** | Service worker runs; opened its welcome page on first install. | Visit a few sites with cookie banners. |
 | **Canvas Blocker** | Service worker runs. Electron warns that `notifications` and `contextMenus` are unknown permissions, but the library provides both. | Check a canvas fingerprinting test page. |
 | **SideHN** | Service worker runs. One error: a `declarativeNetRequest` rule that rewrites request headers (`modifyHeaders`) throws "Method not implemented". | Open a page that's on HN. The sidebar should show; the logged-in view probably won't. |
@@ -22,7 +22,7 @@ from the jb menu bar item: right-click, **Install test extensions**.
 ## What jbrow had to fix
 
 Electron plus `electron-chrome-extensions` didn't run most of these out of the box. The fixes live
-in two places:
+in these places:
 
 **`scripts/patch-deps.mjs`** patches the library in `node_modules` on every build:
 
@@ -46,6 +46,13 @@ in two places:
    pop-out windows). Electron leaves them out ("Unexpected view type found: 0" in the log), so
    Bitwarden thought nothing of it was open or focused, and its vault timeout could lock or log
    out while you were signing in through the pop-out.
+
+**`src/main/content-shim.ts`** covers content scripts, which no preload reaches. Their
+`chrome.storage` has no `sync` area either ('"sync" is not available in this instance of Chrome'),
+so Video Speed Controller never got its settings and never attached to videos. Before an extension
+from the Web Store loads, jbrow writes `jbrow-content-shim.js` into its folder and lists it first in
+each isolated-world content script, pointing `sync` and `managed` at local storage. Updates get it
+too. Unpacked folders such as Stem are left alone, since they're your own source.
 
 **`src/main/commands.ts`** implements `chrome.commands`. The library reads a manifest's commands
 but leaves every shortcut empty and never fires `onCommand`. jbrow takes your shortcut from

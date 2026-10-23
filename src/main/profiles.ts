@@ -3,6 +3,7 @@ import { ElectronChromeExtensions, type ChromeExtensionOptions } from 'electron-
 import { installChromeWebStore, installExtension } from 'electron-chrome-web-store'
 import path from 'node:path'
 import type { Profile } from '../shared/types'
+import { shimContentScripts } from './content-shim'
 import type { SitePermissions } from './permissions'
 import type { Settings } from './settings'
 
@@ -77,6 +78,7 @@ export async function setupProfiles(
     })
 
     const extensionsPath = path.join(app.getPath('userData'), 'Extensions', profile.id)
+    if (!process.env.JBROW_NO_SHIMS) shimContentScripts(sess, extensionsPath)
     await installChromeWebStore({
       session: sess,
       extensionsPath,
