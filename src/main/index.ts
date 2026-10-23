@@ -1,8 +1,8 @@
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, MenuItem, nativeImage, Notification, session, shell, Tray } from 'electron'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
-import { numberedThreads, rootOf, sections } from '../shared/threads'
-import type { AppEntry, AppLabel, Prefs, Profile, UiState } from '../shared/types'
+import { flatFolders, isInFolder, numberedThreads, rootOf, sections, type FolderView } from '../shared/threads'
+import type { AppEntry, AppLabel, Folder, Prefs, Profile, TabRecord, UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
 import { Certificates } from './certs'
 import { ExtensionCommands } from './commands'
@@ -234,7 +234,7 @@ const sweep = () => tabs.sweep(settings.archiveAfterDays * DAY_MS, settings.summ
 /** Most recently seen tab among the threads the sidebar currently shows. */
 function mostRecentInView(): string | undefined {
   const s = threadsInView()
-  const all = [...s.folders.flatMap((f) => f.threads), ...s.kept, ...s.today, ...s.apps.flatMap((a) => [...a.threads, ...a.earlier]), ...s.earlier]
+  const all = [...flatFolders(s.folders).flatMap((f) => f.threads), ...s.kept, ...s.today, ...s.apps.flatMap((a) => [...a.threads, ...a.earlier]), ...s.earlier]
   return all.sort((a, b) => b.lastSeen - a.lastSeen)[0]?.last.id
 }
 
@@ -545,14 +545,12 @@ function threadMenu(id: string) {
     items.push({
       label: 'Move to folder',
       submenu: [
-        ...[...tabs.folders]
-          .sort((a, b) => a.createdAt - b.createdAt)
-          .map<Electron.MenuItemConstructorOptions>((f) => ({
-            label: f.name,
-            type: 'checkbox',
-            checked: rec.kept && rec.folder === f.id,
-            click: () => tabs.move(id, null, true, f.id),
-          })),
+        ...folderChoices().map<Electron.MenuItemConstructorOptions>(({ folder, label }) => ({
+          label,
+          type: 'checkbox',
+          checked: rec.kept && rec.folder === folder.id,
+          click: () => tabs.move(id, null, true, folder.id),
+        })),
         ...(rec.kept && rec.folder ? [{ type: 'separator' as const }, { label: 'Out of folder', click: () => tabs.move(id, null, true) }] : []),
       ],
     })
@@ -573,19 +571,36 @@ function newTabMenu() {
   ).popup({ window: panel.win })
 }
 
-function newFolder() {
-  const folder = tabs.createFolder()
+function newFolder(parent?: string) {
+  const folder = tabs.createFolder('New folder', parent)
+  if (parent) tabs.updateFolder(parent, { collapsed: false })
   panel.ui.send('rename-tab', folder.id)
+}
+
+/** Every folder in sidebar order, labelled with the folders it sits in. */
+function folderChoices(): { folder: Folder; label: string }[] {
+  const walk = (views: FolderView<TabRecord>[], prefix: string): { folder: Folder; label: string }[] =>
+    views.flatMap((v) => [{ folder: v.folder, label: prefix + v.folder.name }, ...walk(v.folders, `${prefix}${v.folder.name} › `)])
+  const s = sections(tabs.records, { filter: 'all', scope: null, activeId: null, now: Date.now(), folders: tabs.folders })
+  return walk(s.folders, '')
 }
 
 function folderMenu(id: string) {
   const folder = tabs.folder(id)
   if (!folder) return
+  // Anywhere but itself, a folder inside it, or where it already is.
+  const targets = folderChoices().filter(({ folder: f }) => !isInFolder(tabs.folders, f.id, id) && f.id !== folder.parent)
+  const moveTo: Electron.MenuItemConstructorOptions[] = [
+    ...(folder.parent ? [{ label: 'Top of Kept', click: () => tabs.moveFolder(id, null) }] : []),
+    ...targets.map(({ folder: f, label }) => ({ label, click: () => tabs.moveFolder(id, f.id) })),
+  ]
   Menu.buildFromTemplate([
     { label: 'Rename', click: () => panel.ui.send('rename-tab', id) },
     { label: 'Auto-file rules…', click: () => panel.ui.send('folder-rules', id) },
+    ...(moveTo.length ? [{ label: 'Move to', submenu: moveTo }] : []),
     { type: 'separator' },
-    { label: 'New folder', click: () => newFolder() },
+    { label: 'New folder inside', click: () => newFolder(id) },
+    { label: 'New folder', click: () => newFolder(folder.parent) },
     { label: 'Delete folder', click: () => tabs.deleteFolder(id) },
   ]).popup({ window: panel.win })
 }

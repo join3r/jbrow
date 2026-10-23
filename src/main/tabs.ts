@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { urlMatcher } from '../shared/patterns'
-import { childrenOf, isAsleep, isRoot, rootOf, subtree } from '../shared/threads'
+import { childrenOf, isAsleep, isInFolder, isRoot, rootOf, subtree } from '../shared/threads'
 import type { Folder, TabRecord, UiTab } from '../shared/types'
 import type { Certificates } from './certs'
 import type { SitePermissions } from './permissions'
@@ -499,8 +499,9 @@ export class Tabs {
     return this.folders.find((f) => f.id === id)
   }
 
-  createFolder(name = 'New folder'): Folder {
+  createFolder(name = 'New folder', parent?: string): Folder {
     const folder: Folder = { id: randomUUID(), name, rules: [], createdAt: Date.now() }
+    if (parent && this.folder(parent)) folder.parent = parent
     this.folders.push(folder)
     this.changed()
     return folder
@@ -515,9 +516,19 @@ export class Tabs {
     this.changed()
   }
 
-  /** Removes a folder. Its threads stay kept, outside any folder. */
+  /** Moves a folder into another, or to the top of Kept with none. Not into itself or a folder inside it. */
+  moveFolder(id: string, parent: string | null) {
+    const folder = this.folder(id)
+    if (!folder || (parent && (!this.folder(parent) || isInFolder(this.folders, parent, id)))) return
+    folder.parent = parent || undefined
+    this.changed()
+  }
+
+  /** Removes a folder. Its threads and folders move up to its parent, or stay kept outside any folder. */
   deleteFolder(id: string) {
-    for (const t of this.records) if (t.folder === id) t.folder = undefined
+    const parent = this.folder(id)?.parent
+    for (const t of this.records) if (t.folder === id) t.folder = parent
+    for (const f of this.folders) if (f.parent === id) f.parent = parent
     this.folders = this.folders.filter((f) => f.id !== id)
     this.changed()
   }

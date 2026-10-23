@@ -37,6 +37,8 @@ export interface TabRecord {
 export interface Folder {
   id: string
   name: string
+  /** The folder this one sits in. None for a folder at the top of Kept. */
+  parent?: string
   /** Address patterns, as for private addresses. A thread about to be archived that matches moves here instead. */
   rules: string[]
   collapsed?: boolean

@@ -34,6 +34,28 @@ export function isRoot(tabs: TabRecord[], tab: TabRecord): boolean {
 export interface FolderView<T extends TabRecord> {
   folder: Folder
   threads: ThreadView<T>[]
+  /** Folders inside this one, oldest first. */
+  folders: FolderView<T>[]
+}
+
+/** A folder and every folder inside it, parents before children. */
+export function flatFolders<T extends TabRecord>(views: FolderView<T>[]): FolderView<T>[] {
+  return views.flatMap((v) => [v, ...flatFolders(v.folders)])
+}
+
+/** Threads in a folder and every folder inside it. */
+export function folderThreads<T extends TabRecord>(v: FolderView<T>): ThreadView<T>[] {
+  return flatFolders([v]).flatMap((f) => f.threads)
+}
+
+/** Whether `id` is `ancestor` or sits somewhere inside it. */
+export function isInFolder(folders: Folder[], id: string, ancestor: string): boolean {
+  const seen = new Set<string>()
+  for (let f = folders.find((x) => x.id === id); f && !seen.has(f.id); f = folders.find((x) => x.id === f!.parent)) {
+    if (f.id === ancestor) return true
+    seen.add(f.id)
+  }
+  return false
 }
 
 export interface AppView<T extends TabRecord> {
@@ -46,7 +68,7 @@ export interface AppView<T extends TabRecord> {
 }
 
 export interface Sections<T extends TabRecord> {
-  /** Folders in the Kept section, oldest first. */
+  /** Top-level folders in the Kept section, oldest first. */
   folders: FolderView<T>[]
   /** Kept threads outside any folder. */
   kept: ThreadView<T>[]
@@ -97,10 +119,17 @@ export function sections<T extends TabRecord>(
     if (!app) apps.set(key, (app = { scope: key, name: opts.appNames?.[key] || v.root.scopeName || key, threads: [], earlier: [] }))
     ;(old(v) ? app.earlier : app.threads).push(v)
   }
+  // A folder whose parent is gone, or that would end up inside itself, sits at the top.
+  const parentOf = (f: Folder) =>
+    f.parent && folderIds.has(f.parent) && !isInFolder(opts.folders, f.parent, f.id) ? f.parent : undefined
+  const byAge = [...opts.folders].sort((a, b) => a.createdAt - b.createdAt)
+  const folderView = (folder: Folder): FolderView<T> => ({
+    folder,
+    threads: views.filter((v) => v.root.kept && v.root.folder === folder.id),
+    folders: byAge.filter((f) => parentOf(f) === folder.id).map(folderView),
+  })
   return {
-    folders: [...opts.folders]
-      .sort((a, b) => a.createdAt - b.createdAt)
-      .map((folder) => ({ folder, threads: views.filter((v) => v.root.kept && v.root.folder === folder.id) })),
+    folders: byAge.filter((f) => !parentOf(f)).map(folderView),
     kept: views.filter((v) => v.root.kept && !inFolder(v)),
     today: loose.filter((v) => !old(v)),
     apps: [...apps.values()].sort((a, b) => a.name.localeCompare(b.name) || a.scope.localeCompare(b.scope)),
@@ -108,9 +137,10 @@ export function sections<T extends TabRecord>(
   }
 }
 
-/** Thread roots in the order ⌘1–9 address them. Threads in collapsed folders don't count. */
+/** Thread roots in the order ⌘1–9 address them, as the sidebar lists them. Threads in collapsed folders don't count. */
 export function numberedThreads<T extends TabRecord>(s: Sections<T>): ThreadView<T>[] {
-  const foldered = s.folders.filter((f) => !f.folder.collapsed).flatMap((f) => f.threads)
+  const shown = (v: FolderView<T>): ThreadView<T>[] => (v.folder.collapsed ? [] : [...v.folders.flatMap(shown), ...v.threads])
+  const foldered = s.folders.flatMap(shown)
   return [...foldered, ...s.kept, ...s.today, ...s.apps.flatMap((a) => a.threads)].slice(0, 9)
 }
 

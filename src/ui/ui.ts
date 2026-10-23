@@ -1,6 +1,6 @@
 import { cssEase } from '../shared/ease'
 import { urlMatcher } from '../shared/patterns'
-import { childrenOf, displayName, isAsleep, numberedThreads, sections, type AppView, type FolderView, type ThreadView } from '../shared/threads'
+import { childrenOf, displayName, folderThreads, isAsleep, numberedThreads, sections, type AppView, type FolderView, type ThreadView } from '../shared/threads'
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import type { AnimMessage, AppEntry, CertInfo, DownloadInfo, ExtensionShortcut, Prefs, Profile, UiState, UiTab } from '../shared/types'
 
@@ -281,7 +281,7 @@ function renderThreads() {
   const appBlock = (v: ThreadView<UiTab>) => row(v.root, 0, v, numbered.get(v.root.id), false)
   // While filtered to a profile or an app, folders with nothing to show stay out of the way.
   const narrowed = S.filter !== 'all' || !!S.scope
-  const folders = s.folders.filter((f) => f.threads.length || !narrowed)
+  const folders = s.folders.filter((f) => folderThreads(f).length || !narrowed)
   let html = settingsTab
     ? `<div class="row set-row ${settingsEl.hidden ? '' : 'cur'}" role="button" tabindex="0" data-settings>
         <span class="fav">${icon('settings')}</span><span class="t">Settings</span>
@@ -289,7 +289,7 @@ function renderThreads() {
       </div>`
     : ''
   html += `<div class="head" data-head="kept"><span>Kept</span><button class="head-act" data-new-folder title="New folder" aria-label="New folder">${icon('folderPlus')}</button></div>`
-  html += folders.map((f) => folderRow(f, block)).join('') + s.kept.map(block).join('')
+  html += folders.map((f) => folderRow(f, block, narrowed)).join('') + s.kept.map(block).join('')
   if (!folders.length && !s.kept.length) html += `<div class="empty">Drag a thread here to keep it</div>`
   html += `<div class="head" data-head="today">Today</div>`
   html += s.today.length ? s.today.map(block).join('') : `<div class="empty">Nothing here yet</div>`
@@ -315,17 +315,21 @@ function appSection(a: AppView<UiTab>, block: (v: ThreadView<UiTab>) => string):
   return html
 }
 
-function folderRow(v: FolderView<UiTab>, block: (v: ThreadView<UiTab>) => string): string {
+/** A folder's row and, when open, the folders and threads inside it. */
+function folderRow(v: FolderView<UiTab>, block: (v: ThreadView<UiTab>) => string, narrowed: boolean): string {
   const f = v.folder
+  const count = folderThreads(v).length
+  const inner = v.folders.filter((c) => folderThreads(c).length || !narrowed)
   const open = !f.collapsed
   const name =
     renaming === f.id
       ? `<input class="ren" id="ren" value="${esc(f.name)}" aria-label="Folder name">`
       : `<span class="t">${esc(f.name)}</span>`
   const html = `<div class="row frow" role="button" tabindex="0" aria-expanded="${open}" data-folder="${f.id}">
-    <span class="fav">${icon(open ? 'folderOpen' : 'folder')}</span>${name}<span class="end"><span class="meta">${v.threads.length || ''}</span></span>
+    <span class="fav">${icon(open ? 'folderOpen' : 'folder')}</span>${name}<span class="end"><span class="meta">${count || ''}</span></span>
   </div>`
-  return open && v.threads.length ? `${html}<div class="folder-body">${v.threads.map(block).join('')}</div>` : html
+  const body = inner.map((c) => folderRow(c, block, narrowed)).join('') + v.threads.map(block).join('')
+  return open && body ? `${html}<div class="folder-body">${body}</div>` : html
 }
 
 const toggleFolder = (id: string) => {
