@@ -67,6 +67,36 @@ const patches = [
         });`,
   },
   {
+    file: 'node_modules/electron-chrome-extensions/dist/chrome-extension-api.preload.js',
+    why: "managed storage isn't local storage: Bitwarden applies whatever it finds there as policy (jbrow's shim makes it empty)",
+    find: `              managed: local,
+              sync: local`,
+    replace: `              managed: base && base.managed,
+              sync: local`,
+  },
+  ...['cjs/browser-action.js', 'esm/browser-action.mjs'].flatMap((file) => [
+    {
+      file: `node_modules/electron-chrome-extensions/dist/${file}`,
+      why: "an extension button's per-tab icon, badge and title win over its defaults, as in Chrome (Bitwarden's icon stayed locked after unlocking)",
+      find: `const info = { ...tabInfo, ...action };`,
+      replace: `const info = { ...action, ...tabInfo };`,
+    },
+    {
+      file: `node_modules/electron-chrome-extensions/dist/${file}`,
+      why: '<browser-action-list> follows its partition: it kept asking the session it started with for updates, so icon and badge changes never arrived',
+      find: `      attributeChangedCallback(name, oldValue, newValue) {
+        if (oldValue === newValue) return;
+        if (this.isConnected) {`,
+      replace: `      attributeChangedCallback(name, oldValue, newValue) {
+        if (oldValue === newValue) return;
+        if (name === "partition" && this.observing) {
+          browserAction.removeObserver(oldValue || DEFAULT_PARTITION);
+          browserAction.addObserver(newValue || DEFAULT_PARTITION);
+        }
+        if (this.isConnected) {`,
+    },
+  ]),
+  {
     file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
     why: "let jbrow add items (pin to toolbar) to an extension button's right-click menu",
     find: `    menu.popup({

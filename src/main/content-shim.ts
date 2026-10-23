@@ -11,13 +11,24 @@ import type { Session } from 'electron'
  */
 const SHIM_FILE = 'jbrow-content-shim.js'
 const SHIM = `// Added by jbrow: Electron has no chrome.storage.sync, so it points at local storage.
+// Nor managed storage, which with no administrator is empty.
 (() => {
   try {
     const storage = globalThis.chrome && chrome.storage
     if (!storage || !storage.local) return
-    for (const area of ['sync', 'managed']) {
-      Object.defineProperty(storage, area, { value: storage.local, configurable: true, enumerable: true, writable: true })
-    }
+    const define = (area, value) => Object.defineProperty(storage, area, { value, configurable: true, enumerable: true, writable: true })
+    define('sync', storage.local)
+    const reply = (value, cb) => (typeof cb === 'function' ? void cb(value) : Promise.resolve(value))
+    const readOnly = () => Promise.reject(new Error('This is a read-only store.'))
+    define('managed', {
+      get: (keys, cb) => reply({}, typeof keys === 'function' ? keys : cb),
+      getKeys: (cb) => reply([], cb),
+      getBytesInUse: (keys, cb) => reply(0, typeof keys === 'function' ? keys : cb),
+      set: readOnly,
+      remove: readOnly,
+      clear: readOnly,
+      onChanged: { addListener() {}, removeListener() {}, hasListener: () => false, hasListeners: () => false },
+    })
   } catch {}
 })()
 `

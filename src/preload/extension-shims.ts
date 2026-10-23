@@ -1,10 +1,10 @@
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 
 /**
  * Fills gaps in Electron's extension APIs. Runs in every extension service worker and
  * chrome-extension:// page, before electron-chrome-extensions adds its own APIs.
  */
-function shims(skip: string[] = []) {
+function shims(skip: string[] = [], installed: { reason: string; previousVersion?: string } | null = null) {
   const g = globalThis as any
   const chrome = g.chrome
   if (!chrome) return
@@ -20,12 +20,27 @@ function shims(skip: string[] = []) {
 
   // Electron has no sync storage, and electron-chrome-extensions' local fallback doesn't reach
   // service workers. Settings stay on this machine either way.
+  // Nor is there a managed area, which holds an administrator's policy. It must not be local
+  // storage: Bitwarden applies everything it finds there as policy ("applied 8 managed
+  // setting(s)"), its own vault data included. With no administrator, it's empty, as in Chrome.
   try {
     const storage = skip.includes('storage') ? undefined : chrome.storage
     if (storage?.local) {
-      for (const area of ['sync', 'managed']) {
-        Object.defineProperty(storage, area, { value: storage.local, configurable: true, enumerable: true, writable: true })
-      }
+      const define = (area: string, value: unknown) =>
+        Object.defineProperty(storage, area, { value, configurable: true, enumerable: true, writable: true })
+      define('sync', storage.local)
+      const reply = (value: unknown, cb?: unknown) => (typeof cb === 'function' ? void cb(value) : Promise.resolve(value))
+      const readOnly = () => Promise.reject(new Error('This is a read-only store.'))
+      define('managed', {
+        get: (keys?: unknown, cb?: unknown) => reply({}, typeof keys === 'function' ? keys : cb),
+        getKeys: (cb?: unknown) => reply([], cb),
+        getBytesInUse: (keys?: unknown, cb?: unknown) => reply(0, typeof keys === 'function' ? keys : cb),
+        set: readOnly,
+        remove: readOnly,
+        clear: readOnly,
+        setAccessLevel: readOnly,
+        onChanged: { addListener() {}, removeListener() {}, hasListener: () => false, hasListeners: () => false },
+      })
     }
   } catch {}
 
@@ -105,6 +120,43 @@ function shims(skip: string[] = []) {
     }
   }
 
+  // Electron never fires chrome.runtime.onInstalled, and Bitwarden only turns on its inline menu
+  // (the icon in login fields) when it's installed. jbrow's main process says whether this
+  // worker's extension was just installed or updated (see src/main/installed.ts), and the event
+  // fires once the worker's script has run, as in Chrome. Bitwarden reads it 100ms later.
+  if (installed && runtime) {
+    const listeners = new Set<(d: object) => void>()
+    let fired = false
+    const fire = (fn: (d: object) => void) => {
+      try {
+        fn({ ...installed })
+      } catch (error) {
+        console.error(error)
+      }
+    }
+    setTimeout(() => {
+      fired = true
+      listeners.forEach(fire)
+    })
+    try {
+      Object.defineProperty(runtime, 'onInstalled', {
+        value: {
+          // A listener added later still gets it, while this worker lives.
+          addListener: (fn: (d: object) => void) => {
+            listeners.add(fn)
+            if (fired) setTimeout(() => fire(fn))
+          },
+          removeListener: (fn: (d: object) => void) => void listeners.delete(fn),
+          hasListener: (fn: (d: object) => void) => listeners.has(fn),
+          hasListeners: () => listeners.size > 0,
+        },
+        configurable: true,
+        enumerable: true,
+        writable: true,
+      })
+    } catch {}
+  }
+
   // chrome.alarms, on timers. Background scripts are kept alive in Electron, so timers
   // survive; alarms don't persist across restarts, which extensions recreate on startup anyway.
   if (!skip.includes('alarms') && !chrome.alarms) {
@@ -167,7 +219,12 @@ const isExtensionContext =
 if (isExtensionContext) {
   try {
     const skip = (process.env.JBROW_SHIM_SKIP ?? '').split(',').filter(Boolean)
-    contextBridge.executeInMainWorld({ func: shims, args: [skip] })
+    // Asked before the worker's own script runs. Pages don't need it.
+    const installed =
+      (process as { type?: string }).type === 'service-worker' && !skip.includes('installed')
+        ? ipcRenderer.sendSync('jbrow-installed')
+        : null
+    contextBridge.executeInMainWorld({ func: shims, args: [skip, installed] })
   } catch (error) {
     console.error('[jbrow] extension shims failed:', error)
   }

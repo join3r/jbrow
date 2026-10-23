@@ -10,7 +10,7 @@ from the jb menu bar item: right-click, **Install test extensions**.
 |---|---|---|
 | **D.Bridge 2** | Native messaging works: the page handshake reaches D.Launcher's host (`dBridge2Nm`), which starts and answers. | Sign something on slovensko.sk with your eID. |
 | **uBlock Origin Lite** | Service worker runs with 6 rulesets enabled (uBlock filters, EasyList, EasyPrivacy, Peter Lowe's, badware, URLhaus). Trackers are blocked; Google ad and analytics scripts are replaced with uBlock's harmless stand-ins, as in Chrome. | Browse a news site. Check that the popup opens and the per-site toggle works. |
-| **Bitwarden** | Installs; service worker runs; every API it asks for is present. | Unlock, fill a login, save a new login, use a passkey, copy a password. Desktop-app unlock goes through native messaging (`com.8bit.bitwarden`), which the D.Bridge test shows working. |
+| **Bitwarden** | Installs; service worker runs; every API it asks for is present. The inline menu (its icon in login fields) shows, and opens its list. The toolbar icon follows lock and unlock. | Unlock, fill a login from the field icon, save a new login, use a passkey, copy a password. If it was installed before onInstalled worked (below), the field icon is off: Bitwarden → Settings → Autofill → **Show autofill suggestions on form fields**. Desktop-app unlock goes through native messaging (`com.8bit.bitwarden`), which the D.Bridge test shows working. |
 | **SponsorBlock** | Service worker runs. It crashed before the fixes below. | Watch a YouTube video with a known sponsor segment. |
 | **Enhancer for YouTube** | Service worker runs. | Open YouTube and use its controls. Its commands have no keys until you assign them under Settings → Extension shortcuts. |
 | **Video Speed Controller** | Works: S and D change the speed on YouTube. It did nothing until the content script shim below. | Change the speed with its in-page keys (S and D). |
@@ -35,24 +35,42 @@ in these places:
    documents) would fail to parse.
 4. An extension button's right-click menu emits `jbrow-action-context-menu` so jbrow can add
    **Pin to toolbar** to it.
+5. `<browser-action-list>` asked for updates only from the session it started with, before jbrow
+   gave it the profile's partition, so a new icon or badge never arrived. It now follows its
+   `partition`.
+6. An extension button let its defaults win over what was set for the tab. Bitwarden sets its
+   locked and unlocked icons per tab, so the icon stayed locked after unlocking.
+7. Pages got local storage as `chrome.storage.managed` (see the shim's storage item below).
 
 **`src/preload/extension-shims.ts`** runs in every extension context before the library:
 
 1. `browser` now points at `chrome`. Chromium has its own `browser` object without the library's
    APIs, and uBlock Origin Lite prefers `browser`. This was why it crashed.
-2. `chrome.storage.sync` and `managed` map to local storage. Settings don't sync to your Chrome.
+2. `chrome.storage.sync` maps to local storage. Settings don't sync to your Chrome. `managed`, which
+   holds an administrator's policy, is empty and read-only, as in a Chrome nobody manages. It
+   used to be local storage too, and Bitwarden applied everything in it, vault data included, as
+   policy.
 3. `chrome.alarms`, which Electron doesn't have, is implemented on timers.
 4. `chrome.runtime.getContexts` lists extension pages in jbrow's own windows (action popups,
    pop-out windows). Electron leaves them out ("Unexpected view type found: 0" in the log), so
    Bitwarden thought nothing of it was open or focused, and its vault timeout could lock or log
    out while you were signing in through the pop-out.
 
+**`src/main/installed.ts`** stands in for `chrome.runtime.onInstalled`, which Electron never
+fires. Bitwarden turns its inline menu on, and shows its welcome page, only on install, so the
+icon in login fields never appeared. Each extension service worker asks the main process as it
+starts: "install" for an extension jbrow hasn't seen whose storage is empty, "update" when its
+version changed. The shim fires the event once the worker's script has run, as Chrome does. Versions
+seen are in `jbrow-extension-versions.json` in the profile's partition folder. Extensions
+installed earlier have stored data, so they get neither.
+
 **`src/main/content-shim.ts`** covers content scripts, which no preload reaches. Their
 `chrome.storage` has no `sync` area either ('"sync" is not available in this instance of Chrome'),
 so Video Speed Controller never got its settings and never attached to videos. Before an extension
 from the Web Store loads, jbrow writes `jbrow-content-shim.js` into its folder and lists it first in
-each isolated-world content script, pointing `sync` and `managed` at local storage. Updates get it
-too. Unpacked folders such as Stem are left alone, since they're your own source.
+each isolated-world content script, pointing `sync` at local storage. Updates get it
+too. Unpacked folders such as Stem are left alone, since they're your own source. `managed` is
+empty here as well.
 
 **`src/main/commands.ts`** implements `chrome.commands`. The library reads a manifest's commands
 but leaves every shortcut empty and never fires `onCommand`. jbrow takes your shortcut from

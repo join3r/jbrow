@@ -4,6 +4,7 @@ import { installChromeWebStore, installExtension } from 'electron-chrome-web-sto
 import path from 'node:path'
 import type { Profile } from '../shared/types'
 import { shimContentScripts } from './content-shim'
+import { trackInstalls } from './installed'
 import type { SitePermissions } from './permissions'
 import type { Settings } from './settings'
 
@@ -74,6 +75,7 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
     const shims = path.join(__dirname, 'preload-extension-shims.js')
     sess.registerPreloadScript({ id: 'jbrow-shims-sw', type: 'service-worker', filePath: shims })
     sess.registerPreloadScript({ id: 'jbrow-shims-frame', type: 'frame', filePath: shims })
+    trackInstalls(sess)
   }
 
   const extensions = new ElectronChromeExtensions({
