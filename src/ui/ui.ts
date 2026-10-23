@@ -77,6 +77,8 @@ let privateKey = ''
 let rulesFor: string | null = null
 /** Profile picked with Tab in the address bar, for what's typed there; null while it's the tab's own. */
 let typedProfile: string | null = null
+/** Settings is open as its own tab in the sidebar; settingsEl.hidden says whether it's the one showing. */
+let settingsTab = false
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const profile = (id: string): Profile | undefined => S?.profiles.find((p) => p.id === id)
@@ -270,7 +272,13 @@ function renderThreads() {
   // While filtered to a profile or an app, folders with nothing to show stay out of the way.
   const narrowed = S.filter !== 'all' || !!S.scope
   const folders = s.folders.filter((f) => f.threads.length || !narrowed)
-  let html = `<div class="head" data-head="kept"><span>Kept</span><button class="head-act" data-new-folder title="New folder" aria-label="New folder">${icon('folderPlus')}</button></div>`
+  let html = settingsTab
+    ? `<div class="row set-row ${settingsEl.hidden ? '' : 'cur'}" role="button" tabindex="0" data-settings>
+        <span class="fav">${icon('settings')}</span><span class="t">Settings</span>
+        <span class="end"><button class="act" data-close-settings title="Close" aria-label="Close settings">${icon('close')}</button></span>
+      </div>`
+    : ''
+  html += `<div class="head" data-head="kept"><span>Kept</span><button class="head-act" data-new-folder title="New folder" aria-label="New folder">${icon('folderPlus')}</button></div>`
   html += folders.map((f) => folderRow(f, block)).join('') + s.kept.map(block).join('')
   if (!folders.length && !s.kept.length) html += `<div class="empty">Drag a thread here to keep it</div>`
   html += `<div class="head" data-head="today">Today</div>`
@@ -333,7 +341,7 @@ function row(t: UiTab, depth: number, thread: ThreadView<UiTab> | null, number?:
   const classes = [
     'row',
     depth > 0 ? 'sub' : '',
-    t.id === S.activeId ? 'cur' : '',
+    t.id === S.activeId && settingsEl.hidden ? 'cur' : '',
     thread && open ? 'open' : '',
     t.loading ? 'loading' : '',
     t.unread ? 'unread' : '',
@@ -429,6 +437,7 @@ function pick(s: Suggestion | undefined) {
   const text = omnibox.value
   hideSuggestions()
   omnibox.blur()
+  if (s || text.trim()) showSettings(false)
   if (s?.kind === 'tab' && s.id) send('activate', { id: s.id })
   else if (s?.kind === 'archived' && s.id) send('restore', { id: s.id })
   else if (text.trim()) send('navigate', { input: text, profile: typedProfile ?? undefined })
@@ -480,17 +489,22 @@ threadsEl.addEventListener('click', (e) => {
   const closeBtn = el.closest<HTMLElement>('[data-close]')
   if (closeBtn) return send('close', { id: closeBtn.dataset.close })
   if (el.closest('[data-new-folder]')) return send('new-folder')
+  if (el.closest('[data-close-settings]')) return setSettings(false)
+  if (el.closest('[data-settings]')) return showSettings(true)
   const folder = el.closest<HTMLElement>('.frow')
   if (folder) return void (!renaming && toggleFolder(folder.dataset.folder!))
   const r = el.closest<HTMLElement>('.row')
-  if (r && !renaming) send('activate', { id: r.dataset.target })
+  if (r && !renaming) {
+    showSettings(false)
+    send('activate', { id: r.dataset.target })
+  }
 })
 threadsEl.addEventListener('dblclick', (e) => {
-  const r = (e.target as HTMLElement).closest<HTMLElement>('.row')
+  const r = (e.target as HTMLElement).closest<HTMLElement>('.row:not([data-settings])')
   if (r && !(e.target as HTMLElement).closest('#ren')) startRename(r.dataset.id ?? r.dataset.folder!)
 })
 threadsEl.addEventListener('contextmenu', (e) => {
-  const r = (e.target as HTMLElement).closest<HTMLElement>('.row')
+  const r = (e.target as HTMLElement).closest<HTMLElement>('.row:not([data-settings])')
   if (!r || (e.target as HTMLElement).closest('#ren')) return
   e.preventDefault()
   if (r.dataset.folder) send('folder-menu', { id: r.dataset.folder })
@@ -509,9 +523,13 @@ threadsEl.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && el.classList.contains('row')) {
     e.preventDefault()
     if (el.dataset.folder) toggleFolder(el.dataset.folder)
-    else send('activate', { id: el.dataset.target })
+    else if (el.hasAttribute('data-settings')) showSettings(true)
+    else {
+      showSettings(false)
+      send('activate', { id: el.dataset.target })
+    }
   }
-  if (e.key === 'F2' && el.classList.contains('row')) startRename(el.dataset.id ?? el.dataset.folder!)
+  if (e.key === 'F2' && el.classList.contains('row') && !el.hasAttribute('data-settings')) startRename(el.dataset.id ?? el.dataset.folder!)
 })
 threadsEl.addEventListener('focusout', (e) => {
   if ((e.target as HTMLElement).id === 'ren') setTimeout(() => renaming && commitRename(), 0)
@@ -552,7 +570,7 @@ threadsEl.addEventListener('dragstart', (e) => {
 })
 threadsEl.addEventListener('dragover', (e) => {
   if (!dragId) return
-  const t = (e.target as HTMLElement).closest<HTMLElement>('.row, .head:not(.app-head)')
+  const t = (e.target as HTMLElement).closest<HTMLElement>('.row:not([data-settings]), .head:not(.app-head)')
   if (!t) return
   e.preventDefault()
   if (!t.classList.contains('dz')) {
@@ -563,7 +581,7 @@ threadsEl.addEventListener('dragover', (e) => {
 threadsEl.addEventListener('drop', (e) => {
   if (!dragId) return
   e.preventDefault()
-  const t = (e.target as HTMLElement).closest<HTMLElement>('.row, .head:not(.app-head)')
+  const t = (e.target as HTMLElement).closest<HTMLElement>('.row:not([data-settings]), .head:not(.app-head)')
   const id = dragId
   dragId = null
   threadsEl.querySelectorAll('.dz').forEach((x) => x.classList.remove('dz'))
@@ -887,11 +905,20 @@ const animSpeed = $<HTMLInputElement>('animSpeed')
 const privateUrls = $<HTMLTextAreaElement>('privateUrls')
 const hideCapture = $<HTMLInputElement>('hideCapture')
 
+/** Opens settings as a tab and shows it, or closes the tab. */
 function setSettings(open: boolean) {
-  if (open === !settingsEl.hidden) return
-  settingsEl.hidden = !open
-  $('settingsButton').setAttribute('aria-pressed', String(open))
-  if (open) {
+  settingsTab = open
+  if (open === !settingsEl.hidden) renderThreads()
+  else showSettings(open)
+}
+
+/** Switches between the settings tab and the page, keeping the tab in the sidebar. */
+function showSettings(show: boolean) {
+  if (show === !settingsEl.hidden || (show && !settingsTab)) return
+  settingsEl.hidden = !show
+  $('settingsButton').setAttribute('aria-pressed', String(show))
+  renderThreads()
+  if (show) {
     setExtensions(false)
     setRestyle(false)
     focusUi()
@@ -1284,6 +1311,8 @@ document.addEventListener('mousedown', (e) => {
 
 let toastTimer: number | undefined
 window.jbrow.on('state', (state: UiState) => {
+  // Another tab coming to the front (a new tab, ⌘1–9, a link) takes over from settings.
+  if (S && S.activeId !== state.activeId) showSettings(false)
   S = state
   render()
 })
@@ -1370,7 +1399,8 @@ window.jbrow.on('anim', (m: AnimMessage) => {
   setDownload(null)
   setRestyle(false)
   setCert(false)
-  setSettings(false)
+  stopRecording()
+  savePrivateUrls()
   closeRules()
   if (renaming) commitRename()
 })

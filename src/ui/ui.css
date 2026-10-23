@@ -8,6 +8,8 @@
   --line: rgba(20, 30, 50, 0.12);
   --tint: rgba(246, 248, 251, 0.55);
   --surface: rgba(255, 255, 255, 0.78);
+  /* For full screens of text, which need a background nothing shows through. */
+  --solid: #fbfcfd;
   --hover: rgba(20, 30, 50, 0.06);
   --selected: rgba(255, 255, 255, 0.92);
   --accent: #1a7f8e;
@@ -26,6 +28,7 @@
     --line: rgba(255, 255, 255, 0.1);
     --tint: rgba(22, 26, 33, 0.5);
     --surface: rgba(38, 44, 55, 0.82);
+    --solid: #20252e;
     --hover: rgba(255, 255, 255, 0.06);
     --selected: rgba(255, 255, 255, 0.11);
     --accent: #5ec3d2;
@@ -189,9 +192,9 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .row .act:hover { color: var(--ink); background: var(--hover); }
 .row.unread .t::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
 .row input.ren { width: 100%; min-width: 0; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--accent); border-radius: 5px; padding: 1px 5px; user-select: text; }
-.frow::before { display: none; }
-.frow .fav { display: inline-grid; place-items: center; color: var(--muted); }
-.frow .fav svg.i { width: 15px; height: 15px; }
+.frow::before, .set-row::before { display: none; }
+.frow .fav, .set-row .fav { display: inline-grid; place-items: center; color: var(--muted); }
+.frow .fav svg.i, .set-row .fav svg.i { width: 15px; height: 15px; }
 .frow .t { font-weight: 600; }
 .folder-body { display: flex; flex-direction: column; gap: 1px; padding-left: 14px; }
 .earlier .row { opacity: 0.55; }
@@ -257,7 +260,7 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .cert-meta .bad { color: var(--danger); }
 
 /* ---------- settings ---------- */
-.settings { position: absolute; inset: 0; overflow-y: auto; padding: 28px 40px 40px; background: var(--surface); user-select: text; }
+.settings { position: absolute; inset: 0; overflow-y: auto; padding: 28px 40px 40px; background: var(--solid); user-select: text; }
 .settings > * { max-width: 600px; }
 .set-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .set-head h1 { font-size: 22px; font-weight: 600; margin: 0; }
