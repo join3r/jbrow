@@ -98,7 +98,9 @@ function state(): UiState {
       summarizeAfterDays: settings.summarizeAfterDays,
       archiveAfterDays: settings.archiveAfterDays,
       pinnedExtensions: settings.pinnedExtensions,
+      restyleAgent: settings.restyle.agent,
       restyleModel: settings.restyle.model,
+      restyleCodexModel: settings.restyle.codexModel,
     },
     now: Date.now(),
   }
@@ -130,7 +132,7 @@ function pushState() {
   pushQueued = true
   queueMicrotask(() => {
     pushQueued = false
-    if (!panel.win.isDestroyed()) panel.win.webContents.send('state', state())
+    if (!panel.win.isDestroyed()) panel.ui.send('state', state())
   })
 }
 
@@ -141,8 +143,8 @@ function pushState() {
  */
 function focusAddressBar() {
   if (panel.win.isDestroyed()) return
-  panel.win.webContents.focus()
-  panel.win.webContents.send('focus-omnibox')
+  panel.ui.focus()
+  panel.ui.send('focus-omnibox')
 }
 
 /** Focus the active page, or the address bar for a new tab. Only while jbrow is on screen. */
@@ -154,7 +156,7 @@ function focusActive() {
 }
 
 function sendDownloads() {
-  if (!panel.win.isDestroyed()) panel.win.webContents.send('downloads', downloads.list())
+  if (!panel.win.isDestroyed()) panel.ui.send('downloads', downloads.list())
 }
 
 /** A link that opened a new tab only to download something leaves that tab empty; close it, as Chrome does. */
@@ -168,7 +170,7 @@ function closeDownloadOnlyTab(wc: Electron.WebContents) {
 }
 
 const toast = (text: string) => {
-  if (!panel.win.isDestroyed()) panel.win.webContents.send('toast', text)
+  if (!panel.win.isDestroyed()) panel.ui.send('toast', text)
 }
 
 // ---------- profiles and scopes ----------
@@ -408,7 +410,7 @@ function runAction(id: ActionId) {
       panel.setPinned(!panel.pinned)
       return pushState()
     case 'settings':
-      return panel.win.webContents.send('settings', {})
+      return panel.ui.send('settings', {})
     case 'devTools':
       return wc?.openDevTools({ mode: 'detach' })
   }
@@ -456,7 +458,9 @@ function updatePrefs(prefs: Partial<Prefs>) {
     settings.hideFromScreenCapture = prefs.hideFromScreenCapture
     panel.applyContentProtection()
   }
+  if (prefs.restyleAgent === 'claude' || prefs.restyleAgent === 'codex') settings.restyle = { ...settings.restyle, agent: prefs.restyleAgent }
   if (prefs.restyleModel) settings.restyle = { ...settings.restyle, model: prefs.restyleModel }
+  if (prefs.restyleCodexModel !== undefined) settings.restyle = { ...settings.restyle, codexModel: prefs.restyleCodexModel.trim() }
   if (prefs.archiveAfterDays !== undefined || prefs.summarizeAfterDays !== undefined) {
     if (prefs.archiveAfterDays !== undefined) settings.archiveAfterDays = Math.max(0, prefs.archiveAfterDays)
     if (prefs.summarizeAfterDays !== undefined) settings.summarizeAfterDays = Math.max(0, prefs.summarizeAfterDays)
@@ -501,7 +505,7 @@ function threadMenu(id: string) {
   const rec = tabs.get(id)
   if (!rec) return
   const items: Electron.MenuItemConstructorOptions[] = [
-    { label: 'Rename', click: () => panel.win.webContents.send('rename-tab', id) },
+    { label: 'Rename', click: () => panel.ui.send('rename-tab', id) },
   ]
   if (rec.url) items.push({ label: 'Copy link', click: () => clipboard.writeText(rec.url) })
   for (const p of settings.profiles) {
@@ -543,15 +547,15 @@ function newTabMenu() {
 
 function newFolder() {
   const folder = tabs.createFolder()
-  panel.win.webContents.send('rename-tab', folder.id)
+  panel.ui.send('rename-tab', folder.id)
 }
 
 function folderMenu(id: string) {
   const folder = tabs.folder(id)
   if (!folder) return
   Menu.buildFromTemplate([
-    { label: 'Rename', click: () => panel.win.webContents.send('rename-tab', id) },
-    { label: 'Auto-file rules…', click: () => panel.win.webContents.send('folder-rules', id) },
+    { label: 'Rename', click: () => panel.ui.send('rename-tab', id) },
+    { label: 'Auto-file rules…', click: () => panel.ui.send('folder-rules', id) },
     { type: 'separator' },
     { label: 'New folder', click: () => newFolder() },
     { label: 'Delete folder', click: () => tabs.deleteFolder(id) },
@@ -602,7 +606,7 @@ function appEntries(): AppEntry[] {
 
 function sendApps() {
   if (panel.win.isDestroyed()) return
-  panel.win.webContents.send('apps', { entries: appEntries(), profiles: settings.profiles })
+  panel.ui.send('apps', { entries: appEntries(), profiles: settings.profiles })
 }
 
 function setAppProfile(key: string, profile: string) {
@@ -698,7 +702,7 @@ function appMenu(key: string) {
 
 function sendShortcuts() {
   if (panel.win.isDestroyed()) return
-  panel.win.webContents.send('shortcuts', {
+  panel.ui.send('shortcuts', {
     profiles: settings.profiles,
     commands: settings.profiles.flatMap((p) => commands.list(p.id)),
   })
@@ -711,7 +715,7 @@ function sendShortcuts() {
 async function openActionPopup(profileId: string, extensionId: string) {
   if (tabs.active()?.profile !== profileId) return
   if (!panel.visible) await summon()
-  panel.win.webContents.send('run-action', extensionId)
+  panel.ui.send('run-action', extensionId)
 }
 
 function popupAt(extensionId: string, anchorRect: { x: number; y: number; width: number; height: number }) {
@@ -841,7 +845,7 @@ function wireIpc() {
   })
   on<{ on: boolean }>('overlay', ({ on: covered }) => panel.setOverlay(covered))
   on('hide', () => void panel.hide())
-  on('focus-ui', () => panel.win.webContents.focus())
+  on('focus-ui', () => panel.ui.focus())
   on('focus-page', () => focusActive())
   on('shortcuts', () => sendShortcuts())
   on('apps', () => sendApps())
@@ -910,12 +914,12 @@ function buildTray() {
         label: 'Settings',
         click: async () => {
           await summon()
-          panel.win.webContents.send('settings', { open: true })
+          panel.ui.send('settings', { open: true })
         },
       },
       { label: 'Open settings.json', click: () => void shell.openPath(settingsPath()) },
       { label: 'Show log file', click: () => { const f = logPath(); if (f) shell.showItemInFolder(f) } },
-      { label: 'Open UI DevTools', click: () => panel.win.webContents.openDevTools({ mode: 'detach' }) },
+      { label: 'Open UI DevTools', click: () => panel.ui.openDevTools({ mode: 'detach' }) },
       { label: 'Restart jbrow', click: () => (app.relaunch(), app.quit()) },
       { type: 'separator' },
       { label: 'Quit jbrow', role: 'quit' },
@@ -961,8 +965,8 @@ app.whenReady().then(async () => {
       pushState()
     },
   })
-  panel.win.webContents.on('render-process-gone', (_e, details) => console.error('[jbrow] UI renderer gone:', details))
-  panel.win.webContents.on('before-input-event', (event, input) => {
+  panel.ui.on('render-process-gone', (_e, details) => console.error('[jbrow] UI renderer gone:', details))
+  panel.ui.on('before-input-event', (event, input) => {
     if (onKey(input)) event.preventDefault()
   })
 
@@ -983,6 +987,7 @@ app.whenReady().then(async () => {
     runtime: (id) => runtimes.get(id),
     contentBounds: () => panel.contentBounds(),
     contentVisible: () => panel.pageVisible(),
+    onViewAdded: () => panel.keepOrder(),
     onChange: () => pushState(),
     onActivated: () => focusActive(),
     onKey,

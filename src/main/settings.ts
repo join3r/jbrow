@@ -2,10 +2,22 @@ import { app } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ActionId } from '../shared/shortcuts'
-import type { Profile } from '../shared/types'
+import type { Profile, RestyleAgent } from '../shared/types'
 
 export type AnimationStyle = 'materialize' | 'slide' | 'scale' | 'fade' | 'off'
 export type AnimationEase = 'spring' | 'snappy' | 'smooth'
+
+export interface RestyleSettings {
+  /** Which coding agent writes the stylesheets. */
+  agent: RestyleAgent
+  /** Claude model alias. */
+  model: string
+  /** Codex model; '' uses Codex's default. */
+  codexModel: string
+  /** The claude and codex commands; '' finds them. */
+  claudePath: string
+  codexPath: string
+}
 
 export interface Settings {
   /** Your keys for jbrow's own commands, as Electron accelerators, '' for none. Unlisted commands use their defaults (see ACTIONS). */
@@ -36,8 +48,8 @@ export interface Settings {
   pinnedExtensions: string[]
   /** Your extension shortcuts, per profile, extension ID and command: Electron accelerators, '' for none. Unlisted commands use the extension's suggestion. */
   extensionShortcuts: Record<string, Record<string, Record<string, string>>>
-  /** Restyling sites with Claude Code. `claudePath` is the claude command; '' finds it. */
-  restyle: { model: string; claudePath: string }
+  /** Restyling sites with Claude Code or Codex. */
+  restyle: RestyleSettings
 }
 
 const DEFAULTS: Settings = {
@@ -62,7 +74,7 @@ const DEFAULTS: Settings = {
   archiveAfterDays: 7,
   pinnedExtensions: [],
   extensionShortcuts: {},
-  restyle: { model: 'sonnet', claudePath: '' },
+  restyle: { agent: 'claude', model: 'sonnet', codexModel: '', claudePath: '', codexPath: '' },
 }
 
 export const settingsPath = () => path.join(app.getPath('userData'), 'settings.json')
@@ -79,6 +91,8 @@ export function loadSettings(): Settings {
     // Older settings kept the two summon keys under "hotkeys".
     const { hotkeys, ...rest } = parsed
     const settings = { ...structuredClone(DEFAULTS), ...rest }
+    // Older settings have fewer restyle keys.
+    settings.restyle = { ...DEFAULTS.restyle, ...rest.restyle }
     if (hotkeys?.all && settings.shortcuts.show === undefined) settings.shortcuts.show = hotkeys.all
     if (hotkeys?.app && settings.shortcuts.showApp === undefined) settings.shortcuts.showApp = hotkeys.app
     return settings

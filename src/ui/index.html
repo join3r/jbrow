@@ -63,25 +63,7 @@
             </div>
           </div>
           <div id="pinnedActions" class="pinned-actions"></div>
-          <div class="restyle">
-            <button id="restyleButton" class="icon" data-icon="wand" title="Restyle this site with Claude" aria-label="Restyle this site" aria-expanded="false"></button>
-            <div id="restylePop" class="pop restyle-pop" hidden>
-              <div id="restyleHead" class="pop-head"></div>
-              <textarea id="restylePrompt" rows="3" placeholder="Make it dark, hide the sidebar, bigger text…" aria-label="How this site should look"></textarea>
-              <p class="pop-help">↩ sends it to Claude with a screenshot and an outline of the page. ⇧↩ for a new line.</p>
-              <div id="restyleRunning" class="restyle-running" hidden>
-                <span id="restyleRunText"></span>
-                <button id="restyleCancel" class="link">Cancel</button>
-              </div>
-              <div id="restyleHistory" hidden>
-                <div class="pop-sep"></div>
-                <ol id="restylePrompts" class="restyle-prompts"></ol>
-                <button id="restyleUndo" class="pop-item"><span data-icon="undo"></span>Undo last change</button>
-                <button id="restyleToggle" class="pop-item"><span data-icon="eye"></span><span id="restyleToggleText"></span></button>
-                <button id="restyleReset" class="pop-item"><span data-icon="trash"></span>Remove all changes</button>
-              </div>
-            </div>
-          </div>
+          <button id="restyleButton" class="icon" data-icon="wand" title="Restyle this site" aria-label="Restyle this site" aria-expanded="false" aria-controls="restylePane"></button>
           <div class="ext">
             <button id="extButton" class="icon" data-icon="puzzle" title="Extensions" aria-label="Extensions" aria-expanded="false"></button>
             <div id="extPop" class="pop" hidden>
@@ -100,6 +82,27 @@
       <aside id="sidebar">
         <div id="scope" class="scope" hidden></div>
         <nav id="threads" aria-label="Threads"></nav>
+        <section id="restylePane" class="restyle-pane" hidden aria-label="Restyle">
+          <div class="restyle-head">
+            <span id="restyleHead"></span>
+            <button id="restyleClose" class="icon sm" data-icon="close" title="Close (Esc)" aria-label="Close restyle"></button>
+          </div>
+          <textarea id="restylePrompt" rows="4" placeholder="Make it dark, hide the sidebar, bigger text…" aria-label="How this site should look"></textarea>
+          <p id="restyleHelp" class="pop-help"></p>
+          <div id="restyleRunning" class="restyle-running" hidden>
+            <span id="restyleRunText"></span>
+            <button id="restyleCancel" class="link">Cancel</button>
+          </div>
+          <div id="restyleHistory" class="restyle-history" hidden>
+            <div class="head">Changes</div>
+            <ol id="restylePrompts" class="restyle-prompts"></ol>
+            <div class="restyle-acts">
+              <button id="restyleUndo" class="icon sm" data-icon="undo" title="Undo last change" aria-label="Undo last change"></button>
+              <button id="restyleToggle" class="icon sm" data-icon="eye" aria-pressed="false"></button>
+              <button id="restyleReset" class="icon sm" data-icon="trash" title="Remove all changes" aria-label="Remove all changes"></button>
+            </div>
+          </div>
+        </section>
         <div id="rulesPop" class="pop rules-pop" hidden>
           <div id="rulesHead" class="pop-head"></div>
           <p class="pop-help">
@@ -207,18 +210,29 @@
 
           <h2>Restyling</h2>
           <p class="help">
-            The wand in the toolbar restyles the site you're on: describe how it should look, and Claude writes a
-            stylesheet that applies to every page of that site. It runs through Claude Code with your Claude
-            subscription, so the <code>claude</code> command must be installed and signed in. Each request sends
-            Claude a screenshot of the page and an outline of its layout and text.
+            The wand in the toolbar opens restyling in the sidebar: describe how the site you're on should look, and
+            the agent writes a stylesheet that applies to every page of that site. It runs through Claude Code or Codex
+            with your subscription, so the <code>claude</code> or <code>codex</code> command must be installed and
+            signed in. Each request sends a screenshot of the page and an outline of its layout and text.
           </p>
           <div class="field">
+            <span class="label">Agent</span>
+            <div id="restyleAgent" class="seg" role="group" aria-label="Agent for restyling">
+              <button data-value="claude">Claude Code</button>
+              <button data-value="codex">Codex</button>
+            </div>
+          </div>
+          <div id="restyleClaudeModel" class="field">
             <span class="label">Model</span>
-            <div id="restyleModel" class="seg" role="group" aria-label="Model for restyling">
+            <div id="restyleModel" class="seg" role="group" aria-label="Claude model for restyling">
               <button data-value="sonnet">Sonnet</button>
               <button data-value="opus">Opus</button>
               <button data-value="haiku">Haiku</button>
             </div>
+          </div>
+          <div id="restyleCodexModelField" class="field" hidden>
+            <label class="label" for="restyleCodexModel">Model</label>
+            <input id="restyleCodexModel" class="text" spellcheck="false" placeholder="Codex's default" />
           </div>
           <div id="styledSites" class="styled-sites"></div>
 

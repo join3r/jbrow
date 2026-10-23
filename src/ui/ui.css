@@ -40,7 +40,8 @@
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; overflow: hidden; }
-body { background: var(--tint); color: var(--ink); font: 13px/1.4 var(--font); user-select: none; }
+/* The tint is #content's shadow rather than the body's background, so the page area can turn clear (see .covering). */
+body { background: none; color: var(--ink); font: 13px/1.4 var(--font); user-select: none; }
 button { font: inherit; color: inherit; cursor: default; }
 button:focus-visible, input:focus-visible, [role='button']:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 [hidden] { display: none !important; }
@@ -58,7 +59,7 @@ button:focus-visible, input:focus-visible, [role='button']:focus-visible { outli
 }
 
 /* ---------- toolbar ---------- */
-#toolbar { position: absolute; top: 0; left: 0; right: 0; height: var(--toolbar); display: flex; align-items: center; -webkit-app-region: drag; }
+#toolbar { position: absolute; z-index: 1; top: 0; left: 0; right: 0; height: var(--toolbar); display: flex; align-items: center; -webkit-app-region: drag; }
 #toolbar > *, .tools > * { -webkit-app-region: no-drag; }
 .side-tools { width: calc(var(--sidebar) - 16px); margin: 0 8px; display: flex; align-items: center; gap: 4px; }
 #filter { flex: 1; min-width: 0; }
@@ -95,7 +96,7 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .private-mask svg.i { width: 14px; height: 14px; }
 
 /* ---------- extensions popover ---------- */
-.ext, .restyle { position: relative; }
+.ext { position: relative; }
 .pinned-actions { display: flex; gap: 2px; }
 .pinned-action { position: relative; flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background-color: transparent; background-position: center; background-repeat: no-repeat; background-size: 16px; }
 .pinned-action:hover { background-color: var(--hover); }
@@ -139,17 +140,9 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .dl-acts { display: flex; align-items: center; gap: 2px; border-top: 1px solid var(--line); padding-top: 6px; }
 .dl-gap { flex: 1; }
 
-/* Restyle: the wand is tinted on a restyled site and pulses while Claude works. */
+/* Restyle: the wand is tinted on a restyled site and pulses while the agent works. */
 #restyleButton.styled { color: var(--accent); }
 #restyleButton.busy svg.i { animation: pulse 1s ease-in-out infinite; }
-.restyle-pop { width: 300px; user-select: text; }
-.restyle-pop textarea { display: block; width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 7px; background: var(--selected); color: var(--ink); padding: 6px 8px; margin-bottom: 6px; font: 13px/1.4 var(--font); }
-.restyle-pop textarea:disabled { opacity: 0.5; }
-.restyle-pop .pop-help { margin-bottom: 4px; }
-.restyle-running { display: flex; justify-content: space-between; gap: 8px; margin: 4px 6px; font-size: 12px; }
-.restyle-running span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.restyle-prompts { margin: 0 0 4px; padding: 0 6px 0 24px; max-height: 120px; overflow-y: auto; color: var(--muted); font-size: 12px; line-height: 1.45; }
-.restyle-prompts li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .suggest { position: absolute; top: 36px; left: 0; right: 0; z-index: 20; background: var(--surface); backdrop-filter: blur(20px); border: 1px solid var(--line); border-radius: 10px; padding: 4px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25); }
 .sg { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 0 10px; align-items: center; width: 100%; border: 0; background: none; text-align: left; padding: 6px 8px; border-radius: 7px; }
@@ -160,7 +153,7 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .sg-tag { grid-column: 3; grid-row: 1 / 3; font: 11px var(--mono); color: var(--muted); }
 
 /* ---------- sidebar ---------- */
-#sidebar { position: absolute; top: var(--toolbar); left: 0; bottom: 0; width: var(--sidebar); display: flex; flex-direction: column; padding: 0 8px var(--gutter); }
+#sidebar { position: absolute; z-index: 1; top: var(--toolbar); left: 0; bottom: 0; width: var(--sidebar); display: flex; flex-direction: column; padding: 0 8px var(--gutter); }
 #threads { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; padding-bottom: 8px; }
 .scope { display: flex; justify-content: space-between; align-items: center; gap: 6px; background: var(--accent-soft); color: var(--accent); border-radius: 7px; padding: 6px 9px; margin-bottom: 4px; font-size: 12px; font-weight: 600; }
 .scope button { border: 0; background: none; color: inherit; text-decoration: underline; padding: 0; font-size: 12px; }
@@ -212,6 +205,25 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .app-icons img, .app-icons .no-icon { width: 14px; height: 14px; }
 .app-icons > * + * { margin-left: -4px; }
 
+/* Restyling takes the sidebar's place of the thread list while it's open. */
+.restyle-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; user-select: text; }
+.restyle-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 0 8px 4px; font-weight: 600; }
+.restyle-head span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.restyle-pane textarea { display: block; width: 100%; flex: none; resize: vertical; border: 1px solid var(--line); border-radius: 8px; background: var(--selected); color: var(--ink); padding: 7px 9px; margin-bottom: 6px; font: 13px/1.4 var(--font); }
+.restyle-pane textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.restyle-pane textarea:disabled { opacity: 0.5; }
+.restyle-pane .pop-help { margin: 0 4px 8px; }
+.restyle-running { display: flex; justify-content: space-between; gap: 8px; margin: 0 4px 8px; font-size: 12px; }
+.restyle-running span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.restyle-history { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.restyle-history .head { padding-left: 4px; }
+.restyle-prompts { flex: 0 1 auto; min-height: 0; overflow-y: auto; margin: 0; padding: 0 4px 0 22px; font-size: 12px; line-height: 1.45; }
+.restyle-prompts li { margin-bottom: 6px; overflow-wrap: anywhere; }
+.restyle-prompts small { display: block; color: var(--muted); font-size: 11.5px; }
+.restyle-history.off .restyle-prompts { opacity: 0.5; }
+.restyle-acts { display: flex; gap: 2px; padding-top: 4px; border-top: 1px solid var(--line); }
+#sidebar.restyling > #threads, #sidebar.restyling > #scope { display: none; }
+
 /* Auto-file rules for a folder, opened from its context menu. */
 .rules-pop { left: 8px; right: 8px; width: auto; user-select: text; }
 .pop-help { color: var(--muted); font-size: 12px; line-height: 1.45; margin: 0 6px 8px; }
@@ -219,7 +231,15 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .rules-pop textarea { display: block; width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 7px; background: var(--selected); color: var(--ink); padding: 6px 8px; font: 12px var(--mono); }
 
 /* ---------- content (the native page view sits on top of this) ---------- */
-#content { position: absolute; left: var(--sidebar); top: var(--toolbar); right: var(--gutter); bottom: var(--gutter); border-radius: 9px; overflow: hidden; background: var(--surface); }
+#content { position: absolute; z-index: 0; left: var(--sidebar); top: var(--toolbar); right: var(--gutter); bottom: var(--gutter); border-radius: 9px; overflow: hidden; background: var(--surface); box-shadow: 0 0 0 100vmax var(--tint); }
+/*
+ * While a popover or the suggestions cover the page, jbrow's UI sits above the live page (see
+ * Panel.setOverlay), so the page area turns clear. Blur can't reach a page in another view, so
+ * popovers turn nearly solid instead.
+ */
+.covering #content { background: none; }
+.covering #snapshot { visibility: hidden; }
+.covering :is(.pop, .suggest) { background: color-mix(in srgb, var(--solid) 96%, transparent); }
 #snapshot { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; }
 .blank { padding: 56px 48px; max-width: 640px; }
 .blank h1 { font-size: 26px; font-weight: 600; margin: 0 0 8px; }
@@ -260,6 +280,7 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .cert-meta .bad { color: var(--danger); }
 
 /* ---------- settings ---------- */
+.field input.text { width: 100%; max-width: 240px; border: 1px solid var(--line); border-radius: 7px; background: var(--selected); color: var(--ink); padding: 5px 8px; font: 12px var(--mono); user-select: text; }
 .settings { position: absolute; inset: 0; overflow-y: auto; padding: 28px 40px 40px; background: var(--solid); user-select: text; }
 .settings > * { max-width: 600px; }
 .set-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }

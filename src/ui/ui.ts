@@ -57,7 +57,7 @@ const threadsEl = $('threads')
 const snapshot = $<HTMLImageElement>('snapshot')
 const actions = $('actions')
 const extPop = $('extPop')
-const restylePop = $('restylePop')
+const restylePane = $('restylePane')
 const restylePrompt = $<HTMLTextAreaElement>('restylePrompt')
 const settingsEl = $('settings')
 const privateMask = $('privateMask')
@@ -186,6 +186,7 @@ function render() {
       .join('')
   }
   snapshot.hidden = blank || snapshotTab !== S.activeId || !!S.cert?.blocked
+  syncCovering()
 }
 
 /**
@@ -422,11 +423,17 @@ function hideSuggestions() {
 /** The page hides while anything of jbrow's own covers it; see Panel.setOverlay. */
 let overlaySent = false
 function syncOverlay() {
-  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !restylePop.hidden || !certPop.hidden || !settingsEl.hidden
+  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !certPop.hidden || !settingsEl.hidden
   if (on !== overlaySent) {
     overlaySent = on
     send('overlay', { on })
   }
+  syncCovering()
+}
+
+/** While jbrow's UI is above a live page, the page area turns clear so the page shows through. */
+function syncCovering() {
+  root.classList.toggle('covering', overlaySent && !!activeTab()?.url && !S?.cert?.blocked)
 }
 function moveHighlight(delta: number) {
   if (!current.length) return
@@ -667,7 +674,6 @@ function setExtensions(open: boolean) {
   extPop.hidden = !open
   $('extButton').setAttribute('aria-expanded', String(open))
   if (open) {
-    setRestyle(false)
     focusUi()
     const count = actions.shadowRoot?.querySelectorAll('.action').length ?? 0
     $('extEmpty').hidden = count > 0
@@ -830,64 +836,83 @@ document.addEventListener('mousedown', (e) => {
   if (dlOpen && !(e.target as HTMLElement).closest('.downloads')) setDownload(null)
 })
 
-// ---------- restyle popover ----------
+// ---------- restyle pane ----------
 
 let restyleTimer: number | undefined
+let restyleShown = ''
 
-/** The wand's look, and the popover while it's open. */
+const agentName = () => (S?.prefs.restyleAgent === 'codex' ? 'Codex' : 'Claude')
+
+/** The wand's look, and the sidebar pane while it's open. */
 function renderRestyle() {
   if (!S) return
   const r = S.restyle
   const button = $<HTMLButtonElement>('restyleButton')
   button.disabled = !r
-  button.classList.toggle('styled', !!r && r.enabled && r.prompts.length > 0)
+  button.classList.toggle('styled', !!r && r.enabled && r.changes.length > 0)
   button.classList.toggle('busy', !!r?.running)
-  button.title = !r ? 'Restyle: only for websites' : r.running ? `Claude is restyling ${r.host}…` : `Restyle ${r.host} with Claude`
+  button.title = !r ? 'Restyle: only for websites' : r.running ? `${r.running.agent} is restyling ${r.host}…` : `Restyle ${r.host} with ${agentName()}`
   if (!r) return setRestyle(false)
-  if (restylePop.hidden) return
-  $('restyleHead').textContent = `Restyle · ${r.host}`
+  if (restylePane.hidden) return
+  $('restyleHead').textContent = `Restyle ${r.host}`
+  $('restyleHelp').textContent = `↩ sends it to ${agentName()} with a screenshot and an outline of the page. ⇧↩ for a new line.`
   restylePrompt.disabled = !!r.running
   $('restyleRunning').hidden = !r.running
   clearInterval(restyleTimer)
   if (r.running) {
-    const started = r.running.startedAt
-    const prompt = r.running.prompt
-    const tick = () => ($('restyleRunText').textContent = `Working on “${prompt}” · ${Math.round((Date.now() - started) / 1000)} s`)
+    const { startedAt, prompt, agent } = r.running
+    const tick = () => ($('restyleRunText').textContent = `${agent} is working on “${prompt}” · ${Math.round((Date.now() - startedAt) / 1000)} s`)
     tick()
     restyleTimer = window.setInterval(tick, 1000)
   }
-  $('restyleHistory').hidden = !r.prompts.length
-  $('restylePrompts').innerHTML = r.prompts.map((p) => `<li title="${esc(p)}">${esc(p)}</li>`).join('')
-  $('restylePrompts').scrollTop = 1e6
-  $('restyleToggleText').textContent = r.enabled ? 'Show the original' : 'Show restyled'
+  $('restyleHistory').hidden = !r.changes.length
+  $('restyleHistory').classList.toggle('off', !r.enabled)
+  const list = $('restylePrompts')
+  const html = r.changes.map((c) => `<li>${esc(c.prompt)}${c.note ? `<small>${esc(c.note)}</small>` : ''}</li>`).join('')
+  // Only on change, so a selection in it survives other updates.
+  if (html !== restyleShown) {
+    restyleShown = html
+    list.innerHTML = html
+    list.scrollTop = 1e6
+  }
+  const toggle = $('restyleToggle')
+  toggle.setAttribute('aria-pressed', String(!r.enabled))
+  toggle.title = r.enabled ? 'Show the original' : 'Show restyled'
+  toggle.setAttribute('aria-label', toggle.title)
 }
 
 function setRestyle(open: boolean) {
-  if (open === !restylePop.hidden) return
+  if (open === !restylePane.hidden) return
   if (open && !S?.restyle) return
-  restylePop.hidden = !open
+  restylePane.hidden = !open
+  $('sidebar').classList.toggle('restyling', open)
   $('restyleButton').setAttribute('aria-expanded', String(open))
   if (open) {
-    setExtensions(false)
+    closeRules()
     renderRestyle()
     focusUi()
     restylePrompt.focus()
-  } else clearInterval(restyleTimer)
-  syncOverlay()
+  } else {
+    clearInterval(restyleTimer)
+    restyleShown = ''
+  }
 }
 
 const restyleSite = (action: 'undo' | 'reset' | 'on' | 'off' | 'cancel') => {
   if (S?.restyle) send('restyle-site', { host: S.restyle.host, action })
 }
-$('restyleButton').addEventListener('click', () => setRestyle(!!restylePop.hidden))
+$('restyleButton').addEventListener('click', () => setRestyle(!!restylePane.hidden))
+$('restyleClose').addEventListener('click', () => {
+  setRestyle(false)
+  send('focus-page')
+})
 restylePrompt.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
   e.preventDefault()
   const prompt = restylePrompt.value.trim()
   if (!prompt || S?.restyle?.running) return
   restylePrompt.value = ''
-  // Out of the way, so the screenshot shows the page and you can watch it change.
-  setRestyle(false)
+  // The pane stays open beside the page, so you can watch it change.
   send('focus-page')
   send('restyle', { prompt })
 })
@@ -895,9 +920,6 @@ $('restyleCancel').addEventListener('click', () => restyleSite('cancel'))
 $('restyleUndo').addEventListener('click', () => restyleSite('undo'))
 $('restyleToggle').addEventListener('click', () => restyleSite(S?.restyle?.enabled ? 'off' : 'on'))
 $('restyleReset').addEventListener('click', () => restyleSite('reset'))
-document.addEventListener('mousedown', (e) => {
-  if (!restylePop.hidden && !(e.target as HTMLElement).closest('.restyle')) setRestyle(false)
-})
 
 // ---------- settings ----------
 
@@ -920,7 +942,6 @@ function showSettings(show: boolean) {
   renderThreads()
   if (show) {
     setExtensions(false)
-    setRestyle(false)
     focusUi()
     settingsEl.focus()
     renderSettings(true)
@@ -944,7 +965,12 @@ function renderSettings(all = false) {
   seg('animEase', animation.ease)
   seg('summarizeAfter', String(S.prefs.summarizeAfterDays))
   seg('archiveAfter', String(S.prefs.archiveAfterDays))
+  seg('restyleAgent', S.prefs.restyleAgent)
   seg('restyleModel', S.prefs.restyleModel)
+  const codex = S.prefs.restyleAgent === 'codex'
+  $('restyleClaudeModel').hidden = codex
+  $('restyleCodexModelField').hidden = !codex
+  if (all || document.activeElement !== restyleCodexModel) restyleCodexModel.value = S.prefs.restyleCodexModel
   renderStyledSites()
   if (all || document.activeElement !== animSpeed) animSpeed.value = String(animation.durationMs)
   $('animSpeedOut').textContent = `${animSpeed.value} ms`
@@ -992,6 +1018,12 @@ $('archiveAfter').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ archiveAfterDays: Number(b.dataset.value) })
 })
+$('restyleAgent').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b) sendPrefs({ restyleAgent: b.dataset.value as Prefs['restyleAgent'] })
+})
+const restyleCodexModel = $<HTMLInputElement>('restyleCodexModel')
+restyleCodexModel.addEventListener('change', () => sendPrefs({ restyleCodexModel: restyleCodexModel.value.trim() }))
 $('restyleModel').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ restyleModel: b.dataset.value })
@@ -1183,7 +1215,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || renaming || e.target === omnibox) return
   if (!rulesPop.hidden) closeRules()
   else if (!certPop.hidden) setCert(false)
-  else if (!restylePop.hidden) setRestyle(false)
+  else if (!restylePane.hidden) setRestyle(false)
   else if (!extPop.hidden) setExtensions(false)
   else if (dlOpen) setDownload(null)
   else if (!settingsEl.hidden) setSettings(false)
@@ -1289,7 +1321,6 @@ function setCert(open: boolean) {
   $('certButton').setAttribute('aria-expanded', String(open))
   if (open) {
     setExtensions(false)
-    setRestyle(false)
     renderCert()
     focusUi()
   } else certPopShown = ''

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen, type Rectangle } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, WebContentsView, type Rectangle, type WebContents } from 'electron'
 import path from 'node:path'
 import { bezier, EASE } from '../shared/ease'
 import type { AnimMessage } from '../shared/types'
@@ -29,6 +29,12 @@ export interface PanelHooks {
  */
 export class Panel {
   readonly win: BrowserWindow
+  /**
+   * jbrow's own UI. It lives in a view of its own rather than in the window's page, which always
+   * sits beneath every view, so it can move above the page while something of its covers it.
+   */
+  readonly ui: WebContents
+  private uiView: WebContentsView
   visible = false
   pinned = false
   private animating = false
@@ -37,7 +43,6 @@ export class Panel {
   /** Bumped by every show and hide, so an interrupted one knows to stop. */
   private run = 0
   private overlay = false
-  private overlayRun = 0
 
   constructor(private settings: () => Settings, private hooks: PanelHooks) {
     this.win = new BrowserWindow({
@@ -57,6 +62,10 @@ export class Panel {
       maximizable: false,
       fullscreenable: false,
       skipTaskbar: true,
+      // The window's own page stays empty; the UI is in uiView.
+      webPreferences: { sandbox: true, contextIsolation: true },
+    })
+    this.uiView = new WebContentsView({
       webPreferences: {
         preload: path.join(__dirname, 'preload-ui.js'),
         sandbox: true,
@@ -65,11 +74,18 @@ export class Panel {
         backgroundThrottling: false,
       },
     })
+    this.uiView.setBackgroundColor('#00000000')
+    this.ui = this.uiView.webContents
+    this.win.contentView.addChildView(this.uiView)
+    this.fitUi()
     this.win.setAlwaysOnTop(true, 'floating')
     this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     this.applyContentProtection()
-    void this.win.loadFile(path.join(__dirname, 'ui', 'index.html'))
-    this.win.on('resize', () => this.hooks.setPageVisible(this.pageVisible()))
+    void this.ui.loadFile(path.join(__dirname, 'ui', 'index.html'))
+    this.win.on('resize', () => {
+      this.fitUi()
+      this.hooks.setPageVisible(this.pageVisible())
+    })
     // A panel never activates jbrow on its own, so a pinned one does it when clicked.
     this.win.on('focus', () => this.pinned && app.focus({ steal: true }))
   }
@@ -107,7 +123,12 @@ export class Panel {
   }
 
   pageVisible() {
-    return this.visible && !this.animating && !this.overlay
+    return this.visible && !this.animating
+  }
+
+  private fitUi() {
+    const [width, height] = this.win.getContentSize()
+    this.uiView.setBounds({ x: 0, y: 0, width, height })
   }
 
   /** JBROW_ALLOW_CAPTURE=1 lets you screenshot jbrow while developing. */
@@ -117,18 +138,20 @@ export class Panel {
 
   /**
    * The UI asks for this while something of its own (suggestions, the extensions list, settings)
-   * covers the page area. The native page would sit on top of it, so the page hides and a
-   * snapshot of it stands in.
+   * covers the page area. The UI moves above the page, which stays live beneath it: a video keeps
+   * playing, and nothing waits on a screenshot. Re-adding a view only reorders it; focus stays.
    */
-  async setOverlay(on: boolean) {
-    const run = ++this.overlayRun
-    if (on && !this.overlay && this.pageVisible()) {
-      const snap = await this.hooks.capture()
-      if (run !== this.overlayRun || this.win.isDestroyed()) return
-      if (snap) this.win.webContents.send('snapshot', snap)
-    }
+  setOverlay(on: boolean) {
+    if (on === this.overlay || this.win.isDestroyed()) return
     this.overlay = on
-    this.hooks.setPageVisible(this.pageVisible())
+    this.keepOrder()
+  }
+
+  /** Puts the UI back where it belongs after a page view was added, which lands on top. */
+  keepOrder() {
+    if (this.win.isDestroyed()) return
+    if (this.overlay) this.win.contentView.addChildView(this.uiView)
+    else this.win.contentView.addChildView(this.uiView, 0)
   }
 
   private placeOnPointerDisplay() {
@@ -153,7 +176,7 @@ export class Panel {
         ipcMain.removeListener(channel, listener)
         resolve()
       }
-      const listener = (e: Electron.IpcMainEvent) => e.sender === this.win.webContents && done()
+      const listener = (e: Electron.IpcMainEvent) => e.sender === this.ui && done()
       const timer = setTimeout(done, ms)
       ipcMain.on(channel, listener)
     })
@@ -162,7 +185,7 @@ export class Panel {
   private send(phase: AnimMessage['phase']): AnimMessage {
     const { style, durationMs, ease } = this.settings().animation
     const msg: AnimMessage = { phase, style, durationMs: phase === 'out' ? Math.round(durationMs * 0.7) : durationMs, ease }
-    this.win.webContents.send('anim', msg)
+    this.ui.send('anim', msg)
     return msg
   }
 
@@ -235,12 +258,11 @@ export class Panel {
     const run = ++this.run
     this.visible = false
     this.animating = true
-    this.overlay = false
-    this.overlayRun++
+    this.setOverlay(false)
     this.hooks.onHiding()
     // Capture while the page is still on screen, without making hiding wait for it.
     void this.hooks.capture().then((snap) => {
-      if (snap && !this.win.isDestroyed()) this.win.webContents.send('snapshot', snap)
+      if (snap && !this.win.isDestroyed()) this.ui.send('snapshot', snap)
     })
     const msg = this.send('out')
     await this.fade(1, 0, msg.style === 'off' ? 0 : msg.durationMs, (t) => t * t)

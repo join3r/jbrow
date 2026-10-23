@@ -90,7 +90,9 @@ export interface Prefs {
   archiveAfterDays: number
   pinnedExtensions: string[]
   /** Claude model alias for restyling sites. */
+  restyleAgent: RestyleAgent
   restyleModel: string
+  restyleCodexModel: string
 }
 
 /** A site's certificate and what's wrong with it, if anything. */
@@ -123,14 +125,16 @@ export interface CertInfo {
   names: string[]
 }
 
-/** One site's restyle, as the restyle popover shows it. */
+export type RestyleAgent = 'claude' | 'codex'
+
+/** One site's restyle, as the restyle pane shows it. */
 export interface RestyleView {
   host: string
-  /** What you asked for so far, oldest first. */
-  prompts: string[]
+  /** What you asked for so far and what the agent said it changed, oldest first. */
+  changes: { prompt: string; note: string }[]
   enabled: boolean
-  /** A request Claude is working on now. */
-  running: { prompt: string; startedAt: number } | null
+  /** A request an agent is working on now, with the agent's name. */
+  running: { prompt: string; startedAt: number; agent: string } | null
 }
 
 export interface StyledSite {

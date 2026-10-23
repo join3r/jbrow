@@ -18,8 +18,10 @@ export interface TabsDeps {
   window: () => BrowserWindow
   runtime: (profileId: string) => ProfileRuntime | undefined
   contentBounds: () => Rectangle
-  /** False while the panel animates or an overlay covers the page; the active view stays hidden. */
+  /** False while the panel animates or is hidden; the active view stays hidden. */
   contentVisible: () => boolean
+  /** A new view lands on top of everything; this puts jbrow's UI back where it belongs. */
+  onViewAdded: () => void
   onChange: () => void
   /** Called after a tab becomes active, to move keyboard focus to it. */
   onActivated: () => void
@@ -199,6 +201,7 @@ export class Tabs {
     view.setBorderRadius(9)
     const win = this.deps.window()
     win.contentView.addChildView(view)
+    this.deps.onViewAdded()
     const live: LiveTab = { view, loading: false }
     this.live.set(rec.id, live)
     this.wire(rec.id, view.webContents, rt)
