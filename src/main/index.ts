@@ -622,10 +622,7 @@ const tabHooks: TabHooks = (profileId) => ({
     if (!wc) throw new Error('jbrow could not create a tab')
     return [wc, panel.win]
   },
-  selectTab: (wc) => {
-    const id = tabs.idForWebContents(wc)
-    if (id) tabs.activate(id)
-  },
+  selectTab: (wc) => tabs.selectFromExtension(wc),
   removeTab: (wc) => tabs.closeWebContents(wc),
   // Extensions such as Bitwarden pop out into their own small window.
   createWindow: async (details) => {

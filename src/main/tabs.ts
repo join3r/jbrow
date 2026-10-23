@@ -59,6 +59,8 @@ export class Tabs {
   private saveTimer: NodeJS.Timeout | null = null
   /** Most recently used first, for ⌃Tab. */
   private mru: string[] = []
+  /** Set while jbrow hands a new view to the extensions library, which marks every new tab active. */
+  private addingView = false
 
   constructor(private deps: TabsDeps) {}
 
@@ -190,7 +192,15 @@ export class Tabs {
     const live: LiveTab = { view, loading: false }
     this.live.set(rec.id, live)
     this.wire(rec.id, view.webContents, rt)
-    rt.extensions.addTab(view.webContents, win)
+    this.addingView = true
+    try {
+      rt.extensions.addTab(view.webContents, win)
+      // Tell the library which tab is really in front, or a background tab would count as active.
+      const active = this.activeId !== rec.id ? this.live.get(this.activeId ?? '') : undefined
+      if (active && this.active()?.profile === rec.profile) rt.extensions.selectTab(active.view.webContents)
+    } finally {
+      this.addingView = false
+    }
     if (!guest && rec.url) void view.webContents.loadURL(rec.url).catch(() => {})
     return live
   }
@@ -303,6 +313,13 @@ export class Tabs {
     ])
     for (const item of extensionItems) menu.insert(menu.items.length - 2, item)
     menu.popup({ window: this.deps.window() })
+  }
+
+  /** An extension (chrome.tabs.update) or the extensions library wants this tab in front. */
+  selectFromExtension(wc: WebContents) {
+    if (this.addingView) return
+    const id = this.idForWebContents(wc)
+    if (id) this.activate(id)
   }
 
   activate(id: string) {
