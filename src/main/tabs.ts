@@ -580,6 +580,12 @@ export class Tabs {
     return unloaded
   }
 
+  /** Drops a deleted profile's archived threads. Its open tabs are closed first. */
+  forgetProfile(profileId: string) {
+    this.archived = this.archived.filter((t) => t.profile !== profileId)
+    this.changed()
+  }
+
   /** Brings an archived tab's whole thread back and makes that tab active. */
   restore(id: string) {
     const rec = this.archived.find((t) => t.id === id)

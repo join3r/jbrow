@@ -93,6 +93,8 @@ export interface Prefs {
   restyleAgent: RestyleAgent
   restyleModel: string
   restyleCodexModel: string
+  /** Profile for links from other apps and new tabs when nothing else decides. */
+  defaultProfile: string
 }
 
 /** A site's certificate and what's wrong with it, if anything. */

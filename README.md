@@ -14,6 +14,37 @@ node node_modules/electron/install.js          # if the Electron binary didn't d
 npm start
 ```
 
+## Install it
+
+```sh
+npm run dist        # builds release/jbrow-0.1.0-arm64.dmg and release/mac-arm64/jbrow.app
+```
+
+Or let `scripts/install.sh` (`npm run install-app`) do it all. It builds the app, quits the jbrow
+that's running, whether installed or from `npm start`, installs the new one into Applications and
+starts it. Instances running with `JBROW_USER_DATA` keep running.
+
+Drag `jbrow.app` from the DMG (or `release/mac-arm64/`) into Applications, quit the jbrow you ran
+from source and open the installed one. It uses the same tabs, profiles and logins. The app is
+signed with the first Developer ID identity in your keychain. It's notarized only when
+electron-builder finds Apple credentials in the environment (`APPLE_KEYCHAIN_PROFILE`, or
+`APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`). A copy you build yourself doesn't
+need notarizing; one you send to someone else does. There are no automatic updates: run
+`npm run dist` again and replace the app.
+
+The installed app is locked down with Electron fuses (`electronFuses` in package.json). It can't be
+run as Node or with `--inspect`, and local pages get only Chrome's rights. An HTML file you open in
+jbrow can't read other files on your Mac. That's also why the UI lives outside `app.asar`
+(`asarUnpack`): file:// pages can no longer read inside it.
+
+Under **Default browser** in settings, **Make jbrow the default browser** asks macOS to switch. From
+then on, links from other apps open in jbrow, which comes up on them. Each link opens in the
+profile set for its app under **Apps**, otherwise in the default profile, and lands in that app's
+section of the sidebar. HTML files opened with jbrow work the same way. Only the installed app can
+be the default browser, not `npm start`.
+
+To change the icon, edit `build/icon.svg` and run `npm run icon`.
+
 If jbrow disappears a few seconds after you hide it, something is quitting apps that have no
 open windows, which is jbrow's normal state. Vorssaint does this; add jbrow to its exceptions
 (while developing, jbrow runs as **Electron**, bundle ID `com.github.Electron`). The log shows
@@ -103,7 +134,7 @@ Sonnet takes about 10 seconds. Styles are kept in `styles.json` next to `setting
 
 ## Settings
 
-The settings screen (⌘, or the sliders icon) covers the summon animation, archiving, apps, restyling, private
+The settings screen (⌘, or the sliders icon) covers profiles, the default browser, the summon animation, archiving, apps, restyling, private
 addresses, screen sharing, jbrow's own shortcuts and extension shortcuts, and changes there apply right away. Private addresses: any address that contains
 one of your patterns (`*` matches anything, e.g. `*.corp.example`) shows as **Private** in the
 address bar, the tab list tooltips and the address suggestions until you click the address bar.
@@ -112,7 +143,11 @@ Page titles still show.
 Everything is stored in `~/Library/Application Support/jbrow/settings.json`, written with defaults
 on first run. Restart jbrow after editing the file by hand (menu bar item, **Restart jbrow**).
 
-- `profiles`: names and colors. Each profile has its own logins, cookies and extensions.
+- `profiles`: names and colors. Each profile has its own logins, cookies and extensions. Manage them
+  under **Profiles** in settings: rename one, change its color, add one, and right-click one to make
+  it the default (`defaultProfile`, for links from other apps and for new tabs when nothing else
+  decides) or delete it. Deleting closes its tabs and erases its logins, site data, extensions and
+  site permissions.
 - `appProfiles`: default profile per app bundle ID, for links from and new tabs in that app's view.
   Set it under **Apps** in settings.
 - `linkedApps`: groups of bundle IDs that share one set of tabs for ⌥⇧Space. Under **Apps**,
@@ -170,10 +205,8 @@ The log is at `~/Library/Logs/jbrow/main.log` (menu bar item, **Show log file**)
 
 ## Not built yet
 
-- Opening links from other apps (needs a packaged app that declares itself a browser), including
-  the quiet background opening for links you didn't click.
+- Quiet background opening for links you didn't click. Every link from another app brings jbrow up.
 - Undo for archiving (reopening from the address bar is the way back for now).
-- A settings screen entry for profiles; they're settings.json only.
 - PiP when hiding a playing video.
 - Known rough edges: the native page view can't take part in the CSS animation, so a snapshot of
   the page animates in its place; and the panel opens at a fixed fraction of the screen.

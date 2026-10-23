@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, M
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { numberedThreads, rootOf, sections } from '../shared/threads'
-import type { AppEntry, AppLabel, Prefs, UiState } from '../shared/types'
+import type { AppEntry, AppLabel, Prefs, Profile, UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
 import { Certificates } from './certs'
 import { ExtensionCommands } from './commands'
@@ -13,10 +13,12 @@ import { Panel } from './panel'
 import { SitePermissions } from './permissions'
 import { MiniPlayer } from './pip'
 import { pickShareSource } from './screenshare'
-import { installTestExtensions, loadUnpacked, partitionFor, setupProfiles, type ProfileRuntime, type TabHooks } from './profiles'
+import { installTestExtensions, loadUnpacked, partitionFor, setupProfile, setupProfiles, type ProfileDeps, type ProfileRuntime, type TabHooks } from './profiles'
 import { Restyler } from './restyle'
 import { loadSettings, saveSettings, scopeForApp, settingsPath, type Settings } from './settings'
 import { Tabs } from './tabs'
+import { rm } from 'node:fs/promises'
+import { pathToFileURL } from 'node:url'
 
 const AWAY_FOCUS_MS = 60 * 1000
 const AWAY_FRESH_MS = 4 * 60 * 60 * 1000
@@ -32,6 +34,8 @@ let commands: ExtensionCommands
 let downloads: Downloads
 let restyler: Restyler
 let certs: Certificates
+let permissions: SitePermissions
+let profileDeps: ProfileDeps
 /** The settings screen is recording a shortcut: key presses go to it, not to jbrow or extensions. */
 let recordingShortcut = false
 
@@ -69,6 +73,20 @@ app.on('before-quit', () => console.log('[jbrow] quitting'))
 
 if (!app.requestSingleInstanceLock()) app.quit()
 
+// Links and HTML files from other apps, once jbrow is the default browser (only the packaged app
+// can be). macOS can send them before jbrow is ready, when it launches jbrow to open one.
+let started = false
+const waitingLinks: string[] = []
+const openLink = (url: string) => (started ? void openFromApp(url) : waitingLinks.push(url))
+app.on('open-url', (event, url) => {
+  event.preventDefault()
+  openLink(url)
+})
+app.on('open-file', (event, file) => {
+  event.preventDefault()
+  openLink(pathToFileURL(file).href)
+})
+
 // ---------- state for the UI ----------
 
 function state(): UiState {
@@ -101,6 +119,7 @@ function state(): UiState {
       restyleAgent: settings.restyle.agent,
       restyleModel: settings.restyle.model,
       restyleCodexModel: settings.restyle.codexModel,
+      defaultProfile: settings.defaultProfile,
     },
     now: Date.now(),
   }
@@ -582,6 +601,183 @@ function certAction(action: 'proceed' | 'back' | 'distrust') {
   }
 }
 
+// ---------- links from other apps ----------
+
+/**
+ * Opens a link another app handed to jbrow, in that app's profile and its section of the sidebar,
+ * and brings jbrow up on it. The app the link came from is still in front when it arrives.
+ */
+async function openFromApp(url: string) {
+  const front = await frontmostApp()
+  const from = front && front.pid !== process.pid ? front : null
+  let fields = {}
+  if (from) {
+    lastFront = from
+    apps.note(from.bundleId, from.name)
+    const key = scopeForApp(settings, from.bundleId)
+    fields = { scope: key, scopeName: scopeName(key), app: from.bundleId }
+  }
+  const profile = (from && settings.appProfiles[from.bundleId]) || settings.defaultProfile
+  if (filter !== 'all' && filter !== profile) filter = 'all'
+  if (scope && scope.key !== (fields as { scope?: string }).scope) scope = null
+  if (!panel.visible) sweep()
+  tabs.create({ profile, url, ...fields })
+  pushState()
+  await panel.show()
+  focusActive()
+}
+
+/** Whether jbrow opens web links: 'dev' when it runs from source, which macOS won't offer. */
+function sendDefaultBrowser() {
+  if (panel.win.isDestroyed()) return
+  const status = !app.isPackaged ? 'dev' : app.isDefaultProtocolClient('https') ? 'yes' : 'no'
+  panel.ui.send('default-browser', status)
+}
+
+/** macOS asks you to confirm; the status updates once you answer. */
+function makeDefaultBrowser() {
+  if (!app.isPackaged) return
+  app.setAsDefaultProtocolClient('http')
+  app.setAsDefaultProtocolClient('https')
+  for (const ms of [1000, 3000, 8000]) setTimeout(sendDefaultBrowser, ms)
+}
+
+// ---------- profiles ----------
+
+const PROFILE_COLORS = ['#2f9aab', '#d0679a', '#7a6ad8', '#d9822b', '#3f9d5a', '#c4483f', '#5b7fa6', '#a08a2a']
+/** IDs of profiles deleted this run. Their sessions live on until quit, so a new profile can't reuse one. */
+const retiredProfiles = new Set<string>()
+
+function sendProfiles() {
+  pushState()
+  sendApps()
+  sendShortcuts()
+}
+
+/** Wires a profile's session into downloads, certificates and the extension button menu. */
+function attachProfile(rt: ProfileRuntime) {
+  downloads.attach(rt.session, rt.profile.id)
+  certs.attach(rt.session, rt.profile.id)
+  // Pin and unpin from the menu an extension's button shows on right-click (see scripts/patch-deps.mjs).
+  rt.extensions.on('jbrow-action-context-menu', ({ menu, extensionId }: { menu: Menu; extensionId: string }) => {
+    const pinned = settings.pinnedExtensions.includes(extensionId)
+    menu.append(new MenuItem({ type: 'separator' }))
+    menu.append(new MenuItem({ label: pinned ? 'Unpin from toolbar' : 'Pin to toolbar', click: () => togglePinnedExtension(extensionId) }))
+  })
+}
+
+let addingProfile = false
+async function addProfile() {
+  if (addingProfile) return
+  addingProfile = true
+  try {
+    const taken = (id: string) => settings.profiles.some((p) => p.id === id) || retiredProfiles.has(id)
+    let n = settings.profiles.length + 1
+    while (taken(`profile-${n}`)) n++
+    const used = new Set(settings.profiles.map((p) => p.color))
+    const profile: Profile = {
+      id: `profile-${n}`,
+      name: `Profile ${n}`,
+      color: PROFILE_COLORS.find((c) => !used.has(c)) ?? PROFILE_COLORS[n % PROFILE_COLORS.length],
+    }
+    const rt = await setupProfile(profile, settings, profileDeps)
+    settings.profiles.push(profile)
+    saveSettings(settings)
+    runtimes.set(profile.id, rt)
+    attachProfile(rt)
+    commands.watchProfile(rt)
+    sendProfiles()
+    panel.ui.send('rename-profile', profile.id)
+  } catch (error) {
+    console.error('[profiles] could not add a profile:', error)
+    toast(`Couldn't add a profile: ${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    addingProfile = false
+  }
+}
+
+function updateProfile(id: string, change: { name?: string; color?: string }) {
+  const profile = settings.profiles.find((p) => p.id === id)
+  if (!profile) return
+  const name = change.name?.trim()
+  if (name) profile.name = name
+  if (change.color && /^#[0-9a-f]{6}$/i.test(change.color)) profile.color = change.color
+  saveSettings(settings)
+  sendProfiles()
+}
+
+function setDefaultProfile(id: string) {
+  if (!settings.profiles.some((p) => p.id === id)) return
+  settings.defaultProfile = id
+  saveSettings(settings)
+  pushState()
+}
+
+/**
+ * Deletes a profile after asking: its tabs close and its cookies, logins, site data, extensions
+ * and site permissions are erased. The last profile can't go.
+ */
+async function deleteProfile(id: string) {
+  const profile = settings.profiles.find((p) => p.id === id)
+  const rt = runtimes.get(id)
+  if (!profile || !rt || settings.profiles.length < 2) return
+  const open = tabs.records.filter((t) => t.profile === id).length
+  const { response } = await dialog.showMessageBox(panel.win, {
+    type: 'warning',
+    message: `Delete ${profile.name}?`,
+    detail:
+      (open ? `Its ${open} ${open === 1 ? 'tab closes' : 'tabs close'}, and its` : 'Its') +
+      ' logins, cookies, site data, extensions and site permissions are erased. This cannot be undone.',
+    buttons: ['Cancel', 'Delete profile'],
+    defaultId: 0,
+    cancelId: 0,
+  })
+  if (response !== 1) return
+
+  // Children first, so closing a tab never hands its children to another tab of this profile.
+  const doomed = tabs.records.filter((t) => t.profile === id)
+  for (const t of doomed.reverse()) tabs.close(t.id)
+  tabs.forgetProfile(id)
+
+  settings.profiles = settings.profiles.filter((p) => p.id !== id)
+  if (settings.defaultProfile === id) settings.defaultProfile = settings.profiles[0].id
+  for (const [bundleId, p] of Object.entries(settings.appProfiles)) if (p === id) delete settings.appProfiles[bundleId]
+  delete settings.unpackedExtensions[id]
+  delete settings.extensionShortcuts[id]
+  saveSettings(settings)
+  permissions.forgetProfile(id)
+  runtimes.delete(id)
+  retiredProfiles.add(id)
+  if (filter === id) filter = 'all'
+  commands.refresh()
+  commands.registerGlobal()
+  if (!tabs.active()) tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
+  sendProfiles()
+
+  for (const ext of rt.session.extensions.getAllExtensions()) rt.session.extensions.removeExtension(ext.id)
+  await Promise.all([rt.session.clearStorageData(), rt.session.clearCache(), rt.session.clearAuthCache()]).catch((error) =>
+    console.error(`[profiles] ${id}: could not erase its data:`, error),
+  )
+  await rm(rt.extensionsPath, { recursive: true, force: true }).catch(() => {})
+  toast(`Deleted ${profile.name}.`)
+}
+
+function profileMenu(id: string) {
+  const profile = settings.profiles.find((p) => p.id === id)
+  if (!profile) return
+  Menu.buildFromTemplate([
+    { label: 'Rename', click: () => panel.ui.send('rename-profile', id) },
+    { label: 'Use for links and new tabs', type: 'checkbox', checked: settings.defaultProfile === id, click: () => setDefaultProfile(id) },
+    { label: `New tab in ${profile.name}`, click: () => {
+      tabs.create({ profile: id, ...scopeFields() })
+      panel.ui.send('settings', { open: false })
+      focusAddressBar()
+    } },
+    { type: 'separator' },
+    { label: 'Delete profile…', enabled: settings.profiles.length > 1, click: () => void deleteProfile(id) },
+  ]).popup({ window: panel.win })
+}
+
 // ---------- apps ----------
 
 /** Rows for the Apps list in settings: every app with threads, a profile or a link. */
@@ -852,6 +1048,12 @@ function wireIpc() {
   on<{ key: string; profile: string }>('app-profile', ({ key, profile }) => setAppProfile(key, profile))
   on<{ key: string }>('app-menu', ({ key }) => appMenu(key))
   on('add-app', () => void addApp())
+  on('add-profile', () => void addProfile())
+  on<{ id: string; name?: string; color?: string }>('profile', ({ id, ...change }) => updateProfile(id, change))
+  on<{ id: string }>('profile-menu', ({ id }) => profileMenu(id))
+  on<{ id: string }>('default-profile', ({ id }) => setDefaultProfile(id))
+  on('default-browser', () => sendDefaultBrowser())
+  on('make-default-browser', () => makeDefaultBrowser())
   on<{ on: boolean }>('recording-shortcut', ({ on: recording }) => setRecording(recording))
   on<{ id: ActionId; shortcut: string }>('set-action-key', ({ id, shortcut }) => {
     const error = setActionKey(id, shortcut)
@@ -970,7 +1172,7 @@ app.whenReady().then(async () => {
     if (onKey(input)) event.preventDefault()
   })
 
-  const permissions = new SitePermissions(() => panel.win)
+  permissions = new SitePermissions(() => panel.win)
   restyler = new Restyler({
     settings: () => settings.restyle,
     pages: () => tabs.pages(),
@@ -1005,19 +1207,9 @@ app.whenReady().then(async () => {
   })
 
   wireIpc()
-  runtimes = await setupProfiles(settings, tabHooks, (callback) => void pickShareSource(panel.win, callback), permissions)
-  for (const rt of runtimes.values()) {
-    downloads.attach(rt.session, rt.profile.id)
-    certs.attach(rt.session, rt.profile.id)
-  }
-  // Pin and unpin from the menu an extension's button shows on right-click (see scripts/patch-deps.mjs).
-  for (const rt of runtimes.values()) {
-    rt.extensions.on('jbrow-action-context-menu', ({ menu, extensionId }: { menu: Menu; extensionId: string }) => {
-      const pinned = settings.pinnedExtensions.includes(extensionId)
-      menu.append(new MenuItem({ type: 'separator' }))
-      menu.append(new MenuItem({ label: pinned ? 'Unpin from toolbar' : 'Pin to toolbar', click: () => togglePinnedExtension(extensionId) }))
-    })
-  }
+  profileDeps = { hooks: tabHooks, pickShareSource: (callback) => void pickShareSource(panel.win, callback), permissions }
+  runtimes = await setupProfiles(settings, profileDeps)
+  for (const rt of runtimes.values()) attachProfile(rt)
 
   commands = new ExtensionCommands(() => settings, () => runtimes, {
     save: () => saveSettings(settings),
@@ -1057,6 +1249,8 @@ app.whenReady().then(async () => {
     const results = await installTestExtensions(installInto)
     console.log(`[extensions] ${installInto.profile.id}:\n  ${results.join('\n  ')}`)
   }
+  started = true
+  for (const url of waitingLinks.splice(0)) await openFromApp(url)
   // `npm start -- --show` summons the panel right away, handy while developing.
   if (process.argv.includes('--show')) setTimeout(() => void onHotkey(), 600)
 })

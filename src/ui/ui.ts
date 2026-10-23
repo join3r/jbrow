@@ -947,6 +947,7 @@ function showSettings(show: boolean) {
     renderSettings(true)
     send('shortcuts')
     send('apps')
+    send('default-browser')
   } else {
     stopRecording()
     savePrivateUrls()
@@ -972,6 +973,7 @@ function renderSettings(all = false) {
   $('restyleCodexModelField').hidden = !codex
   if (all || document.activeElement !== restyleCodexModel) restyleCodexModel.value = S.prefs.restyleCodexModel
   renderStyledSites()
+  renderProfiles()
   if (all || document.activeElement !== animSpeed) animSpeed.value = String(animation.durationMs)
   $('animSpeedOut').textContent = `${animSpeed.value} ms`
   for (const id of ['animSpeed', 'animEase', 'animPreview']) $(id).closest('.field')!.classList.toggle('off', animation.style === 'off')
@@ -1056,6 +1058,100 @@ hideCapture.addEventListener('change', () => sendPrefs({ hideFromScreenCapture: 
 $('openSettingsFile').addEventListener('click', () => send('open-settings-file'))
 $('settingsButton').addEventListener('click', () => setSettings(!!settingsEl.hidden))
 $('closeSettings').addEventListener('click', () => setSettings(false))
+// ---------- profiles ----------
+
+const profileListEl = $('profileList')
+/** A profile to rename once its row shows: a new one arrives in the state after the request to rename it. */
+let renameProfile: string | null = null
+
+function renderProfiles() {
+  if (!S) return
+  const counts = new Map<string, number>()
+  for (const t of S.tabs) if (t.url) counts.set(t.profile, (counts.get(t.profile) ?? 0) + 1)
+  const rows = [...profileListEl.querySelectorAll<HTMLElement>('[data-profile]')]
+  // Rebuilt only when profiles come or go, so a name being typed isn't replaced under you.
+  if (rows.map((r) => r.dataset.profile).join() !== S.profiles.map((p) => p.id).join()) {
+    profileListEl.innerHTML = S.profiles
+      .map(
+        (p) => `<div class="profile-row" data-profile="${esc(p.id)}">
+          <label class="swatch" title="Color"><input type="color" aria-label="Color of ${esc(p.name)}"></label>
+          <input class="name" spellcheck="false" aria-label="Name">
+          <em></em>
+        </div>`,
+      )
+      .join('')
+  }
+  for (const p of S.profiles) {
+    const row = profileListEl.querySelector<HTMLElement>(`[data-profile="${CSS.escape(p.id)}"]`)!
+    const name = row.querySelector<HTMLInputElement>('.name')!
+    const color = row.querySelector<HTMLInputElement>('input[type=color]')!
+    if (document.activeElement !== name) name.value = p.name
+    if (document.activeElement !== color) color.value = p.color
+    row.querySelector<HTMLElement>('.swatch')!.style.background = color.value
+    const n = counts.get(p.id) ?? 0
+    const notes = [n ? `${n} ${n === 1 ? 'tab' : 'tabs'}` : 'no tabs', p.id === S.prefs.defaultProfile ? 'default' : '']
+    row.querySelector('em')!.textContent = notes.filter(Boolean).join(' · ')
+    if (renameProfile === p.id) {
+      renameProfile = null
+      name.focus()
+      name.select()
+    }
+  }
+}
+
+const profileOf = (el: EventTarget | null) => (el as HTMLElement | null)?.closest<HTMLElement>('[data-profile]')?.dataset.profile
+function saveProfileName(input: HTMLInputElement) {
+  const id = profileOf(input)
+  const cur = S?.profiles.find((p) => p.id === id)
+  const name = input.value.trim()
+  if (!cur) return
+  if (!name) input.value = cur.name
+  else if (name !== cur.name) send('profile', { id, name })
+}
+profileListEl.addEventListener('change', (e) => {
+  const input = e.target as HTMLInputElement
+  if (input.classList.contains('name')) saveProfileName(input)
+  else if (input.type === 'color') send('profile', { id: profileOf(input), color: input.value })
+})
+// The color well updates live while you pick, and is saved when the picker closes.
+profileListEl.addEventListener('input', (e) => {
+  const input = e.target as HTMLInputElement
+  if (input.type === 'color') (input.parentElement as HTMLElement).style.background = input.value
+})
+profileListEl.addEventListener('keydown', (e) => {
+  const input = e.target as HTMLInputElement
+  if (!input.classList.contains('name')) return
+  if (e.key === 'Enter') input.blur()
+  else if (e.key === 'Escape') {
+    e.stopPropagation()
+    input.value = S?.profiles.find((p) => p.id === profileOf(input))?.name ?? input.value
+    input.blur()
+  }
+})
+profileListEl.addEventListener('contextmenu', (e) => {
+  const id = profileOf(e.target)
+  if (!id) return
+  e.preventDefault()
+  send('profile-menu', { id })
+})
+$('addProfile').addEventListener('click', () => send('add-profile'))
+window.jbrow.on('rename-profile', (id: string) => {
+  renameProfile = id
+  setSettings(true)
+  renderProfiles()
+})
+
+window.jbrow.on('default-browser', (status: 'yes' | 'no' | 'dev') => {
+  $('defaultBrowser').innerHTML =
+    status === 'yes'
+      ? 'jbrow is your default browser. Links from other apps open in the profile set for that app under <b>Apps</b>, else in the default profile, in that app\'s section of the sidebar.'
+      : status === 'no'
+        ? 'Links from other apps open in another browser. Make jbrow the default and they open here, in the profile set for that app under <b>Apps</b>, else in the default profile.'
+        : 'Only the installed app can be the default browser, not jbrow running from source. Build it with <code>npm run dist</code>.'
+  $('makeDefault').hidden = status !== 'no'
+})
+$('makeDefault').addEventListener('click', () => send('make-default-browser'))
+
 // ---------- apps ----------
 
 const appListEl = $('appList')

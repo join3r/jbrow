@@ -12,7 +12,10 @@
     "build": "node scripts/patch-deps.mjs && node build.mjs",
     "start": "npm run setup && electron .",
     "dev": "npm run setup && JBROW_DEBUG=1 electron .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dist": "npm run setup && electron-builder --mac",
+    "icon": "sips -s format png build/icon.svg --out build/icon.png",
+    "install-app": "scripts/install.sh"
   },
   "dependencies": {
     "electron-chrome-extensions": "4.9.0",
@@ -22,7 +25,77 @@
     "@types/chrome": "0.3.4",
     "@types/node": "22.19.0",
     "electron": "44.7.0",
+    "electron-builder": "26.17.0",
     "esbuild": "0.28.2",
     "typescript": "7.0.2"
+  },
+  "build": {
+    "appId": "sk.awantech.jbrow",
+    "productName": "jbrow",
+    "copyright": "© Vladimir Schmotzer",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "LSUIElement": true,
+        "NSCameraUsageDescription": "A site you visit wants to use the camera. jbrow asks you first.",
+        "NSMicrophoneUsageDescription": "A site you visit wants to use the microphone. jbrow asks you first.",
+        "NSLocationUsageDescription": "A site you visit wants your location. jbrow asks you first.",
+        "NSLocationWhenInUseUsageDescription": "A site you visit wants your location. jbrow asks you first.",
+        "NSBluetoothAlwaysUsageDescription": "A site you visit wants to use a Bluetooth device."
+      }
+    },
+    "protocols": [
+      {
+        "name": "Web site URL",
+        "schemes": [
+          "http",
+          "https"
+        ],
+        "role": "Viewer"
+      }
+    ],
+    "fileAssociations": [
+      {
+        "ext": [
+          "html",
+          "htm",
+          "xhtml",
+          "shtml"
+        ],
+        "name": "HTML document",
+        "role": "Viewer",
+        "rank": "Alternate"
+      }
+    ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "grantFileProtocolExtraPrivileges": false,
+      "onlyLoadAppFromAsar": true
+    },
+    "asarUnpack": [
+      "dist/ui/**"
+    ]
   }
 }

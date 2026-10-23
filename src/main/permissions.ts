@@ -1,6 +1,7 @@
 import { app, dialog, type BrowserWindow, type Session, type WebContents } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import type { Profile } from '../shared/types'
 
 /** Granted without asking, as Chrome does. display-capture asks with its own menu (see screenshare.ts). */
 const ALWAYS = new Set([
@@ -89,13 +90,15 @@ export class SitePermissions {
   }
 
   /** Denies by default; asks for what's in ASK and remembers the answer for the profile. */
-  attach(sess: Session, profileId: string, profileName: string) {
+  attach(sess: Session, profile: Profile) {
+    const profileId = profile.id
     sess.setPermissionRequestHandler((wc, permission, callback, details) => {
       const origin = originOf(details.requestingUrl)
       if (ALWAYS.has(permission) || isExtension(origin)) return callback(true)
       const wanted = expand(permission, details as { mediaTypes?: string[]; externalURL?: string })
       if (!wanted.every((p) => describe(p))) return callback(false)
-      void this.ask(wc, profileId, profileName, origin, wanted).then(callback)
+      // The name is read when asking, so a profile renamed in settings asks under its new name.
+      void this.ask(wc, profileId, profile.name, origin, wanted).then(callback)
     })
     sess.setPermissionCheckHandler((_wc, permission, requestingOrigin, details) => {
       const origin = originOf(requestingOrigin)
@@ -117,6 +120,12 @@ export class SitePermissions {
   /** Whether the site has remembered decisions in the profile, to offer resetting them. */
   has(profileId: string, url: string): boolean {
     return Object.keys(this.store[profileId]?.[originOf(url)] ?? {}).length > 0
+  }
+
+  /** Forgets every decision made in a deleted profile. */
+  forgetProfile(profileId: string) {
+    delete this.store[profileId]
+    this.save()
   }
 
   /** Forgets every decision for the site, so it asks again. */

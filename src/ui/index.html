@@ -143,6 +143,19 @@
             <button id="closeSettings" class="icon" data-icon="close" title="Close (Esc)" aria-label="Close settings"></button>
           </header>
 
+          <h2>Profiles</h2>
+          <p class="help">
+            Each profile has its own logins, cookies and extensions. Click a name to rename it and the dot to change its
+            color. Right-click a profile to make it the default, for links from other apps and for new tabs when nothing
+            else decides, or to delete it.
+          </p>
+          <div id="profileList" class="profile-list"></div>
+          <button id="addProfile" class="chip">Add profile</button>
+
+          <h2>Default browser</h2>
+          <p id="defaultBrowser" class="help"></p>
+          <button id="makeDefault" class="chip" hidden>Make jbrow the default browser</button>
+
           <h2>Summon animation</h2>
           <div class="field">
             <span class="label">Style</span>
@@ -265,7 +278,7 @@
           </p>
           <div id="shortcuts" class="shortcuts"></div>
 
-          <p class="help foot">Profiles are in <button id="openSettingsFile" class="link">settings.json</button>; they need a restart.</p>
+          <p class="help foot">Everything here is saved in <button id="openSettingsFile" class="link">settings.json</button>.</p>
         </section>
       </main>
     </div>

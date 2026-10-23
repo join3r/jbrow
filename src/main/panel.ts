@@ -81,7 +81,9 @@ export class Panel {
     this.win.setAlwaysOnTop(true, 'floating')
     this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     this.applyContentProtection()
-    void this.ui.loadFile(path.join(__dirname, 'ui', 'index.html'))
+    // The installed app keeps the UI outside app.asar (asarUnpack in package.json): with the
+    // grantFileProtocolExtraPrivileges fuse off, as in Chrome, file:// pages can't read inside it.
+    void this.ui.loadFile(path.join(__dirname.replace(/\.asar(?=[\\/]|$)/, '.asar.unpacked'), 'ui', 'index.html'))
     this.win.on('resize', () => {
       this.fitUi()
       this.hooks.setPageVisible(this.pageVisible())

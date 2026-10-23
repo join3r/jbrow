@@ -79,15 +79,18 @@ export class ExtensionCommands {
 
   /** Keeps the shortcuts current as extensions come and go. Call once the profiles exist. */
   watch() {
-    for (const rt of this.runtimes().values()) {
-      const changed = () => {
-        this.cache.clear()
-        this.registerGlobal()
-      }
-      rt.session.extensions.on('extension-loaded', changed)
-      rt.session.extensions.on('extension-unloaded', changed)
-    }
+    for (const rt of this.runtimes().values()) this.watchProfile(rt)
     this.registerGlobal()
+  }
+
+  /** Same, for a profile added while jbrow runs. */
+  watchProfile(rt: ProfileRuntime) {
+    const changed = () => {
+      this.cache.clear()
+      this.registerGlobal()
+    }
+    rt.session.extensions.on('extension-loaded', changed)
+    rt.session.extensions.on('extension-unloaded', changed)
   }
 
   /** Every command of every extension in a profile, with the shortcut each one has now. */
