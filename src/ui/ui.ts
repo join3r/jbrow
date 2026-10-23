@@ -2297,7 +2297,8 @@ window.jbrow.on('anim', (m: AnimMessage) => {
   setRestyle(false)
   setCert(false)
   stopRecording()
-  savePrivateUrls()
+  // The box only holds the list while settings is open; saving it otherwise would clear the list.
+  if (!settingsEl.hidden) savePrivateUrls()
   closeRules()
   if (renaming) commitRename()
 })
