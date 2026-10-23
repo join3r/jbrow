@@ -54,7 +54,11 @@ click it to fold it away, and right-click it to rename, delete (its threads stay
 **auto-file rules**. A thread about to be archived moves into the first folder whose rules match one of
 its addresses instead of being archived. Rules are patterns like the private addresses ones.
 
-Threads unseen for a week are archived (change it under Archiving in settings, or turn it off):
+Threads unseen for 3 days fall asleep: their pages unload and the sidebar shows them as one line
+saying how many tabs, which sites and how long ago. Clicking one loads it again. A page that's playing
+sound stays loaded, and kept threads never sleep.
+
+Threads unseen for a week are archived (change both under Archiving in settings, or turn them off):
 their pages close and they leave the sidebar. Type in the address bar to find one and bring the
 whole thread back. Archived threads are forgotten after 90 days.
 

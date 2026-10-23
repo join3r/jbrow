@@ -114,4 +114,14 @@ export function numberedThreads<T extends TabRecord>(s: Sections<T>): ThreadView
   return [...foldered, ...s.kept, ...s.today, ...s.apps.flatMap((a) => a.threads)].slice(0, 9)
 }
 
+/**
+ * Whether a thread (root first, as `subtree` gives it) is asleep: unseen for `afterMs` or longer, so
+ * its pages are unloaded and the sidebar shows it as a one-line summary. Kept threads and the
+ * active thread never sleep; 0 turns sleeping off.
+ */
+export function isAsleep(all: TabRecord[], opts: { now: number; afterMs: number; activeId: string | null }): boolean {
+  if (opts.afterMs <= 0 || !all.length || all[0].kept || all.some((t) => t.id === opts.activeId)) return false
+  return opts.now - Math.max(...all.map((t) => t.lastSeen)) >= opts.afterMs
+}
+
 export const displayName = (t: TabRecord) => t.name || t.title || (t.url ? t.url : 'New tab')

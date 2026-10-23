@@ -26,6 +26,8 @@ export interface Settings {
   hideFromScreenCapture: boolean
   /** Addresses matching these show as "Private" in the address bar until clicked. `*` matches anything. */
   privateUrls: string[]
+  /** Threads unseen this many days unload their pages and show as a one-line summary, unless kept. 0 never does. */
+  summarizeAfterDays: number
   /** Threads unseen this many days are archived, unless kept or caught by a folder's rules. 0 never archives. */
   archiveAfterDays: number
   /** Extension IDs shown as buttons in the toolbar, in this order, whenever the current profile has them. */
@@ -52,6 +54,7 @@ const DEFAULTS: Settings = {
   panel: { widthFraction: 0.72, heightFraction: 0.78 },
   hideFromScreenCapture: true,
   privateUrls: [],
+  summarizeAfterDays: 3,
   archiveAfterDays: 7,
   pinnedExtensions: [],
   extensionShortcuts: {},

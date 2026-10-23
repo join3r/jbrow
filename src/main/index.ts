@@ -82,6 +82,7 @@ function state(): UiState {
       animation: settings.animation,
       privateUrls: settings.privateUrls,
       hideFromScreenCapture: settings.hideFromScreenCapture,
+      summarizeAfterDays: settings.summarizeAfterDays,
       archiveAfterDays: settings.archiveAfterDays,
       pinnedExtensions: settings.pinnedExtensions,
     },
@@ -178,8 +179,8 @@ function threadsInView() {
   return sections(tabs.records, { filter, scope: scope?.key ?? null, activeId: tabs.activeId, now: Date.now(), folders: tabs.folders, appNames })
 }
 
-/** Archives stale threads, or files them into folders, per settings. */
-const sweep = () => tabs.sweep(settings.archiveAfterDays * DAY_MS)
+/** Unloads and archives stale threads, or files them into folders, per settings. */
+const sweep = () => tabs.sweep(settings.archiveAfterDays * DAY_MS, settings.summarizeAfterDays * DAY_MS)
 
 /** Most recently seen tab among the threads the sidebar currently shows. */
 function mostRecentInView(): string | undefined {
@@ -364,8 +365,9 @@ function updatePrefs(prefs: Partial<Prefs>) {
     settings.hideFromScreenCapture = prefs.hideFromScreenCapture
     panel.applyContentProtection()
   }
-  if (prefs.archiveAfterDays !== undefined) {
-    settings.archiveAfterDays = Math.max(0, prefs.archiveAfterDays)
+  if (prefs.archiveAfterDays !== undefined || prefs.summarizeAfterDays !== undefined) {
+    if (prefs.archiveAfterDays !== undefined) settings.archiveAfterDays = Math.max(0, prefs.archiveAfterDays)
+    if (prefs.summarizeAfterDays !== undefined) settings.summarizeAfterDays = Math.max(0, prefs.summarizeAfterDays)
     sweep()
   }
   saveSettings(settings)

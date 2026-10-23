@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { urlMatcher } from '../shared/patterns'
-import { childrenOf, isRoot, rootOf, subtree } from '../shared/threads'
+import { childrenOf, isAsleep, isRoot, rootOf, subtree } from '../shared/threads'
 import type { Folder, TabRecord, UiTab } from '../shared/types'
 import type { SitePermissions } from './permissions'
 import type { ProfileRuntime } from './profiles'
@@ -61,6 +61,8 @@ export class Tabs {
   private mru: string[] = []
   /** Set while jbrow hands a new view to the extensions library, which marks every new tab active. */
   private addingView = false
+  /** Set while jbrow takes a view away from the extensions library, which reports that as the tab closing. */
+  private droppingView = false
 
   constructor(private deps: TabsDeps) {}
 
@@ -397,12 +399,18 @@ export class Tabs {
     const live = this.live.get(rec.id)
     if (!live) return
     this.deps.window().contentView.removeChildView(live.view)
-    this.deps.runtime(rec.profile)?.extensions.removeTab(live.view.webContents)
+    this.droppingView = true
+    try {
+      this.deps.runtime(rec.profile)?.extensions.removeTab(live.view.webContents)
+    } finally {
+      this.droppingView = false
+    }
     live.view.webContents.close()
     this.live.delete(rec.id)
   }
 
   closeWebContents(wc: WebContents) {
+    if (this.droppingView) return
     const id = this.idForWebContents(wc)
     if (id) this.close(id)
   }
@@ -499,10 +507,10 @@ export class Tabs {
   /**
    * Archives threads unseen for `afterMs`. Kept threads and the active thread stay. A thread
    * with an address matching a folder's rules moves into that folder (and so becomes kept)
-   * instead; the oldest folder wins.
+   * instead; the oldest folder wins. Threads unseen for `sleepAfterMs` but not yet archived
+   * unload their pages (see isAsleep). 0 turns either off.
    */
-  sweep(afterMs: number) {
-    if (afterMs <= 0) return
+  sweep(afterMs: number, sleepAfterMs: number) {
     const now = Date.now()
     const folders = [...this.folders]
       .sort((a, b) => a.createdAt - b.createdAt)
@@ -512,7 +520,10 @@ export class Tabs {
     for (const root of this.records.filter((t) => isRoot(this.records, t) && !t.kept)) {
       const all = subtree(this.records, root)
       if (all.some((t) => t.id === this.activeId)) continue
-      if (now - Math.max(...all.map((t) => t.lastSeen)) < afterMs) continue
+      if (afterMs <= 0 || now - Math.max(...all.map((t) => t.lastSeen)) < afterMs) {
+        if (isAsleep(all, { now, afterMs: sleepAfterMs, activeId: this.activeId }) && this.unload(all)) changed = true
+        continue
+      }
       const into = folders.find((f) => all.some((t) => f.matches(t.url)))
       if (into) {
         root.kept = true
@@ -535,6 +546,18 @@ export class Tabs {
       changed = true
     }
     if (changed) this.changed()
+  }
+
+  /** Closes an asleep thread's pages; each loads again when opened. A page playing sound stays. */
+  private unload(all: TabRecord[]): boolean {
+    let unloaded = false
+    for (const t of all) {
+      const wc = this.webContentsFor(t.id)
+      if (!wc || wc.isCurrentlyAudible()) continue
+      this.dropView(t)
+      unloaded = true
+    }
+    return unloaded
   }
 
   /** Brings an archived tab's whole thread back and makes that tab active. */

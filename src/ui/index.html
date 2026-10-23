@@ -114,7 +114,16 @@
 
           <h2>Archiving</h2>
           <div class="field">
-            <span class="label">After</span>
+            <span class="label">Summarize</span>
+            <div id="summarizeAfter" class="seg" role="group" aria-label="Summarize threads unseen for">
+              <button data-value="1">1 day</button>
+              <button data-value="3">3 days</button>
+              <button data-value="7">1 week</button>
+              <button data-value="0">Never</button>
+            </div>
+          </div>
+          <div class="field">
+            <span class="label">Archive</span>
             <div id="archiveAfter" class="seg" role="group" aria-label="Archive threads unseen for">
               <button data-value="1">1 day</button>
               <button data-value="3">3 days</button>
@@ -124,8 +133,9 @@
             </div>
           </div>
           <p class="help">
-            Threads you haven't opened for this long close and leave the sidebar. Type in the address bar to find and
-            reopen them. Kept threads never archive, and a folder in Kept can catch threads by address before they do:
+            Threads you haven't opened for a while first unload their pages and shrink to one line: how many tabs, which
+            sites, how long ago. Opening one loads it again. Later they close and leave the sidebar. Type in the address
+            bar to find and reopen them. Kept threads never archive, and a folder in Kept can catch threads by address before they do:
             right-click the folder and choose <b>Auto-file rules</b>.
           </p>
 

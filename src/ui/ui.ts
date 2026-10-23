@@ -1,5 +1,5 @@
 import { urlMatcher } from '../shared/patterns'
-import { childrenOf, displayName, numberedThreads, sections, type AppView, type FolderView, type ThreadView } from '../shared/threads'
+import { childrenOf, displayName, isAsleep, numberedThreads, sections, type AppView, type FolderView, type ThreadView } from '../shared/threads'
 import { shortcutFromKey, shortcutLabel } from '../shared/shortcuts'
 import type { AnimMessage, AppEntry, ExtensionShortcut, Prefs, Profile, UiState, UiTab } from '../shared/types'
 
@@ -70,6 +70,23 @@ const profile = (id: string): Profile | undefined => S?.profiles.find((p) => p.i
 const activeTab = () => S?.tabs.find((t) => t.id === S!.activeId)
 /** The address as it may be shown on screen. */
 const shownUrl = (url: string) => (isPrivate(url) ? 'Private' : url)
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/** What an asleep thread held, e.g. "4 tabs · github.com, mozilla.org +1 · 5 d". */
+function sleepSummary(v: ThreadView<UiTab>, now: number): string {
+  const hosts = new Map<string, number>()
+  for (const t of v.all) {
+    let host = ''
+    try {
+      if (/^https?:/i.test(t.url)) host = isPrivate(t.url) ? 'Private' : new URL(t.url).hostname.replace(/^www\./, '')
+    } catch {}
+    if (host) hosts.set(host, (hosts.get(host) ?? 0) + 1)
+  }
+  const top = [...hosts].sort((a, b) => b[1] - a[1]).map(([h]) => h)
+  const sites = top.slice(0, 2).join(', ') + (top.length > 2 ? ` +${top.length - 2}` : '')
+  const tabs = v.all.length > 1 ? `${v.all.length} tabs` : ''
+  return [tabs, sites, `${Math.floor((now - v.lastSeen) / DAY_MS)} d`].filter(Boolean).join(' · ')
+}
 
 // ---------- render ----------
 
@@ -241,7 +258,8 @@ function row(t: UiTab, depth: number, thread: ThreadView<UiTab> | null, number?:
   const kids = childrenOf(S.tabs, t.id)
   const open = thread ? thread.all.some((x) => x.id === S!.activeId) : true
   const target = thread && !open ? thread.last.id : t.id
-  const count = thread && !open && thread.all.length > 1 ? String(thread.all.length) : ''
+  const asleep = !!thread && isAsleep(thread.all, { now: S.now, afterMs: S.prefs.summarizeAfterDays * DAY_MS, activeId: S.activeId })
+  const count = thread && !open && !asleep && thread.all.length > 1 ? String(thread.all.length) : ''
   const app = showApp && depth === 0 && t.scope && !S.scope ? (S.apps[t.scope]?.name ?? t.scopeName ?? '') : ''
   const meta = [app, count].filter(Boolean).join(' · ')
   const key = number ? `⌘${number}` : ''
@@ -257,10 +275,12 @@ function row(t: UiTab, depth: number, thread: ThreadView<UiTab> | null, number?:
     thread && open ? 'open' : '',
     t.loading ? 'loading' : '',
     t.unread ? 'unread' : '',
+    asleep ? 'asleep' : '',
   ].join(' ')
   const color = profile(t.profile)?.color ?? ''
   let html = `<div class="${classes}" role="button" tabindex="0" draggable="true" data-id="${t.id}" data-target="${target}" style="--d:${depth};--pc:${esc(color)}">
     ${fav}${name}<span class="end"><span class="meta">${esc(meta || key)}</span><button class="act" data-close="${t.id}" title="Close" aria-label="Close">${icon('close')}</button></span>
+    ${asleep ? `<span class="sum">${esc(sleepSummary(thread!, S.now))}</span>` : ''}
   </div>`
   if (open) html += kids.map((k) => row(k, depth + 1, null)).join('')
   return html
@@ -610,6 +630,7 @@ function renderSettings(all = false) {
     $(id).querySelectorAll<HTMLElement>('[data-value]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === value)))
   seg('animStyle', animation.style)
   seg('animEase', animation.ease)
+  seg('summarizeAfter', String(S.prefs.summarizeAfterDays))
   seg('archiveAfter', String(S.prefs.archiveAfterDays))
   if (all || document.activeElement !== animSpeed) animSpeed.value = String(animation.durationMs)
   $('animSpeedOut').textContent = `${animSpeed.value} ms`
@@ -647,6 +668,10 @@ privateUrls.addEventListener('input', () => {
   privateTimer = window.setTimeout(savePrivateUrls, 400)
 })
 privateUrls.addEventListener('blur', savePrivateUrls)
+$('summarizeAfter').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b) sendPrefs({ summarizeAfterDays: Number(b.dataset.value) })
+})
 $('archiveAfter').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ archiveAfterDays: Number(b.dataset.value) })

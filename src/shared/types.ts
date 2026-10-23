@@ -74,6 +74,8 @@ export interface Prefs {
   /** Addresses matching one of these show as "Private" until clicked. `*` matches anything. */
   privateUrls: string[]
   hideFromScreenCapture: boolean
+  /** Threads unseen this many days unload their pages and show as one line. 0 never does. */
+  summarizeAfterDays: number
   /** Threads unseen this many days are archived. 0 never archives. */
   archiveAfterDays: number
   pinnedExtensions: string[]
