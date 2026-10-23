@@ -348,9 +348,15 @@ function folderRow(v: FolderView<UiTab>, block: (v: ThreadView<UiTab>) => string
   const html = `<div class="row frow" role="button" tabindex="0" aria-expanded="${open}" data-folder="${f.id}">
     <span class="fav">${icon(open ? 'folderOpen' : 'folder')}</span>${name}<span class="end"><span class="meta">${count || ''}</span></span>
   </div>`
-  const body = inner.map((c) => folderRow(c, block, narrowed)).join('') + v.threads.map(block).join('')
-  return open && body ? `${html}<div class="folder-body">${body}</div>` : html
+  // A collapsed folder still shows the thread you're on, and the folders down to it.
+  const shown = (t: ThreadView<UiTab>) => open || holdsActive(t)
+  const body =
+    inner.filter((c) => open || folderThreads(c).some(holdsActive)).map((c) => folderRow(c, block, narrowed)).join('') +
+    v.threads.filter(shown).map(block).join('')
+  return body ? `${html}<div class="folder-body">${body}</div>` : html
 }
+
+const holdsActive = (t: ThreadView<UiTab>) => t.all.some((x) => x.id === S?.activeId)
 
 const toggleFolder = (id: string) => {
   const f = S?.folders.find((x) => x.id === id)

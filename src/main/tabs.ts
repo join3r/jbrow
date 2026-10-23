@@ -494,6 +494,7 @@ export class Tabs {
     const rec = this.get(id)
     if (!rec) return
     if (remember && rec.url) this.remember(rec)
+    const thread = new Set(subtree(this.records, rootOf(this.records, rec)).map((t) => t.id))
     // Children move up to the closed tab's parent so a thread doesn't fall apart.
     for (const child of childrenOf(this.records, id)) {
       child.parent = rec.parent
@@ -510,7 +511,11 @@ export class Tabs {
     this.mru = this.mru.filter((m) => m !== id)
     if (this.activeId === id) {
       this.activeId = null
-      const next = this.mru.find((m) => this.get(m))
+      // The next tab comes from the same thread or from outside Kept; a kept thread only comes up when asked for.
+      const next = this.mru.find((m) => {
+        const t = this.get(m)
+        return t && (thread.has(m) || !rootOf(this.records, t).kept)
+      })
       if (next) this.activate(next)
     }
     this.changed()
