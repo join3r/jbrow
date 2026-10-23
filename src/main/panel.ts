@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, screen, type Rectangle } from 'electron'
 import path from 'node:path'
+import { bezier, EASE } from '../shared/ease'
 import type { AnimMessage } from '../shared/types'
 import type { Settings } from './settings'
 
@@ -166,7 +167,7 @@ export class Panel {
   }
 
   /** Fades the whole native window (glass included) alongside the UI's CSS animation. */
-  private fade(from: number, to: number, ms: number): Promise<void> {
+  private fade(from: number, to: number, ms: number, curve: (t: number) => number): Promise<void> {
     // A new fade (hotkey pressed mid-animation) ends the previous one, so its caller moves on.
     this.endFade?.()
     return new Promise((resolve) => {
@@ -188,8 +189,7 @@ export class Panel {
         // The window goes away when jbrow quits mid-animation.
         if (this.win.isDestroyed()) return end()
         const t = Math.min(1, (performance.now() - start) / ms)
-        const eased = to > from ? 1 - Math.pow(1 - t, 3) : t * t
-        this.win.setOpacity(from + (to - from) * eased)
+        this.win.setOpacity(from + (to - from) * Math.min(1, curve(t)))
         if (t >= 1) end()
       }, 1000 / 120)
     })
@@ -218,7 +218,10 @@ export class Panel {
     this.win.focus()
     if (ms) await started
     if (run !== this.run || this.win.isDestroyed()) return
-    await Promise.all([this.fade(0, 1, ms), ended])
+    // The window turns opaque on the curve the content moves on, so it settles together with the
+    // content instead of still fading in around content that has already arrived.
+    const curve = msg.style === 'fade' ? (t: number) => 1 - (1 - t) ** 3 : (t: number) => bezier(EASE[msg.ease], t)
+    await Promise.all([this.fade(0, 1, ms, curve), ended])
     debug('shown; focused =', this.win.isFocused(), 'visible =', this.win.isVisible(), 'window =', this.win.getMediaSourceId())
     if (run !== this.run || this.win.isDestroyed()) return
     this.animating = false
@@ -240,7 +243,7 @@ export class Panel {
       if (snap && !this.win.isDestroyed()) this.win.webContents.send('snapshot', snap)
     })
     const msg = this.send('out')
-    await this.fade(1, 0, msg.style === 'off' ? 0 : msg.durationMs)
+    await this.fade(1, 0, msg.style === 'off' ? 0 : msg.durationMs, (t) => t * t)
     if (run !== this.run || this.win.isDestroyed()) return
     this.win.hide()
     this.hooks.setPageVisible(false)

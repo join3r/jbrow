@@ -1,3 +1,4 @@
+import { cssEase } from '../shared/ease'
 import { urlMatcher } from '../shared/patterns'
 import { childrenOf, displayName, isAsleep, numberedThreads, sections, type AppView, type FolderView, type ThreadView } from '../shared/threads'
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
@@ -10,12 +11,6 @@ declare global {
       send(channel: string, data?: unknown): void
     }
   }
-}
-
-const EASE: Record<AnimMessage['ease'], string> = {
-  spring: 'cubic-bezier(.34,1.45,.64,1)',
-  snappy: 'cubic-bezier(.2,.9,.2,1)',
-  smooth: 'cubic-bezier(.45,0,.2,1)',
 }
 
 /** 24×24 stroke icons. The puzzle, pin, eye, eye-off, folder, store, open, copy, wand, undo, trash, lock and warn paths are from Lucide (ISC). */
@@ -1342,7 +1337,7 @@ function playIn(m: AnimMessage, report = true) {
   const run = ++playRun
   root.dataset.style = m.style
   root.style.setProperty('--dur', `${m.durationMs}ms`)
-  root.style.setProperty('--ease', EASE[m.ease])
+  root.style.setProperty('--ease', cssEase(m.ease))
   root.classList.add('pre')
   root.classList.remove('shown')
   void root.offsetWidth
