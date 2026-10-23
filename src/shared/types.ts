@@ -65,6 +65,10 @@ export interface UiState {
   /** Names and icons of the apps threads belong to, by scope key. */
   apps: Record<string, AppLabel>
   pinned: boolean
+  /** Restyling of the active tab's site. Null when its page isn't a website. */
+  restyle: RestyleView | null
+  /** Every site with a restyle, for the settings screen. */
+  styledSites: StyledSite[]
   nav: { canGoBack: boolean; canGoForward: boolean; loading: boolean }
   /** The key of each of jbrow's own commands, '' for none. */
   keys: Record<ActionId, string>
@@ -83,6 +87,24 @@ export interface Prefs {
   /** Threads unseen this many days are archived. 0 never archives. */
   archiveAfterDays: number
   pinnedExtensions: string[]
+  /** Claude model alias for restyling sites. */
+  restyleModel: string
+}
+
+/** One site's restyle, as the restyle popover shows it. */
+export interface RestyleView {
+  host: string
+  /** What you asked for so far, oldest first. */
+  prompts: string[]
+  enabled: boolean
+  /** A request Claude is working on now. */
+  running: { prompt: string; startedAt: number } | null
+}
+
+export interface StyledSite {
+  host: string
+  changes: number
+  enabled: boolean
 }
 
 export interface AnimMessage {

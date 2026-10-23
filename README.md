@@ -78,9 +78,32 @@ second download asks first, as in Chrome, and while jbrow is hidden it's simply 
 close their details, and if one finishes while jbrow is hidden, you get a notification. A link that opens
 a new tab only to start a download closes that tab again.
 
+## Restyling sites with Claude
+
+The wand icon in the toolbar restyles the site you're on. Type how it should look ("dark theme",
+"hide the sidebar", "wider text column, bigger font") and press Return. jbrow sends Claude a
+screenshot of the page, an outline of its DOM and the site's stylesheet so far, and inserts the
+stylesheet Claude writes back into every page of that site (the hostname, without www) from the
+moment each starts loading. Ask again to refine it; each request builds on the last. The wand turns
+teal on a restyled site and pulses while Claude works, and the note on what changed shows at the
+bottom of the sidebar. The wand's popover lists what you asked for and has **Undo last change**,
+**Show the original** and **Remove all changes**. Settings lists every restyled site.
+
+It runs Claude Code's `claude -p` with your Claude subscription, so install Claude Code and sign in
+first (`claude`, then `/login`). jbrow finds `claude` in `~/.local/bin`, `/opt/homebrew/bin`,
+`/usr/local/bin` or your login shell's PATH; set `restyle.claudePath` otherwise. Each run has no
+tools, settings, CLAUDE.md or MCP servers, and jbrow leaves `ANTHROPIC_API_KEY` out of its
+environment so it can't bill an API key instead. Because page text reaches Claude, a page could try
+to talk it into CSS that sends what you type elsewhere (`input[value^=a] { background: url(…) }`),
+so jbrow removes every `url()`, `image-set()` and `@import` that isn't a `data:` URL before using a
+stylesheet, and says so when it does. Chromium parses the stylesheet first (in a blank page with no
+network), and jbrow checks and inserts Chromium's own serialization of it, so escapes and odd line
+endings can't hide a reference from the check. Pick the model under **Restyling** in settings;
+Sonnet takes about 10 seconds. Styles are kept in `styles.json` next to `settings.json`.
+
 ## Settings
 
-The settings screen (⌘, or the sliders icon) covers the summon animation, archiving, apps, private
+The settings screen (⌘, or the sliders icon) covers the summon animation, archiving, apps, restyling, private
 addresses, screen sharing, jbrow's own shortcuts and extension shortcuts, and changes there apply right away. Private addresses: any address that contains
 one of your patterns (`*` matches anything, e.g. `*.corp.example`) shows as **Private** in the
 address bar, the tab list tooltips and the address suggestions until you click the address bar.
@@ -105,6 +128,8 @@ on first run. Restart jbrow after editing the file by hand (menu bar item, **Res
   `hotkeys`; jbrow still reads those and writes them here the next time it saves settings.
 - `extensionShortcuts`: your extension shortcuts per profile, extension and command (`""` removes one).
 - `archiveAfterDays`: archive threads unseen this many days; 0 turns archiving off.
+- `restyle`: `model` for restyling (a Claude model alias such as sonnet, opus or haiku) and
+  `claudePath`, the claude command if jbrow doesn't find it on its own.
 
 Tabs, folders and archived threads are in `tabs.json` next to it.
 

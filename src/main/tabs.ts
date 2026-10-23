@@ -26,6 +26,8 @@ export interface TabsDeps {
   onKey: (input: Electron.Input) => boolean
   searchUrl: () => string
   permissions: SitePermissions
+  /** A page committed a navigation to a new document. */
+  onNavigate: (wc: WebContents) => void
 }
 
 export interface CreateOptions {
@@ -121,6 +123,10 @@ export class Tabs {
   webContentsFor(id: string): WebContents | null {
     const live = this.live.get(id)
     return live && !live.view.webContents.isDestroyed() ? live.view.webContents : null
+  }
+  /** Every page that's loaded. */
+  pages(): WebContents[] {
+    return [...this.live.values()].map((l) => l.view.webContents).filter((wc) => !wc.isDestroyed())
   }
   idForWebContents(wc: WebContents): string | undefined {
     for (const [id, live] of this.live) if (live.view.webContents === wc) return id
@@ -230,7 +236,10 @@ export class Tabs {
         this.changed()
       }
     }
-    wc.on('did-navigate', onNav)
+    wc.on('did-navigate', (e, url) => {
+      onNav(e, url)
+      this.deps.onNavigate(wc)
+    })
     wc.on('did-navigate-in-page', onNav)
     wc.on('did-start-loading', () => this.setLoading(id, true))
     wc.on('did-stop-loading', () => this.setLoading(id, false))

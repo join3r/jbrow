@@ -13,6 +13,7 @@ import { SitePermissions } from './permissions'
 import { MiniPlayer } from './pip'
 import { pickShareSource } from './screenshare'
 import { installTestExtensions, loadUnpacked, partitionFor, setupProfiles, type ProfileRuntime, type TabHooks } from './profiles'
+import { Restyler } from './restyle'
 import { loadSettings, saveSettings, scopeForApp, settingsPath, type Settings } from './settings'
 import { Tabs } from './tabs'
 
@@ -28,6 +29,7 @@ let runtimes = new Map<string, ProfileRuntime>()
 let tray: Tray | null = null
 let commands: ExtensionCommands
 let downloads: Downloads
+let restyler: Restyler
 /** The settings screen is recording a shortcut: key presses go to it, not to jbrow or extensions. */
 let recordingShortcut = false
 
@@ -82,6 +84,8 @@ function state(): UiState {
     scope,
     apps: appLabels(),
     pinned: panel.pinned,
+    restyle: active ? restyler.view(active.url) : null,
+    styledSites: restyler.styledSites(),
     nav: tabs.navState(),
     keys: actionKeys(settings.shortcuts),
     prefs: {
@@ -91,6 +95,7 @@ function state(): UiState {
       summarizeAfterDays: settings.summarizeAfterDays,
       archiveAfterDays: settings.archiveAfterDays,
       pinnedExtensions: settings.pinnedExtensions,
+      restyleModel: settings.restyle.model,
     },
     now: Date.now(),
   }
@@ -448,6 +453,7 @@ function updatePrefs(prefs: Partial<Prefs>) {
     settings.hideFromScreenCapture = prefs.hideFromScreenCapture
     panel.applyContentProtection()
   }
+  if (prefs.restyleModel) settings.restyle = { ...settings.restyle, model: prefs.restyleModel }
   if (prefs.archiveAfterDays !== undefined || prefs.summarizeAfterDays !== undefined) {
     if (prefs.archiveAfterDays !== undefined) settings.archiveAfterDays = Math.max(0, prefs.archiveAfterDays)
     if (prefs.summarizeAfterDays !== undefined) settings.summarizeAfterDays = Math.max(0, prefs.summarizeAfterDays)
@@ -799,6 +805,16 @@ function wireIpc() {
     else if (action === 'reload') wc.reload()
     else wc.stop()
   })
+  on<{ prompt: string }>('restyle', ({ prompt }) => {
+    const wc = tabs.activeWebContents()
+    if (wc) void restyler.restyle(wc, prompt)
+  })
+  on<{ host: string; action: 'undo' | 'reset' | 'on' | 'off' | 'cancel' }>('restyle-site', ({ host, action }) => {
+    if (action === 'undo') restyler.undo(host)
+    else if (action === 'reset') restyler.reset(host)
+    else if (action === 'cancel') restyler.cancel(host)
+    else restyler.setEnabled(host, action === 'on')
+  })
   on<{ on: boolean }>('overlay', ({ on: covered }) => panel.setOverlay(covered))
   on('hide', () => void panel.hide())
   on('focus-ui', () => panel.win.webContents.focus())
@@ -927,6 +943,13 @@ app.whenReady().then(async () => {
   })
 
   const permissions = new SitePermissions(() => panel.win)
+  restyler = new Restyler({
+    settings: () => settings.restyle,
+    pages: () => tabs.pages(),
+    onChange: () => pushState(),
+    notify: toast,
+  })
+  restyler.load()
   tabs = new Tabs({
     window: () => panel.win,
     runtime: (id) => runtimes.get(id),
@@ -937,6 +960,7 @@ app.whenReady().then(async () => {
     onKey,
     searchUrl: () => settings.searchUrl,
     permissions,
+    onNavigate: (wc) => restyler.onNavigate(wc),
   })
 
   downloads = new Downloads({

@@ -92,7 +92,7 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .private-mask svg.i { width: 14px; height: 14px; }
 
 /* ---------- extensions popover ---------- */
-.ext { position: relative; }
+.ext, .restyle { position: relative; }
 .pinned-actions { display: flex; gap: 2px; }
 .pinned-action { position: relative; flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background-color: transparent; background-position: center; background-repeat: no-repeat; background-size: 16px; }
 .pinned-action:hover { background-color: var(--hover); }
@@ -135,6 +135,18 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .dl-meta .link { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; vertical-align: bottom; }
 .dl-acts { display: flex; align-items: center; gap: 2px; border-top: 1px solid var(--line); padding-top: 6px; }
 .dl-gap { flex: 1; }
+
+/* Restyle: the wand is tinted on a restyled site and pulses while Claude works. */
+#restyleButton.styled { color: var(--accent); }
+#restyleButton.busy svg.i { animation: pulse 1s ease-in-out infinite; }
+.restyle-pop { width: 300px; user-select: text; }
+.restyle-pop textarea { display: block; width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 7px; background: var(--selected); color: var(--ink); padding: 6px 8px; margin-bottom: 6px; font: 13px/1.4 var(--font); }
+.restyle-pop textarea:disabled { opacity: 0.5; }
+.restyle-pop .pop-help { margin-bottom: 4px; }
+.restyle-running { display: flex; justify-content: space-between; gap: 8px; margin: 4px 6px; font-size: 12px; }
+.restyle-running span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.restyle-prompts { margin: 0 0 4px; padding: 0 6px 0 24px; max-height: 120px; overflow-y: auto; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.restyle-prompts li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .suggest { position: absolute; top: 36px; left: 0; right: 0; z-index: 20; background: var(--surface); backdrop-filter: blur(20px); border: 1px solid var(--line); border-radius: 10px; padding: 4px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25); }
 .sg { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 0 10px; align-items: center; width: 100%; border: 0; background: none; text-align: left; padding: 6px 8px; border-radius: 7px; }
@@ -248,6 +260,11 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .shortcuts .sc-key[aria-pressed='true'] { border-color: var(--accent); color: var(--accent); }
 .shortcuts .sc-key.fixed { color: var(--muted); border-style: dashed; }
 .link { border: 0; background: none; padding: 0; color: var(--accent); text-decoration: underline; font: inherit; }
+
+.styled-sites .check { align-items: center; padding: 3px 0; }
+.styled-sites .check input { margin: 0; }
+.styled-sites .check span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.styled-sites em { font-style: normal; font-size: 11px; color: var(--muted); margin-left: 6px; }
 
 .app-list { margin-bottom: 10px; }
 .app-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 5px 0; }

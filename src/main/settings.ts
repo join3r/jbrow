@@ -36,6 +36,8 @@ export interface Settings {
   pinnedExtensions: string[]
   /** Your extension shortcuts, per profile, extension ID and command: Electron accelerators, '' for none. Unlisted commands use the extension's suggestion. */
   extensionShortcuts: Record<string, Record<string, Record<string, string>>>
+  /** Restyling sites with Claude Code. `claudePath` is the claude command; '' finds it. */
+  restyle: { model: string; claudePath: string }
 }
 
 const DEFAULTS: Settings = {
@@ -60,6 +62,7 @@ const DEFAULTS: Settings = {
   archiveAfterDays: 7,
   pinnedExtensions: [],
   extensionShortcuts: {},
+  restyle: { model: 'sonnet', claudePath: '' },
 }
 
 export const settingsPath = () => path.join(app.getPath('userData'), 'settings.json')

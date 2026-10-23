@@ -18,7 +18,7 @@ const EASE: Record<AnimMessage['ease'], string> = {
   smooth: 'cubic-bezier(.45,0,.2,1)',
 }
 
-/** 24×24 stroke icons. The puzzle, pin, eye-off, folder, store, open and copy paths are from Lucide (ISC). */
+/** 24×24 stroke icons. The puzzle, pin, eye, eye-off, folder, store, open, copy, wand, undo and trash paths are from Lucide (ISC). */
 const ICONS: Record<string, string> = {
   back: '<path d="m15 18-6-6 6-6"/>',
   forward: '<path d="m9 18 6-6-6-6"/>',
@@ -43,6 +43,11 @@ const ICONS: Record<string, string> = {
   copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
   alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>',
+  wand:
+    '<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  eye: '<path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
 }
 const icon = (name: string) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`
 document.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => (el.innerHTML = icon(el.dataset.icon!)))
@@ -55,6 +60,8 @@ const threadsEl = $('threads')
 const snapshot = $<HTMLImageElement>('snapshot')
 const actions = $('actions')
 const extPop = $('extPop')
+const restylePop = $('restylePop')
+const restylePrompt = $<HTMLTextAreaElement>('restylePrompt')
 const settingsEl = $('settings')
 const privateMask = $('privateMask')
 const rulesPop = $('rulesPop')
@@ -146,6 +153,7 @@ function render() {
   if (S.activeWebContentsId != null) actions.setAttribute('tab', String(S.activeWebContentsId))
   else actions.removeAttribute('tab')
   renderPinnedActions()
+  renderRestyle()
 
   const scope = $('scope')
   scope.hidden = !S.scope
@@ -405,7 +413,7 @@ function hideSuggestions() {
 /** The page hides while anything of jbrow's own covers it; see Panel.setOverlay. */
 let overlaySent = false
 function syncOverlay() {
-  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !settingsEl.hidden
+  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !restylePop.hidden || !settingsEl.hidden
   if (on !== overlaySent) {
     overlaySent = on
     send('overlay', { on })
@@ -640,6 +648,7 @@ function setExtensions(open: boolean) {
   extPop.hidden = !open
   $('extButton').setAttribute('aria-expanded', String(open))
   if (open) {
+    setRestyle(false)
     focusUi()
     const count = actions.shadowRoot?.querySelectorAll('.action').length ?? 0
     $('extEmpty').hidden = count > 0
@@ -802,6 +811,75 @@ document.addEventListener('mousedown', (e) => {
   if (dlOpen && !(e.target as HTMLElement).closest('.downloads')) setDownload(null)
 })
 
+// ---------- restyle popover ----------
+
+let restyleTimer: number | undefined
+
+/** The wand's look, and the popover while it's open. */
+function renderRestyle() {
+  if (!S) return
+  const r = S.restyle
+  const button = $<HTMLButtonElement>('restyleButton')
+  button.disabled = !r
+  button.classList.toggle('styled', !!r && r.enabled && r.prompts.length > 0)
+  button.classList.toggle('busy', !!r?.running)
+  button.title = !r ? 'Restyle: only for websites' : r.running ? `Claude is restyling ${r.host}…` : `Restyle ${r.host} with Claude`
+  if (!r) return setRestyle(false)
+  if (restylePop.hidden) return
+  $('restyleHead').textContent = `Restyle · ${r.host}`
+  restylePrompt.disabled = !!r.running
+  $('restyleRunning').hidden = !r.running
+  clearInterval(restyleTimer)
+  if (r.running) {
+    const started = r.running.startedAt
+    const prompt = r.running.prompt
+    const tick = () => ($('restyleRunText').textContent = `Working on “${prompt}” · ${Math.round((Date.now() - started) / 1000)} s`)
+    tick()
+    restyleTimer = window.setInterval(tick, 1000)
+  }
+  $('restyleHistory').hidden = !r.prompts.length
+  $('restylePrompts').innerHTML = r.prompts.map((p) => `<li title="${esc(p)}">${esc(p)}</li>`).join('')
+  $('restylePrompts').scrollTop = 1e6
+  $('restyleToggleText').textContent = r.enabled ? 'Show the original' : 'Show restyled'
+}
+
+function setRestyle(open: boolean) {
+  if (open === !restylePop.hidden) return
+  if (open && !S?.restyle) return
+  restylePop.hidden = !open
+  $('restyleButton').setAttribute('aria-expanded', String(open))
+  if (open) {
+    setExtensions(false)
+    renderRestyle()
+    focusUi()
+    restylePrompt.focus()
+  } else clearInterval(restyleTimer)
+  syncOverlay()
+}
+
+const restyleSite = (action: 'undo' | 'reset' | 'on' | 'off' | 'cancel') => {
+  if (S?.restyle) send('restyle-site', { host: S.restyle.host, action })
+}
+$('restyleButton').addEventListener('click', () => setRestyle(!!restylePop.hidden))
+restylePrompt.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
+  e.preventDefault()
+  const prompt = restylePrompt.value.trim()
+  if (!prompt || S?.restyle?.running) return
+  restylePrompt.value = ''
+  // Out of the way, so the screenshot shows the page and you can watch it change.
+  setRestyle(false)
+  send('focus-page')
+  send('restyle', { prompt })
+})
+$('restyleCancel').addEventListener('click', () => restyleSite('cancel'))
+$('restyleUndo').addEventListener('click', () => restyleSite('undo'))
+$('restyleToggle').addEventListener('click', () => restyleSite(S?.restyle?.enabled ? 'off' : 'on'))
+$('restyleReset').addEventListener('click', () => restyleSite('reset'))
+document.addEventListener('mousedown', (e) => {
+  if (!restylePop.hidden && !(e.target as HTMLElement).closest('.restyle')) setRestyle(false)
+})
+
 // ---------- settings ----------
 
 const animSpeed = $<HTMLInputElement>('animSpeed')
@@ -814,6 +892,7 @@ function setSettings(open: boolean) {
   $('settingsButton').setAttribute('aria-pressed', String(open))
   if (open) {
     setExtensions(false)
+    setRestyle(false)
     focusUi()
     settingsEl.focus()
     renderSettings(true)
@@ -837,6 +916,8 @@ function renderSettings(all = false) {
   seg('animEase', animation.ease)
   seg('summarizeAfter', String(S.prefs.summarizeAfterDays))
   seg('archiveAfter', String(S.prefs.archiveAfterDays))
+  seg('restyleModel', S.prefs.restyleModel)
+  renderStyledSites()
   if (all || document.activeElement !== animSpeed) animSpeed.value = String(animation.durationMs)
   $('animSpeedOut').textContent = `${animSpeed.value} ms`
   for (const id of ['animSpeed', 'animEase', 'animPreview']) $(id).closest('.field')!.classList.toggle('off', animation.style === 'off')
@@ -882,6 +963,34 @@ $('summarizeAfter').addEventListener('click', (e) => {
 $('archiveAfter').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ archiveAfterDays: Number(b.dataset.value) })
+})
+$('restyleModel').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b) sendPrefs({ restyleModel: b.dataset.value })
+})
+
+const styledSitesEl = $('styledSites')
+function renderStyledSites() {
+  if (!S) return
+  const html = S.styledSites
+    .map(
+      (site) => `<label class="check"><input type="checkbox" data-site="${esc(site.host)}" ${site.enabled ? 'checked' : ''}>
+        <span>${esc(site.host)}<em>${site.changes} ${site.changes === 1 ? 'change' : 'changes'}</em></span>
+        <button class="link" data-remove-site="${esc(site.host)}">Remove</button></label>`,
+    )
+    .join('')
+  const next = html || `<p class="help">No restyled sites yet.</p>`
+  if (styledSitesEl.innerHTML !== next) styledSitesEl.innerHTML = next
+}
+styledSitesEl.addEventListener('change', (e) => {
+  const box = e.target as HTMLInputElement
+  if (box.dataset.site) send('restyle-site', { host: box.dataset.site, action: box.checked ? 'on' : 'off' })
+})
+styledSitesEl.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-remove-site]')
+  if (!b) return
+  e.preventDefault()
+  send('restyle-site', { host: b.dataset.removeSite, action: 'reset' })
 })
 hideCapture.addEventListener('change', () => sendPrefs({ hideFromScreenCapture: hideCapture.checked }))
 $('openSettingsFile').addEventListener('click', () => send('open-settings-file'))
@@ -1045,6 +1154,7 @@ document.addEventListener('mousedown', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || renaming || e.target === omnibox) return
   if (!rulesPop.hidden) closeRules()
+  else if (!restylePop.hidden) setRestyle(false)
   else if (!extPop.hidden) setExtensions(false)
   else if (dlOpen) setDownload(null)
   else if (!settingsEl.hidden) setSettings(false)
@@ -1138,6 +1248,7 @@ window.jbrow.on('anim', (m: AnimMessage) => {
   hideSuggestions()
   setExtensions(false)
   setDownload(null)
+  setRestyle(false)
   setSettings(false)
   closeRules()
   if (renaming) commitRename()
