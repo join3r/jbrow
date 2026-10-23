@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, type Rectangle } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ActionId } from '../shared/shortcuts'
@@ -42,8 +42,12 @@ export interface Settings {
   searchSuggestions: boolean
   /** Unpacked extension folders to load, per profile ID. */
   unpackedExtensions: Record<string, string[]>
-  /** Panel size as a fraction of the display's work area. */
-  panel: { widthFraction: number; heightFraction: number }
+  /**
+   * Where the window goes. Until you move or resize it, it's this fraction of the display's work
+   * area. `displays`: where you left the unpinned panel on each display, by display ID, relative to
+   * that display's work area. `pinned`: where you left the pinned window, in screen coordinates.
+   */
+  panel: { widthFraction: number; heightFraction: number; displays: Record<string, Rectangle>; pinned: Rectangle | null }
   /** Keep jbrow out of screen shares and screenshots. */
   hideFromScreenCapture: boolean
   /** Warn before opening sites on the phishing and malware lists (see dangerous.ts). */
@@ -70,6 +74,8 @@ export interface Settings {
   miniPlayer: MiniPlayerPrefs
   /** Page zoom: the default in percent, and whether each site's zoom is kept across restarts (`sites`, hostname without www → percent). */
   zoom: { defaultPercent: number; remember: boolean; sites: Record<string, number> }
+  /** Width of the extension side panel (chrome.sidePanel), in pixels. Drag its edge to change it. */
+  sidePanelWidth: number
 }
 
 const DEFAULTS: Settings = {
@@ -91,7 +97,7 @@ const DEFAULTS: Settings = {
   searchUrl: 'https://www.google.com/search?q=%s',
   searchSuggestions: true,
   unpackedExtensions: {},
-  panel: { widthFraction: 0.72, heightFraction: 0.78 },
+  panel: { widthFraction: 0.72, heightFraction: 0.78, displays: {}, pinned: null },
   hideFromScreenCapture: true,
   dangerousSites: true,
   pinned: true,
@@ -105,6 +111,7 @@ const DEFAULTS: Settings = {
   restyle: { agent: 'claude', model: 'sonnet', codexModel: '', claudePath: '', codexPath: '' },
   miniPlayer: { onHide: true, onTabSwitch: false, mutedToo: false, sites: 'all', onlySites: [], exceptSites: [] },
   zoom: { defaultPercent: 100, remember: true, sites: {} },
+  sidePanelWidth: 360,
 }
 
 export const settingsPath = () => path.join(app.getPath('userData'), 'settings.json')
@@ -125,6 +132,14 @@ export function loadSettings(): Settings {
     settings.restyle = { ...DEFAULTS.restyle, ...rest.restyle }
     settings.miniPlayer = { ...DEFAULTS.miniPlayer, ...rest.miniPlayer }
     settings.zoom = { ...DEFAULTS.zoom, ...rest.zoom }
+    // Older settings have only the fractions. A place that isn't a rectangle is dropped.
+    const panel = { ...structuredClone(DEFAULTS.panel), ...rest.panel }
+    const isRect = (r: unknown): r is Rectangle =>
+      !!r && typeof r === 'object' && ['x', 'y', 'width', 'height'].every((k) => Number.isFinite((r as Record<string, unknown>)[k]))
+    panel.displays = Object.fromEntries(Object.entries(panel.displays ?? {}).filter(([, r]) => isRect(r)))
+    if (!isRect(panel.pinned)) panel.pinned = null
+    settings.panel = panel
+    if (!Number.isFinite(settings.sidePanelWidth)) settings.sidePanelWidth = DEFAULTS.sidePanelWidth
     if (!['system', 'light', 'dark'].includes(settings.appearance)) settings.appearance = DEFAULTS.appearance
     if (!THEMES.some((t) => t.id === settings.theme)) settings.theme = DEFAULTS.theme
     if (!['tint', 'edge', 'solid'].includes(settings.profileStyle)) settings.profileStyle = DEFAULTS.profileStyle

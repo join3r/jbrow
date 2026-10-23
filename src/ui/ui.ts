@@ -1,7 +1,7 @@
 import { cssEase } from '../shared/ease'
 import { engineOf, isSearchUrl, SEARCH_ENGINES, suggestUrlFor } from '../shared/engines'
 import { urlMatcher } from '../shared/patterns'
-import { childrenOf, displayName, folderThreads, isAsleep, numberedThreads, sections, type AppView, type FolderView, type ThreadView } from '../shared/threads'
+import { childrenOf, displayName, folderThreads, isAsleep, isRoot, numberedThreads, sections, subtree, type AppView, type FolderView, type ThreadView } from '../shared/threads'
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type VisitView } from '../shared/types'
 
@@ -72,7 +72,6 @@ const root = $('root')
 const omnibox = $<HTMLInputElement>('omnibox')
 const suggest = $('suggest')
 const threadsEl = $('threads')
-const snapshot = $<HTMLImageElement>('snapshot')
 const actions = $('actions')
 const extPop = $('extPop')
 const restylePane = $('restylePane')
@@ -88,7 +87,6 @@ const send = window.jbrow.send
 let S: UiState | null = null
 let renaming: string | null = null
 let dragId: string | null = null
-let snapshotTab: string | null = null
 let highlighted = 0
 let isPrivate: (url: string) => boolean = () => false
 let privateKey = ''
@@ -126,8 +124,13 @@ const keyHint = (id: ActionId) => (keyLabel(id) ? ` (${keyLabel(id)})` : '')
 
 /** What an asleep thread held, e.g. "4 tabs · github.com, mozilla.org +1 · 5 d". */
 function sleepSummary(v: ThreadView<UiTab>, now: number): string {
+  return [threadSummary(v.all), `${Math.floor((now - v.lastSeen) / DAY_MS)} d`].filter(Boolean).join(' · ')
+}
+
+/** How many tabs and which sites a thread holds, e.g. "4 tabs · github.com, mozilla.org +1". */
+function threadSummary(all: TabRecord[]): string {
   const hosts = new Map<string, number>()
-  for (const t of v.all) {
+  for (const t of all) {
     let host = ''
     try {
       if (/^https?:/i.test(t.url)) host = isPrivate(t.url) ? 'Private' : new URL(t.url).hostname.replace(/^www\./, '')
@@ -136,8 +139,17 @@ function sleepSummary(v: ThreadView<UiTab>, now: number): string {
   }
   const top = [...hosts].sort((a, b) => b[1] - a[1]).map(([h]) => h)
   const sites = top.slice(0, 2).join(', ') + (top.length > 2 ? ` +${top.length - 2}` : '')
-  const tabs = v.all.length > 1 ? `${v.all.length} tabs` : ''
-  return [tabs, sites, `${Math.floor((now - v.lastSeen) / DAY_MS)} d`].filter(Boolean).join(' · ')
+  const tabs = all.length > 1 ? `${all.length} tabs` : ''
+  return [tabs, sites].filter(Boolean).join(' · ')
+}
+
+/** Archived threads, most recently archived first. */
+function archivedThreads(): { root: TabRecord; all: TabRecord[] }[] {
+  const a = S?.archived ?? []
+  return a
+    .filter((t) => isRoot(a, t))
+    .sort((x, y) => (y.archivedAt ?? 0) - (x.archivedAt ?? 0) || y.lastSeen - x.lastSeen)
+    .map((root) => ({ root, all: subtree(a, root) }))
 }
 
 // ---------- render ----------
@@ -198,6 +210,7 @@ function render() {
   if (S.scope) scope.innerHTML = `<span>${esc(S.scope.name)} tabs only</span><button data-unscope>Show all</button>`
 
   renderThreads()
+  renderArchiveNotice()
 
   const blank = !active?.url
   $('blank').hidden = !blank
@@ -221,9 +234,67 @@ function render() {
       .map(([k, what]) => `<div><dt>${esc(k)}</dt><dd>${esc(what)}</dd></div>`)
       .join('')
   }
-  snapshot.hidden = blank || snapshotTab !== S.activeId || pageCovered()
   syncCovering()
+  renderSidePanel()
 }
+
+/** The header and the space for an extension's side panel; its page is a native view main lays over it. */
+const sidePanelEl = $('sidePanel')
+let sideDrag: { x: number; width: number } | null = null
+function renderSidePanel() {
+  const side = S?.sidePanel
+  sidePanelEl.hidden = !side
+  if (!side) {
+    root.style.removeProperty('--side')
+    root.style.removeProperty('--side-w')
+    return
+  }
+  if (!sideDrag) setSideWidth(side.width)
+  $('sideName').textContent = side.name
+  const img = $<HTMLImageElement>('sideIcon')
+  if (!side.icon) img.removeAttribute('src')
+  else if (img.getAttribute('src') !== side.icon) img.src = side.icon
+}
+/** --side-w is the panel, --side the room it takes from the page (with the gap). */
+function setSideWidth(width: number) {
+  root.style.setProperty('--side-w', `${width}px`)
+  root.style.setProperty('--side', `${width + 8}px`)
+}
+$('sideClose').addEventListener('click', () => send('side-panel-close'))
+$('sideHead').addEventListener('contextmenu', (e) => {
+  e.preventDefault()
+  send('side-panel-menu')
+})
+// Drag the gap left of the panel to resize it. macOS keeps sending the drag here even over the pages.
+$('sideSplit').addEventListener('mousedown', (e) => {
+  if (!S?.sidePanel || e.button !== 0) return
+  e.preventDefault()
+  const drag = (sideDrag = { x: e.clientX, width: S.sidePanel.width })
+  $('sideSplit').classList.add('drag')
+  document.body.classList.add('resizing')
+  let width = drag.width
+  let queued = false
+  const move = (ev: MouseEvent) => {
+    width = Math.max(240, drag.width + drag.x - ev.clientX)
+    setSideWidth(width)
+    if (queued) return
+    queued = true
+    requestAnimationFrame(() => {
+      queued = false
+      send('side-panel-width', { width })
+    })
+  }
+  const up = () => {
+    sideDrag = null
+    $('sideSplit').classList.remove('drag')
+    document.body.classList.remove('resizing')
+    window.removeEventListener('mousemove', move)
+    window.removeEventListener('mouseup', up)
+    send('side-panel-width', { width, done: true })
+  }
+  window.addEventListener('mousemove', move)
+  window.addEventListener('mouseup', up)
+})
 
 /**
  * Pinned extensions, as <browser-action> buttons in the toolbar. Only those the current profile
@@ -325,8 +396,13 @@ function renderThreads() {
   html += `<div class="head" data-head="today">${recentLabel(S.prefs.earlierAfterHours)}</div>`
   html += s.today.length ? s.today.map(block).join('') : `<div class="empty">Nothing here yet</div>`
   html += s.apps.map((a) => appSection(a, appBlock)).join('')
-  // Earlier sits at the bottom of the sidebar, away from what's current.
-  if (s.earlier.length) html += `<div class="earlier-sec"><div class="head" data-head="today">Earlier</div><div class="earlier">${s.earlier.map(block).join('')}</div></div>`
+  // Earlier sits at the bottom of the sidebar, away from what's current, and the way to archived threads under it.
+  const archived = S.archived.filter((t) => isRoot(S!.archived, t)).length
+  const archivedLink = archived
+    ? `<button class="archived-link" data-show-archived title="Archived threads">${icon('archive')}${archived} archived</button>`
+    : ''
+  if (s.earlier.length) html += `<div class="earlier-sec"><div class="head" data-head="today">Earlier</div><div class="earlier">${s.earlier.map(block).join('')}</div>${archivedLink}</div>`
+  else html += archivedLink
   threadsEl.innerHTML = html
 
   const input = document.getElementById('ren') as HTMLInputElement | null
@@ -337,6 +413,16 @@ function renderThreads() {
     } else input.select()
     input.focus()
   }
+}
+
+/** "Archived 3 threads · Undo" after archiving, until jbrow hides once you've seen it. */
+function renderArchiveNotice() {
+  const roots = S?.archiveNotice ?? null
+  const el = $('archiveNotice')
+  el.hidden = !roots
+  if (!roots || !S) return
+  $('archiveNoticeText').textContent = `Archived ${roots.length} ${roots.length === 1 ? 'thread' : 'threads'}`
+  el.title = roots.flatMap((id) => S!.archived.filter((t) => t.id === id).map(displayName)).join('\n')
 }
 
 /** Heading for threads seen within the Earlier cutoff. */
@@ -691,6 +777,7 @@ threadsEl.addEventListener('click', (e) => {
   const closeBtn = el.closest<HTMLElement>('[data-close]')
   if (closeBtn) return send('close', { id: closeBtn.dataset.close })
   if (el.closest('[data-new-folder]')) return send('new-folder')
+  if (el.closest('[data-show-archived]')) return showArchived()
   if (el.closest('[data-close-settings]')) return setSettings(false)
   if (el.closest('[data-settings]')) return showSettings(true)
   const folder = el.closest<HTMLElement>('.frow')
@@ -1287,6 +1374,7 @@ function renderSettings(all = false) {
   seg('zoomDefault', String(S.prefs.zoom.defaultPercent))
   zoomRemember.checked = S.prefs.zoom.remember
   renderZoomSites()
+  renderArchived()
   renderProfiles()
   if (all || document.activeElement !== animSpeed) animSpeed.value = String(animation.durationMs)
   $('animSpeedOut').textContent = `${animSpeed.value} ms`
@@ -1338,9 +1426,8 @@ $('animEase').addEventListener('click', (e) => {
 })
 animSpeed.addEventListener('input', () => ($('animSpeedOut').textContent = `${animSpeed.value} ms`))
 animSpeed.addEventListener('change', () => animPrefs({ durationMs: Number(animSpeed.value) }))
-$('animPreview').addEventListener('click', () => {
-  if (S) playIn({ phase: 'in', ...S.prefs.animation }, false)
-})
+// The real thing: the window plays its show animation again where it is.
+$('animPreview').addEventListener('click', () => send('anim-preview'))
 
 let privateTimer: number | undefined
 function savePrivateUrls() {
@@ -1460,8 +1547,41 @@ zoomSitesEl.addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-zoom-site]')
   if (b) send('zoom-reset', { site: b.dataset.zoomSite })
 })
+
+const archivedListEl = $('archivedList')
+/** Archived threads in settings: name, sites, when, and Restore and Forget on hover. */
+function renderArchived() {
+  if (!S) return
+  const html = archivedThreads()
+    .map(({ root, all }) => {
+      const fav = root.favicon ? `<img class="fav" src="${esc(root.favicon)}" alt="">` : `<span class="fav none"></span>`
+      const urls = all.map((t) => shownUrl(t.url)).join('\n')
+      const color = profile(root.profile)?.color ?? ''
+      return `<div class="arch-row" data-arch="${esc(root.id)}" style="--pc:${esc(color)}">${fav}<span class="arch-t" title="${esc(urls)}">${esc(displayName(root))}<small>${esc(threadSummary(all))}</small></span><span class="arch-when">${esc(since(root.archivedAt ?? Date.now()))}</span><span class="arch-acts"><button class="icon sm" data-unarchive title="Restore" aria-label="Restore">${icon('undo')}</button><button class="icon sm" data-forget title="Forget" aria-label="Forget">${icon('trash')}</button></span></div>`
+    })
+    .join('')
+  const next = html || `<p class="help">Nothing archived.</p>`
+  if (archivedListEl.innerHTML !== next) archivedListEl.innerHTML = next
+}
+archivedListEl.addEventListener('click', (e) => {
+  const el = e.target as HTMLElement
+  const id = el.closest<HTMLElement>('[data-arch]')?.dataset.arch
+  if (!id) return
+  if (el.closest('[data-unarchive]')) send('unarchive', { id })
+  else if (el.closest('[data-forget]')) send('forget-archived', { id })
+})
+
+/** Opens settings at the Archived list. */
+function showArchived() {
+  setSettings(true, 'threads')
+  $('archivedItem').scrollIntoView({ block: 'start' })
+}
+
+$('undoArchive').addEventListener('click', () => send('undo-archive'))
+$('dismissNotice').addEventListener('click', () => send('dismiss-archive-notice'))
 hideCapture.addEventListener('change', () => sendPrefs({ hideFromScreenCapture: hideCapture.checked }))
 pinWindow.addEventListener('change', () => send('pin', { on: pinWindow.checked }))
+$('resetWindow').addEventListener('click', () => send('window-reset'))
 quietLinks.addEventListener('change', () => sendPrefs({ quietLinks: quietLinks.checked }))
 dangerousSites.addEventListener('change', () => sendPrefs({ dangerousSites: dangerousSites.checked }))
 $('clearProfile').addEventListener('click', (e) => {
@@ -2195,11 +2315,6 @@ window.jbrow.on('state', (state: UiState) => {
   document.documentElement.dataset.profileStyle = state.prefs.profileStyle
   render()
 })
-window.jbrow.on('snapshot', ({ dataUrl, tabId }: { dataUrl: string; tabId: string }) => {
-  snapshot.src = dataUrl
-  snapshotTab = tabId
-  render()
-})
 window.jbrow.on('suggestions', (r: SuggestReply) => {
   if (r.seq !== suggestSeq || document.activeElement !== omnibox) return
   visitHits = r.visits
@@ -2250,11 +2365,11 @@ window.jbrow.on('downloads', (list: DownloadInfo[]) => {
 let playRun = 0
 
 /**
- * Starts the show animation on the first frame the window paints, then tells the main process
- * when it started and ended so the window fade and the live page keep in step with it.
- * The settings preview passes `report = false`.
+ * The main process moves, sizes and fades the window, page and all; the UI's own part is
+ * materialize's blur. It starts on the first frame the window paints and tells the main process,
+ * which starts moving the window then.
  */
-function playIn(m: AnimMessage, report = true) {
+function playIn(m: AnimMessage) {
   const run = ++playRun
   root.dataset.style = m.style
   root.style.setProperty('--dur', `${m.durationMs}ms`)
@@ -2262,20 +2377,11 @@ function playIn(m: AnimMessage, report = true) {
   root.classList.add('pre')
   root.classList.remove('shown')
   void root.offsetWidth
-  const moves = m.style !== 'fade' && m.style !== 'off' && !matchMedia('(prefers-reduced-motion: reduce)').matches
   requestAnimationFrame(() => {
     if (run !== playRun) return
     root.classList.remove('pre')
     root.classList.add('shown')
-    if (!report) return
     send('anim-start')
-    if (!moves) return send('anim-end')
-    const end = (e: TransitionEvent) => {
-      if (e.target !== root || e.propertyName !== 'transform') return
-      root.removeEventListener('transitionend', end)
-      if (run === playRun) send('anim-end')
-    }
-    root.addEventListener('transitionend', end)
   })
 }
 

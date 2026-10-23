@@ -31,6 +31,8 @@ export interface TabRecord {
   unread?: boolean
   /** Set on every tab of an archived thread. */
   archivedAt?: number
+  /** When Undo brought the thread back. Archiving counts it as seen then, so it gets its full time again. */
+  restoredAt?: number
 }
 
 /** A folder in the Kept section. */
@@ -55,8 +57,10 @@ export interface UiState {
   tabs: UiTab[]
   activeId: string | null
   folders: Folder[]
-  /** Tabs of archived threads, for finding them from the address bar. */
+  /** Tabs of archived threads, for finding them from the address bar and the Archived list. */
   archived: TabRecord[]
+  /** Threads (root IDs) archived since you last looked, for the sidebar's Undo. */
+  archiveNotice: string[] | null
   /** WebContents ID of the active tab, for <browser-action-list>. Null for a new tab with no page yet. */
   activeWebContentsId: number | null
   /** Session partition of the active tab's profile, for <browser-action-list>. */
@@ -69,6 +73,8 @@ export interface UiState {
   /** Names and icons of the apps threads belong to, by scope key. */
   apps: Record<string, AppLabel>
   pinned: boolean
+  /** The extension side panel next to the page, if one is open for the active tab. */
+  sidePanel: SidePanelState | null
   /** Restyling of the active tab's site. Null when its page isn't a website. */
   restyle: RestyleView | null
   /** The active tab's certificate. Null for pages not loaded over https. */
@@ -342,4 +348,30 @@ export interface DownloadInfo {
   endedAt?: number
   /** False for apps, installers and scripts: Open shows them in Finder instead of running them. */
   openable: boolean
+}
+
+/** An extension's side panel (chrome.sidePanel) as the UI draws its header. */
+export interface SidePanelState {
+  extensionId: string
+  name: string
+  /** Data URL of the extension's icon. */
+  icon?: string
+  /** In pixels, as laid out now. */
+  width: number
+}
+
+/** User scripts (chrome.userScripts) of one extension and world that a page should run. */
+export interface UserScriptInjection {
+  extensionId: string
+  world: 'MAIN' | 'USER_SCRIPT'
+  /** Isolated world number for USER_SCRIPT scripts. */
+  worldId: number
+  worldName: string
+  /** The world's content security policy, from configureWorld. */
+  csp?: string
+  /** User scripts in this world get chrome.runtime.sendMessage. */
+  messaging: boolean
+  runAt: 'document_start' | 'document_end' | 'document_idle'
+  /** The script's sources, in order. */
+  js: { code: string; url?: string }[]
 }

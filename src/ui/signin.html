@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <title>Sign in</title>
+    <link rel="stylesheet" href="ui.css" />
+    <style>
+      body { background: var(--solid); }
+      .cert-warn { padding: 22px 22px 16px; background: none; }
+      .cert-warn-icon { margin-bottom: 8px; }
+      .cert-warn-icon svg.i { width: 24px; height: 24px; }
+      .cert-warn h1 { font-size: 18px; margin-bottom: 4px; }
+      .cert-warn p { font-size: 13px; margin-bottom: 14px; overflow-wrap: anywhere; }
+      .login-form { max-width: 360px; }
+      .login-form .cert-acts { margin-bottom: 0; }
+    </style>
+  </head>
+  <body>
+    <section class="cert-warn login-warn" aria-live="polite">
+      <span class="cert-warn-icon">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+      </span>
+      <h1>Sign in</h1>
+      <p id="loginText"></p>
+      <form id="loginForm" class="login-form" autocomplete="on">
+        <label>Username <input id="loginUser" name="username" autocomplete="username" spellcheck="false" autocapitalize="off" /></label>
+        <label>Password <input id="loginPass" name="password" type="password" autocomplete="current-password" /></label>
+        <p id="loginError" class="login-error" hidden>Wrong username or password.</p>
+        <div class="cert-acts">
+          <button class="btn primary" type="submit">Sign in</button>
+          <button id="loginCancel" class="btn" type="button">Cancel</button>
+        </div>
+      </form>
+    </section>
+    <script src="signin.js"></script>
+  </body>
+</html>

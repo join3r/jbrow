@@ -1,4 +1,4 @@
-/* Sizes here must match SIDEBAR_WIDTH, TOOLBAR_HEIGHT and GUTTER in src/main/panel.ts. */
+/* Sizes here must match SIDEBAR_WIDTH, TOOLBAR_HEIGHT, GUTTER, SIDE_GAP and SIDE_HEADER in src/main/panel.ts. */
 /* Theme colors are set on [data-theme] rather than :root alone, so a theme swatch in settings can show its own. */
 :root {
   --sidebar: 256px;
@@ -136,16 +136,13 @@ button { font: inherit; color: inherit; cursor: default; }
 button:focus-visible, input:focus-visible, [role='button']:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 [hidden] { display: none !important; }
 
-/* ---------- summon animation (the native window fades; this moves the content) ---------- */
-.panel { position: fixed; inset: 0; transition: transform var(--dur) var(--ease), filter var(--dur) var(--ease); }
+/* ---------- summon animation (the main process moves and fades the window, page and all; this blurs the UI for materialize) ---------- */
+.panel { position: fixed; inset: 0; transition: filter var(--dur) var(--ease); }
 .panel.pre { transition: none; }
-.panel:not(.shown)[data-style='materialize'] { transform: scale(0.975) translateY(6px); filter: blur(8px); }
-.panel:not(.shown)[data-style='slide'] { transform: translateY(-28px); }
-.panel:not(.shown)[data-style='scale'] { transform: scale(0.92); }
-.panel:not(.shown)[data-style='fade'], .panel:not(.shown)[data-style='off'] { transform: none; }
+.panel:not(.shown)[data-style='materialize'] { filter: blur(8px); }
 .panel[data-style='off'] { transition: none; }
 @media (prefers-reduced-motion: reduce) {
-  .panel:not(.shown)[data-style] { transform: none; filter: none; }
+  .panel:not(.shown)[data-style] { filter: none; }
 }
 
 /* ---------- toolbar ---------- */
@@ -319,6 +316,16 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .row .sum { grid-column: 2 / -1; margin-top: -4px; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dz { outline: 2px dashed var(--accent); outline-offset: -2px; }
 .head.dz { color: var(--accent); }
+/* The way to the Archived list, quiet at the very bottom of the threads. */
+.archived-link { align-self: flex-start; margin-top: auto; display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 0; background: none; border-radius: 6px; font: 11px var(--mono); color: var(--muted); }
+.earlier-sec .archived-link { margin-top: 6px; }
+.archived-link svg.i { width: 12px; height: 12px; }
+.archived-link:hover { background: var(--hover); color: var(--ink); }
+/* After archiving: "Archived 3 threads · Undo". */
+.notice { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 2px 2px 2px 10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); font-size: 12px; }
+.notice > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.notice .link { font-weight: 600; text-decoration: none; }
+.notice .icon.sm svg.i { width: 12px; height: 12px; }
 .toast { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); font-size: 12px; line-height: 1.45; }
 
 /* App sections: the heading shows the apps' icons, overlapping for linked apps. */
@@ -354,16 +361,29 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .rules-pop textarea { display: block; width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 7px; background: var(--selected); color: var(--ink); padding: 6px 8px; font: 12px var(--mono); }
 
 /* ---------- content (the native page view sits on top of this) ---------- */
-#content { position: absolute; z-index: 0; left: var(--sidebar); top: var(--toolbar); right: var(--gutter); bottom: var(--gutter); border-radius: 9px; overflow: hidden; background: var(--surface); box-shadow: 0 0 0 100vmax var(--tint); }
+#content { position: absolute; z-index: 0; left: var(--sidebar); top: var(--toolbar); right: calc(var(--gutter) + var(--side, 0px)); bottom: var(--gutter); border-radius: 9px; overflow: hidden; background: var(--surface); box-shadow: 0 0 0 100vmax var(--tint); }
 /*
  * While a popover or the suggestions cover the page, jbrow's UI sits above the live page (see
  * Panel.setOverlay), so the page area turns clear. Blur can't reach a page in another view, so
  * popovers turn nearly solid instead.
  */
 .covering #content { background: none; }
-.covering #snapshot { visibility: hidden; }
 .covering :is(.pop, .suggest) { background: color-mix(in srgb, var(--solid) 96%, transparent); }
-#snapshot { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; }
+
+/* An extension's side panel (chrome.sidePanel). Its page is a native view over .side-body. */
+.side-panel { position: absolute; z-index: 1; top: var(--toolbar); right: var(--gutter); bottom: var(--gutter); width: var(--side-w, 0px); display: flex; flex-direction: column; }
+.side-split { position: absolute; left: -8px; top: 0; bottom: 0; width: 8px; cursor: col-resize; }
+.side-split:hover, .side-split.drag { background: linear-gradient(var(--accent), var(--accent)) center / 2px 40% no-repeat; }
+.side-head { flex: none; height: 32px; display: flex; align-items: center; gap: 7px; padding-left: 6px; min-width: 0; font-size: 12px; font-weight: 600; }
+.side-head img { width: 16px; height: 16px; border-radius: 3px; }
+.side-head img:not([src]) { visibility: hidden; }
+.side-head span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Close shows on hover, like a tab row's. */
+.side-head .icon { visibility: hidden; }
+.side-head:hover .icon, .side-head .icon:focus-visible { visibility: visible; }
+.side-body { flex: 1; min-height: 0; border-radius: 9px; background: var(--surface); }
+.covering .side-body { background: none; }
+body.resizing, body.resizing * { cursor: col-resize !important; }
 .blank { padding: 56px 48px; max-width: 640px; }
 .blank h1 { font-size: 26px; font-weight: 600; margin: 0 0 8px; }
 .blank p { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
@@ -480,6 +500,8 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .check { display: flex; gap: 10px; align-items: flex-start; line-height: 1.45; }
 .check input { margin: 2px 0 0; accent-color: var(--accent); }
 .set-item > .check + .check { margin-top: 8px; }
+.set-item > .check + .help { margin-top: 10px; }
+.set-item > .chip { display: inline-flex; }
 .shortcuts .sc-profile { display: flex; align-items: center; gap: 6px; margin: 18px 0 6px; font-weight: 600; }
 .shortcuts .sc-profile .dot { width: 8px; height: 8px; border-radius: 50%; }
 .shortcuts .sc-ext { margin: 12px 0 4px; color: var(--muted); font-size: 12px; font-weight: 600; }
@@ -496,6 +518,19 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .styled-sites .check input { margin: 0; }
 .styled-sites .check span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .styled-sites em { font-style: normal; font-size: 11px; color: var(--muted); margin-left: 6px; }
+/* Archived threads in settings. */
+.archived-list { margin-top: 8px; }
+.arch-row { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 5px 6px 5px 12px; border-radius: 7px; }
+.arch-row::before { content: ''; position: absolute; left: 3px; top: 8px; bottom: 8px; width: 3px; border-radius: 2px; background: var(--pc, var(--muted)); }
+.arch-row:hover { background: var(--hover); }
+.arch-row .fav { width: 16px; height: 16px; border-radius: 3px; object-fit: contain; }
+.arch-row .fav.none { background: var(--line); }
+.arch-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arch-t small { display: block; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.arch-when { font-size: 11px; color: var(--muted); }
+/* Restore and Forget show on hover, like a row's close button. */
+.arch-acts { display: flex; visibility: hidden; }
+.arch-row:hover .arch-acts, .arch-acts:focus-within { visibility: visible; }
 
 .app-list { margin-bottom: 10px; }
 .app-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 5px 0; }

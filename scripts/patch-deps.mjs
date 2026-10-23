@@ -97,6 +97,46 @@ const patches = [
     },
   ]),
   {
+    file: 'node_modules/electron-chrome-extensions/dist/chrome-extension-api.preload.js',
+    why: 'events answer hasListener/hasListeners instead of throwing "Method not implemented" (SideHN checks cookies.onChanged)',
+    find: `        addListener(callback) {
+          electron.addExtensionListener(extensionId, this.name, callback);
+        }
+        removeListener(callback) {
+          electron.removeExtensionListener(extensionId, this.name, callback);
+        }
+        getRules(ruleIdentifiers, callback) {
+          throw new Error("Method not implemented.");
+        }
+        hasListener(callback) {
+          throw new Error("Method not implemented.");
+        }`,
+    replace: `        addListener(callback) {
+          (this.callbacks ??= new Set()).add(callback);
+          electron.addExtensionListener(extensionId, this.name, callback);
+        }
+        removeListener(callback) {
+          this.callbacks?.delete(callback);
+          electron.removeExtensionListener(extensionId, this.name, callback);
+        }
+        getRules(ruleIdentifiers, callback) {
+          throw new Error("Method not implemented.");
+        }
+        hasListener(callback) {
+          return !!this.callbacks?.has(callback);
+        }`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/chrome-extension-api.preload.js',
+    why: 'see above',
+    find: `        hasListeners() {
+          throw new Error("Method not implemented.");
+        }`,
+    replace: `        hasListeners() {
+          return !!this.callbacks?.size;
+        }`,
+  },
+  {
     file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
     why: "let jbrow add items (pin to toolbar) to an extension button's right-click menu",
     find: `    menu.popup({

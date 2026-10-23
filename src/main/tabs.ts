@@ -24,7 +24,7 @@ export interface TabsDeps {
   window: () => BrowserWindow
   runtime: (profileId: string) => ProfileRuntime | undefined
   contentBounds: () => Rectangle
-  /** False while the panel animates or is hidden; the active view stays hidden. */
+  /** False while the panel is hidden; the active view stays hidden. It shows while the panel animates. */
   contentVisible: () => boolean
   /** A new view lands on top of everything; this puts jbrow's UI back where it belongs. */
   onViewAdded: () => void
@@ -963,19 +963,21 @@ export class Tabs {
    * Archives threads unseen for `afterMs`. Kept threads and the active thread stay. A thread
    * with an address matching a folder's rules moves into that folder (and so becomes kept)
    * instead; the oldest folder wins. Threads unseen for `sleepAfterMs` but not yet archived
-   * unload their pages (see isAsleep). 0 turns either off.
+   * unload their pages (see isAsleep). 0 turns either off. Returns the root IDs of the threads
+   * it archived.
    */
-  sweep(afterMs: number, sleepAfterMs: number) {
+  sweep(afterMs: number, sleepAfterMs: number): string[] {
     const now = Date.now()
     const folders = [...this.folders]
       .sort((a, b) => a.createdAt - b.createdAt)
       .filter((f) => f.rules.length)
       .map((f) => ({ id: f.id, matches: urlMatcher(f.rules) }))
     let changed = false
+    const archived: string[] = []
     for (const root of this.records.filter((t) => isRoot(this.records, t) && !t.kept)) {
       const all = subtree(this.records, root)
       if (all.some((t) => t.id === this.activeId)) continue
-      if (afterMs <= 0 || now - Math.max(...all.map((t) => t.lastSeen)) < afterMs) {
+      if (afterMs <= 0 || now - Math.max(...all.map((t) => Math.max(t.lastSeen, t.restoredAt ?? 0))) < afterMs) {
         if (isAsleep(all, { now, afterMs: sleepAfterMs, activeId: this.activeId }) && this.unload(all)) changed = true
         continue
       }
@@ -987,11 +989,13 @@ export class Tabs {
         for (const t of all) {
           this.dropView(t)
           t.archivedAt = now
+          t.restoredAt = undefined
         }
         const ids = new Set(all.map((t) => t.id))
         this.records = this.records.filter((t) => !ids.has(t.id))
         this.mru = this.mru.filter((m) => !ids.has(m))
         this.archived.push(...all)
+        archived.push(root.id)
       }
       changed = true
     }
@@ -1001,6 +1005,7 @@ export class Tabs {
       changed = true
     }
     if (changed) this.changed()
+    return archived
   }
 
   /** Closes an asleep thread's pages; each loads again when opened. A page playing sound stays. */
@@ -1022,20 +1027,46 @@ export class Tabs {
     this.changed()
   }
 
-  /** Brings an archived tab's whole thread back and makes that tab active. */
-  restore(id: string) {
-    const rec = this.archived.find((t) => t.id === id)
-    if (!rec) return
-    const all = subtree(this.archived, rootOf(this.archived, rec))
-    const ids = new Set(all.map((t) => t.id))
-    this.archived = this.archived.filter((t) => !ids.has(t.id))
+  /** Every tab of the archived threads that `ids` (any tab of each) belong to, each thread once. */
+  private archivedThreads(ids: string[]): TabRecord[] {
+    const roots = new Set(ids.flatMap((id) => this.archived.filter((t) => t.id === id).map((t) => rootOf(this.archived, t))))
+    return [...roots].flatMap((r) => subtree(this.archived, r))
+  }
+
+  /**
+   * Brings archived threads back whole, their back and forward lists with them. `ids` can be any
+   * tab of a thread. Undo passes `inPlace`: a thread keeps when it was last seen, so it goes back
+   * to the same spot in the sidebar (asleep, if it was), and gets its full time before archiving
+   * again. Otherwise it counts as seen now.
+   */
+  unarchive(ids: string[], inPlace = false) {
+    const all = this.archivedThreads(ids)
+    if (!all.length) return
+    const back = new Set(all.map((t) => t.id))
+    this.archived = this.archived.filter((t) => !back.has(t.id))
     const now = Date.now()
     for (const t of all) {
       t.archivedAt = undefined
-      t.lastSeen = now
+      if (inPlace) t.restoredAt = now
+      else t.lastSeen = now
     }
     this.records.push(...all)
+    this.changed()
+  }
+
+  /** Brings an archived tab's whole thread back and makes that tab active. */
+  restore(id: string) {
+    if (!this.archived.some((t) => t.id === id)) return
+    this.unarchive([id])
     this.activate(id)
+  }
+
+  /** Drops archived threads for good. `ids` can be any tab of a thread. */
+  forget(ids: string[]) {
+    const gone = new Set(this.archivedThreads(ids).map((t) => t.id))
+    if (!gone.size) return
+    this.archived = this.archived.filter((t) => !gone.has(t.id))
+    this.changed()
   }
 
   /** ⌃Tab: the tab used before the current one. */

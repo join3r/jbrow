@@ -11,23 +11,27 @@ import { Certificates } from './certs'
 import { DangerousSites } from './dangerous'
 import { DeviceChooser } from './devices'
 import { Logins } from './logins'
+import { SignInSheets } from './signin'
 import { ExtensionCommands } from './commands'
 import { Downloads, type DownloadAction } from './downloads'
 import { FindInPage } from './find'
 import { frontmostApp, type FrontApp } from './frontmost'
+import { IdleWatcher } from './idle'
 import { secondsSinceInput } from './input'
 import { logPath, setupLogging } from './log'
 import { Panel } from './panel'
 import { SitePermissions } from './permissions'
 import { MiniPlayer } from './pip'
 import { pickShareSource } from './screenshare'
+import { SidePanels } from './side-panel'
 import { installTestExtensions, loadUnpacked, partitionFor, setupProfile, setupProfiles, type ProfileDeps, type ProfileRuntime, type TabHooks } from './profiles'
 import { Restyler } from './restyle'
 import { loadSettings, saveSettings, scopeForApp, settingsPath, type Settings } from './settings'
 import { wireSwipes } from './swipe'
 import { Tabs, type UnloadKind } from './tabs'
+import { UserScripts } from './user-scripts'
 import { BrowsingHistory, fetchSearchSuggestions } from './visits'
-import { Zoom, ZOOM_STEPS } from './zoom'
+import { Zoom, ZOOM_STEPS, zoomSite } from './zoom'
 import { rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -51,9 +55,13 @@ let restyler: Restyler
 let certs: Certificates
 let dangerous: DangerousSites
 let logins: Logins
+let signIns: SignInSheets
 let devices: DeviceChooser
 let permissions: SitePermissions
 let profileDeps: ProfileDeps
+let sidePanels: SidePanels
+let idle: IdleWatcher
+let userScripts: UserScripts
 /** Pages you've visited, per profile, for the address bar's suggestions. */
 const visits = new BrowsingHistory()
 /** The settings screen is recording a shortcut: key presses go to it, not to jbrow or extensions. */
@@ -63,6 +71,13 @@ let filter = 'all'
 let scope: { key: string; name: string } | null = null
 let lastFront: FrontApp | null = null
 let hiddenAt = 0
+/**
+ * Threads (root IDs) archived since you last looked, for the sidebar's Undo. `seenAt` is when it
+ * was put on screen: archiving while jbrow is hidden counts from the next show. The notice goes
+ * when jbrow hides after it's been on screen for a few seconds, so a glance doesn't take it away.
+ */
+let archiveNotice: { roots: string[]; seenAt: number | null } | null = null
+const NOTICE_SEEN_MS = 3000
 // The PiP window's "back to tab" brings jbrow back on the video's tab. A page can make its video
 // leave PiP while playing too, so it only counts if a click just made jbrow the frontmost app:
 // showing the panel takes keyboard focus from whatever you're typing in.
@@ -94,7 +109,11 @@ if (process.env.JBROW_USER_DATA) {
 setupLogging()
 // Utilities that quit apps with no open windows (Vorssaint, for one) will quit jbrow while it's
 // hidden. Exclude jbrow in them; this line in the log shows when it happens.
-app.on('before-quit', () => console.log('[jbrow] quitting'))
+app.on('before-quit', () => {
+  console.log('[jbrow] quitting')
+  // A move or resize from the last moment, while the window is still there.
+  panel?.flush()
+})
 
 if (!app.requestSingleInstanceLock()) app.quit()
 
@@ -121,6 +140,7 @@ function state(): UiState {
     activeId: tabs.activeId,
     folders: tabs.folders,
     archived: tabs.archived,
+    archiveNotice: noticeRoots(),
     activeWebContentsId: tabs.activeWebContents()?.id ?? null,
     activePartition: active ? partitionFor(active.profile) : null,
     activeExtensions: actionExtensions(active?.profile),
@@ -129,6 +149,7 @@ function state(): UiState {
     scope,
     apps: appLabels(),
     pinned: panel.pinned,
+    sidePanel: sidePanels?.state() ?? null,
     restyle: active ? restyler.view(active.url) : null,
     cert: active ? certs.view(active.id, active.profile, active.url) : null,
     insecure: !!active && isInsecure(active.url),
@@ -291,7 +312,27 @@ function threadsInView() {
 }
 
 /** Unloads and archives stale threads, or files them into folders, per settings. */
-const sweep = () => tabs.sweep(settings.archiveAfterDays * DAY_MS, settings.summarizeAfterDays * DAY_MS)
+function sweep() {
+  const archived = tabs.sweep(settings.archiveAfterDays * DAY_MS, settings.summarizeAfterDays * DAY_MS)
+  if (!archived.length) return
+  const seenAt = archiveNotice?.seenAt ?? (panel?.visible ? Date.now() : null)
+  archiveNotice = { roots: [...new Set([...(archiveNotice?.roots ?? []), ...archived])], seenAt }
+  pushState()
+}
+
+/** The notice's threads that are still archived; one brought back or forgotten meanwhile drops out. */
+function noticeRoots(): string[] | null {
+  const roots = archiveNotice?.roots.filter((id) => tabs.archived.some((t) => t.id === id))
+  return roots?.length ? roots : null
+}
+
+/** Puts the threads the notice names back where they were. */
+function undoArchive() {
+  const roots = noticeRoots()
+  archiveNotice = null
+  if (roots) tabs.unarchive(roots, true)
+  pushState()
+}
 
 /** Most recently seen tab among the threads the sidebar currently shows. */
 function mostRecentInView(): string | undefined {
@@ -513,6 +554,17 @@ function runAction(id: ActionId) {
   }
 }
 
+/** ⌘+ (1), ⌘− (−1) or ⌘0 (0) for zoom; null for any other key. */
+function zoomDirection(input: Electron.Input): -1 | 0 | 1 | null {
+  if (!input.meta || input.alt) return null
+  const key = input.key.toLowerCase()
+  // Matched by code too, so zoom works on layouts where = and - sit elsewhere or need Shift.
+  return key === '=' || key === '+' || input.code === 'Equal' || input.code === 'NumpadAdd' ? 1
+    : key === '-' || input.code === 'Minus' || input.code === 'NumpadSubtract' ? -1
+    : key === '0' || input.code === 'Numpad0' ? 0
+    : null
+}
+
 function onKey(input: Electron.Input): boolean {
   if (input.type !== 'keyDown' || recordingShortcut) return false
   if (commands?.handleKey(tabs.active()?.profile, input)) return true
@@ -533,13 +585,8 @@ function onKey(input: Electron.Input): boolean {
   }
   if (!input.meta) return false
   const key = input.key.toLowerCase()
-  // Matched by code too, so zoom works on layouts where = and - sit elsewhere or need Shift.
-  const zoomKey =
-    key === '=' || key === '+' || input.code === 'Equal' || input.code === 'NumpadAdd' ? 1
-    : key === '-' || input.code === 'Minus' || input.code === 'NumpadSubtract' ? -1
-    : key === '0' || input.code === 'Numpad0' ? 0
-    : null
-  if (zoomKey !== null && !input.alt) {
+  const zoomKey = zoomDirection(input)
+  if (zoomKey !== null) {
     const wc = tabs.activeWebContents()
     if (wc) {
       const percent = zoom.step(wc, zoomKey)
@@ -551,6 +598,63 @@ function onKey(input: Electron.Input): boolean {
   if (!input.alt && !input.shift && /^[1-9]$/.test(key)) {
     openThread(Number(key))
     return true
+  }
+  return false
+}
+
+/** Action popups open for the active tab; extension shortcuts pressed in one act on that tab. */
+const popupTabs = new WeakMap<Electron.WebContents, Electron.WebContents>()
+
+/** jbrow's commands that bring up the panel when pressed in another window, to do their thing there. */
+const PANEL_ACTIONS = new Set<ActionId>(['newTab', 'newTabNextProfile', 'settings'])
+
+/**
+ * Keys in jbrow's other windows: extension popups, pop-out windows and popups pages open. As in
+ * Chrome, extension shortcuts work there too, for the window's profile. Your keys for closing a
+ * tab, reloading, zoom and DevTools act on the window and its page; new tab, new tab in the next
+ * profile and settings bring up the panel to do their thing. Every other key reaches the page.
+ */
+function onWindowKey(wc: Electron.WebContents, input: Electron.Input): boolean {
+  if (input.type !== 'keyDown' || recordingShortcut || wc.isDestroyed()) return false
+  // Tabs and side panels have the panel's keys (onKey).
+  const win = BrowserWindow.fromWebContents(wc)
+  if (!win || win === panel.win || tabs.idForWebContents(wc)) return false
+  const profile = [...runtimes.values()].find((rt) => rt.session === wc.session)?.profile.id
+  if (!profile) return false
+  const popupTab = popupTabs.get(wc)
+  if (commands?.handleKey(profile, input, popupTab && !popupTab.isDestroyed() ? popupTab : undefined)) return true
+  const zoomKey = zoomDirection(input)
+  if (zoomKey !== null) {
+    zoom.step(wc, zoomKey)
+    // A web page's zoom is its site's, so the site's tabs follow and the panel shows it.
+    if (zoomSite(wc.getURL())) pushState()
+    return true
+  }
+  const shortcut = shortcutFromKey({ ...input, command: input.meta })
+  if (!shortcut) return false
+  const keys = actionKeys(settings.shortcuts)
+  const action = ACTIONS.find((a) => keys[a.id] === shortcut && !isGlobal(a.id))?.id
+  if (!action) return false
+  if (PANEL_ACTIONS.has(action)) {
+    void (async () => {
+      await summon()
+      runAction(action)
+    })()
+    return true
+  }
+  switch (action) {
+    case 'closeTab':
+      win.close()
+      return true
+    case 'reload':
+      wc.reload()
+      return true
+    case 'hardReload':
+      wc.reloadIgnoringCache()
+      return true
+    case 'devTools':
+      wc.openDevTools({ mode: 'detach' })
+      return true
   }
   return false
 }
@@ -1206,11 +1310,21 @@ function sendProfiles() {
 function attachProfile(rt: ProfileRuntime) {
   downloads.attach(rt.session, rt.profile.id)
   certs.attach(rt.session, rt.profile.id)
-  // Pin and unpin from the menu an extension's button shows on right-click (see scripts/patch-deps.mjs).
+  // Pin and unpin from the menu an extension's button shows on right-click (see scripts/patch-deps.mjs),
+  // and open or close its side panel there, as in Chrome.
   rt.extensions.on('jbrow-action-context-menu', ({ menu, extensionId }: { menu: Menu; extensionId: string }) => {
     const pinned = settings.pinnedExtensions.includes(extensionId)
+    const ext = rt.session.extensions.getExtension(extensionId)
     menu.append(new MenuItem({ type: 'separator' }))
+    if (ext && sidePanels.hasPanel(rt.profile.id, ext)) {
+      const open = sidePanels.state()?.extensionId === extensionId
+      menu.append(new MenuItem({ label: open ? 'Close side panel' : 'Open side panel', click: () => sidePanels.toggle(rt.profile.id, ext) }))
+    }
     menu.append(new MenuItem({ label: pinned ? 'Unpin from toolbar' : 'Pin to toolbar', click: () => togglePinnedExtension(extensionId) }))
+  })
+  rt.extensions.on('browser-action-popup-created', (popup: { browserWindow?: BrowserWindow }) => {
+    const tab = tabs.activeWebContents()
+    if (popup.browserWindow && tab) popupTabs.set(popup.browserWindow.webContents, tab)
   })
 }
 
@@ -1286,6 +1400,9 @@ async function deleteProfile(id: string) {
   const doomed = tabs.records.filter((t) => t.profile === id)
   for (const t of doomed.reverse()) tabs.close(t.id)
   tabs.forgetProfile(id)
+  sidePanels.forgetProfile(id)
+  idle.forgetProfile(id)
+  userScripts.forgetProfile(id)
   visits.clear(id)
 
   settings.profiles = settings.profiles.filter((p) => p.id !== id)
@@ -1549,6 +1666,13 @@ function wireIpc() {
   on('open-settings-file', () => void shell.openPath(settingsPath()))
   on<{ id: string; name: string }>('rename', ({ id, name }) => tabs.rename(id, name))
   on<{ id: string }>('restore', ({ id }) => tabs.restore(id))
+  on<{ id: string }>('unarchive', ({ id }) => tabs.unarchive([id]))
+  on<{ id: string }>('forget-archived', ({ id }) => tabs.forget([id]))
+  on('undo-archive', () => undoArchive())
+  on('dismiss-archive-notice', () => {
+    archiveNotice = null
+    pushState()
+  })
   on('new-folder', () => newFolder())
   on<{ id: string }>('folder-menu', ({ id }) => folderMenu(id))
   on<{ id: string; name?: string; rules?: string[]; collapsed?: boolean }>('folder', ({ id, ...change }) => tabs.updateFolder(id, change))
@@ -1607,10 +1731,15 @@ function wireIpc() {
     else restyler.setEnabled(host, action === 'on')
   })
   on<{ on: boolean }>('overlay', ({ on: covered }) => panel.setOverlay(covered))
+  on('side-panel-close', () => sidePanels.closeShown())
+  on('side-panel-menu', () => sidePanels.menu())
+  on<{ width: number; done?: boolean }>('side-panel-width', ({ width, done }) => sidePanels.resize(width, !!done))
   on<{ id: number; device: string | null }>('device', ({ id, device }) => {
     if (tabs.activeId) devices.answer(tabs.activeId, id, device)
   })
   on('hide', () => void panel.hide())
+  on('anim-preview', () => void panel.preview())
+  on('window-reset', () => panel.resetPlace())
   on('focus-ui', () => panel.ui.focus())
   on('focus-page', () => focusActive())
   on<{ text: string; forward?: boolean }>('find', ({ text, forward }) => {
@@ -1742,25 +1871,32 @@ app.whenReady().then(async () => {
   ElectronChromeExtensions.handleCRXProtocol(session.defaultSession)
 
   panel = new Panel(() => settings, {
-    setPageVisible: () => tabs.layout(),
-    capture: async () => {
-      const wc = tabs.activeWebContents()
-      const tabId = tabs.activeId
-      if (!wc || !tabId) return null
-      try {
-        const img = await wc.capturePage()
-        return img.isEmpty() ? null : { dataUrl: `data:image/jpeg;base64,${img.toJPEG(82).toString('base64')}`, tabId }
-      } catch {
-        return null
-      }
+    setPageVisible: () => {
+      tabs.layout()
+      sidePanels?.layout()
+    },
+    sideWidth: () => sidePanels?.width() ?? 0,
+    page: () => {
+      const wc = tabs?.activeWebContents()
+      return wc && tabs.activeId && !tabs.covered(tabs.activeId) ? wc : null
+    },
+    onPlaced: () => {
+      saveSettings(settings)
+      pushState()
     },
     onHiding: () => {
       tabs.leaveFullscreen()
       if (settings.miniPlayer.onHide) toMiniPlayer(tabs.activeWebContents())
     },
-    onShown: () => pushState(),
+    onShown: () => {
+      if (archiveNotice) archiveNotice.seenAt ??= Date.now()
+      pushState()
+    },
     onHidden: () => {
       hiddenAt = Date.now()
+      // Seen long enough, it goes; a glance counts from the next show again.
+      if (archiveNotice?.seenAt && Date.now() - archiveNotice.seenAt >= NOTICE_SEEN_MS) archiveNotice = null
+      else if (archiveNotice) archiveNotice.seenAt = null
       downloads.clearFinished()
       pushState()
     },
@@ -1769,6 +1905,12 @@ app.whenReady().then(async () => {
   panel.ui.on('render-process-gone', (_e, details) => console.error('[jbrow] UI renderer gone:', details))
   panel.ui.on('before-input-event', (event, input) => {
     if (onKey(input)) event.preventDefault()
+  })
+  app.on('web-contents-created', (_e, wc) => {
+    if (wc.getType() !== 'window') return
+    wc.on('before-input-event', (event, input) => {
+      if (onWindowKey(wc, input)) event.preventDefault()
+    })
   })
 
   permissions = new SitePermissions(() => panel.win)
@@ -1792,10 +1934,19 @@ app.whenReady().then(async () => {
   })
   dangerous.start()
   logins = new Logins((tabId) => {
+    if (SignInSheets.owns(tabId)) return signIns.update(tabId)
     tabs.layout()
     pushState()
     // The sign-in form needs the keyboard; once it's answered, the page gets it back.
     if (tabId === tabs.activeId) focusActive()
+  })
+  signIns = new SignInSheets(logins, () => settings.theme)
+  // HTTP auth for pages outside tabs: sign-in popups that pages open, extension popups, pop-out
+  // windows. Tabs answer through their own 'login' handler (tabs.ts).
+  app.on('login', (event, wc, _details, authInfo, callback) => {
+    if (!wc || tabs.idForWebContents(wc)) return
+    event.preventDefault()
+    signIns.ask(wc, authInfo, callback)
   })
   devices = new DeviceChooser(permissions, {
     tabFor: (wc) => tabs.idForWebContents(wc),
@@ -1813,6 +1964,7 @@ app.whenReady().then(async () => {
     onViewAdded: () => panel.keepOrder(),
     onChange: () => pushState(),
     onActivated: () => {
+      sidePanels?.layout()
       focusActive()
       tabSwitched()
     },
@@ -1832,7 +1984,11 @@ app.whenReady().then(async () => {
     print: (wc) => printPage(wc),
     saveAsPdf: (wc) => void savePageAsPdf(wc),
     download: (wc, url) => downloads.start(wc, url),
-    onFullscreen: (on, url) => panel.setPageFullscreen(on, siteName(url)),
+    onFullscreen: (on, url) => {
+      panel.setPageFullscreen(on, siteName(url))
+      // The side panel steps aside for a fullscreen page and comes back after.
+      sidePanels.layout()
+    },
     confirmUnload,
     profiles: () => settings.profiles,
     openInProfile: (fromId, profile, url) => {
@@ -1850,9 +2006,44 @@ app.whenReady().then(async () => {
     window: () => panel.win,
   })
 
+  sidePanels = new SidePanels({
+    window: () => panel.win,
+    active: () => {
+      const active = tabs.active()
+      return active ? { profile: active.profile, wc: tabs.activeWebContents() } : null
+    },
+    bounds: () => panel.sideBounds(),
+    visible: () => panel.pageVisible() && !panel.pageFullscreen,
+    onViewAdded: () => panel.keepOrder(),
+    onChange: () => {
+      tabs.layout()
+      pushState()
+    },
+    onKey,
+    openTab: (profile, url) => void tabs.create({ profile, url }),
+    width: () => settings.sidePanelWidth,
+    setWidth: (width, save) => {
+      settings.sidePanelWidth = width
+      if (save) saveSettings(settings)
+      sidePanels.layout()
+    },
+  })
+  idle = new IdleWatcher()
+  userScripts = new UserScripts()
+
   wireIpc()
   wireSwipes(panel.win, (wc) => (tabs.idForWebContents(wc) ? wc : null), () => tabs.activeWebContents())
-  profileDeps = { hooks: tabHooks, pickShareSource: (callback) => void pickShareSource(panel.win, callback), permissions, devices }
+  profileDeps = {
+    hooks: tabHooks,
+    pickShareSource: (callback) => void pickShareSource(panel.win, callback),
+    permissions,
+    devices,
+    attach: (rt) => {
+      idle.attach(rt)
+      sidePanels.attach(rt)
+      userScripts.attach(rt)
+    },
+  }
   runtimes = await setupProfiles(settings, profileDeps)
   for (const rt of runtimes.values()) attachProfile(rt)
 

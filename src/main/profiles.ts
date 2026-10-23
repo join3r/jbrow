@@ -6,6 +6,7 @@ import type { Profile } from '../shared/types'
 import { shimContentScripts } from './content-shim'
 import { trackInstalls } from './installed'
 import type { DeviceChooser } from './devices'
+import { writeJbrowExtension } from './jbrow-extension'
 import type { SitePermissions } from './permissions'
 import type { Settings } from './settings'
 
@@ -41,6 +42,8 @@ export interface ProfileDeps {
   pickShareSource: (callback: (streams: Electron.Streams | null) => void) => void
   permissions: SitePermissions
   devices: DeviceChooser
+  /** Adds jbrow's own extension APIs (idle, sidePanel, userScripts) to a profile, before its extensions load and start. */
+  attach: (rt: ProfileRuntime) => void
 }
 
 export async function setupProfiles(settings: Settings, deps: ProfileDeps): Promise<Map<string, ProfileRuntime>> {
@@ -50,19 +53,13 @@ export async function setupProfiles(settings: Settings, deps: ProfileDeps): Prom
 }
 
 /** Sets up one profile's session and extensions. Also used for a profile added in settings. */
-export async function setupProfile(profile: Profile, settings: Settings, { hooks, pickShareSource, permissions, devices }: ProfileDeps): Promise<ProfileRuntime> {
+export async function setupProfile(profile: Profile, settings: Settings, { hooks, pickShareSource, permissions, devices, attach }: ProfileDeps): Promise<ProfileRuntime> {
   const partition = partitionFor(profile.id)
   const sess = session.fromPartition(partition)
-  const electronUserAgent = sess.getUserAgent()
+  // Google sign-in gets the real user agent from jbrow's own extension (see jbrow-extension.ts):
+  // a session.webRequest listener here would switch off every extension's declarativeNetRequest.
+  const ownExtension = writeJbrowExtension(sess.getUserAgent())
   sess.setUserAgent(chromeLikeUserAgent(sess))
-
-  // Google sign-in rejects a browser that claims to be Chrome but doesn't behave like it
-  // ("This browser or app may not be secure"). Told the truth, it serves its lighter sign-in
-  // flow, which works.
-  sess.webRequest.onBeforeSendHeaders({ urls: ['https://accounts.google.com/*'] }, (details, callback) => {
-    details.requestHeaders['User-Agent'] = electronUserAgent
-    callback({ requestHeaders: details.requestHeaders })
-  })
 
   // Without a handler Electron rejects getDisplayMedia, so Meet and friends can't share the
   // screen. The macOS system picker (useSystemPicker) closes and reopens on the first click,
@@ -83,6 +80,8 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
 
   // Two-finger swipe back and forward in tab pages; see src/preload/swipe.ts.
   sess.registerPreloadScript({ id: 'jbrow-swipe', type: 'frame', filePath: path.join(__dirname, 'preload-swipe.js') })
+  // Extensions' user scripts (chrome.userScripts) in tab pages; see src/preload/user-scripts.ts.
+  sess.registerPreloadScript({ id: 'jbrow-user-scripts', type: 'frame', filePath: path.join(__dirname, 'preload-user-scripts.js') })
 
   const extensions = new ElectronChromeExtensions({
     license: 'GPL-3.0',
@@ -91,6 +90,8 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
   })
 
   const extensionsPath = path.join(app.getPath('userData'), 'Extensions', profile.id)
+  const rt: ProfileRuntime = { profile, partition, session: sess, extensions, extensionsPath }
+  attach(rt)
   if (!process.env.JBROW_NO_SHIMS) shimContentScripts(sess, extensionsPath)
   await installChromeWebStore({
     session: sess,
@@ -113,6 +114,12 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
     },
   })
 
+  try {
+    await sess.extensions.loadExtension(ownExtension)
+  } catch (error) {
+    console.error(`[profiles] ${profile.id}: could not load jbrow's own extension:`, error)
+  }
+
   for (const dir of settings.unpackedExtensions[profile.id] ?? []) {
     try {
       const ext = await sess.extensions.loadExtension(dir, { allowFileAccess: true })
@@ -125,7 +132,7 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
   await Promise.all(sess.extensions.getAllExtensions().map((ext) => startWorker(sess, ext, profile.id)))
 
   console.log(`[profiles] ${profile.id}: ${sess.extensions.getAllExtensions().length} extension(s) loaded`)
-  return { profile, partition, session: sess, extensions, extensionsPath }
+  return rt
 }
 
 /** MV3 service workers don't start on their own until something wakes them. */

@@ -131,10 +131,14 @@
           </p>
           <textarea id="folderRules" rows="4" spellcheck="false" placeholder="github.com/acme&#10;*.atlassian.net"></textarea>
         </div>
+        <div id="archiveNotice" class="notice" hidden>
+          <span id="archiveNoticeText"></span>
+          <button id="undoArchive" class="link">Undo</button>
+          <button id="dismissNotice" class="icon sm" data-icon="close" title="Dismiss" aria-label="Dismiss"></button>
+        </div>
         <div id="toast" class="toast" hidden></div>
       </aside>
       <main id="content">
-        <img id="snapshot" alt="" hidden />
         <section id="blank" class="blank" hidden>
           <h1>Where to?</h1>
           <p>Type in the address bar to search, open a site, or find any open tab.</p>
@@ -221,7 +225,7 @@
 
             <section class="set-section" data-section="general">
               <h2 class="set-section-title">General</h2>
-              <div class="set-item" data-keywords="pin pinned dock window regular ghost hide click away launch startup">
+              <div class="set-item" data-keywords="pin pinned dock window regular ghost hide click away launch startup size resize position place display reset default">
                 <h3>Window</h3>
                 <label class="check">
                   <input id="pinWindow" type="checkbox" />
@@ -229,6 +233,9 @@
                     click another app. Turn it off and jbrow only shows on <b id="showHotkey">its hotkey</b>, then hides
                     when you click away. The pin in the toolbar switches it too.</span>
                 </label>
+                <p class="help">Drag the window's edges to resize it and the toolbar to move it. jbrow keeps both. Unpinned,
+                  it keeps them separately for each display and comes up on the one the pointer is on.</p>
+                <button id="resetWindow" class="chip">Reset size and position</button>
               </div>
               <div class="set-item" data-keywords="search engine google duckduckgo bing brave kagi ecosia custom address bar omnibox suggestions autocomplete queries">
                 <h3>Search</h3>
@@ -367,10 +374,15 @@
                 </div>
                 <p class="help">
                   Threads you haven't opened for a while first unload their pages and shrink to one line: how many tabs, which
-                  sites, how long ago. Opening one loads it again. Later they close and leave the sidebar. Type in the address
-                  bar to find and reopen them. Kept threads never archive, and a folder in Kept can catch threads by address before they do:
+                  sites, how long ago. Opening one loads it again. Later they close and leave the sidebar, which offers
+                  <b>Undo</b> until you've seen it and hide jbrow. Find them below or by typing in the address bar. Kept threads never archive, and a folder in Kept can catch threads by address before they do:
                   right-click the folder and choose <b>Auto-file rules</b>.
                 </p>
+              </div>
+              <div id="archivedItem" class="set-item" data-keywords="archived archive restore forget undo threads closed">
+                <h3>Archived</h3>
+                <p class="help">Restore puts a thread back in the sidebar with its back and forward history. Archived threads are forgotten after 90 days.</p>
+                <div id="archivedList" class="archived-list"></div>
               </div>
             </section>
 
@@ -573,6 +585,14 @@
           </div>
         </section>
       </main>
+      <aside id="sidePanel" class="side-panel" hidden>
+        <div id="sideSplit" class="side-split" title="Drag to resize"></div>
+        <header id="sideHead" class="side-head" title="Right-click for more">
+          <img id="sideIcon" alt="" /><span id="sideName"></span>
+          <button id="sideClose" class="icon sm" data-icon="close" title="Close side panel" aria-label="Close side panel"></button>
+        </header>
+        <div class="side-body"></div>
+      </aside>
     </div>
     <script src="ui.js"></script>
   </body>

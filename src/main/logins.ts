@@ -16,9 +16,11 @@ interface Asking {
 }
 
 /**
- * HTTP basic and digest auth. Chromium asks for a username and password through the tab's
- * 'login' event; jbrow asks in the tab's page area and answers. Nothing is stored: Chromium
- * remembers what worked until jbrow quits, and a password manager can fill the form.
+ * HTTP basic and digest auth. Chromium asks for a username and password through a page's
+ * 'login' event; jbrow asks and answers. Questions are kept per tab id, and per `wc:<id>` for
+ * pages outside tabs (popup windows, extension pages), which signin.ts asks in a sheet of their
+ * own. Nothing is stored: Chromium remembers what worked until jbrow quits, and a password
+ * manager can fill the tab's form.
  */
 export class Logins {
   private asking = new Map<string, Asking[]>()

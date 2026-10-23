@@ -589,7 +589,7 @@ export class Restyler {
 
 /** The page as you see it, as base64 JPEG. Null if it can't be captured, e.g. while it's hidden. */
 async function screenshot(wc: WebContents): Promise<string | null> {
-  // A page that's hidden for a moment (the panel animating) may capture empty.
+  // A page that's hidden for a moment (the panel just shown) may capture empty.
   for (let attempt = 0; attempt < 4; attempt++) {
     if (wc.isDestroyed()) return null
     try {

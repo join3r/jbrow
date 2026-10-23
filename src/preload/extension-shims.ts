@@ -1,10 +1,21 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
+type Invoke = (extensionId: string, name: string, args: unknown[]) => Promise<unknown>
+type Listen = (extensionId: string, name: string, listener: (...args: unknown[]) => void) => void
+
 /**
  * Fills gaps in Electron's extension APIs. Runs in every extension service worker and
  * chrome-extension:// page, before electron-chrome-extensions adds its own APIs.
+ *
+ * `invoke` and `listen` reach APIs jbrow implements in the main process, over
+ * electron-chrome-extensions' own channels.
  */
-function shims(skip: string[] = [], installed: { reason: string; previousVersion?: string } | null = null) {
+function shims(
+  skip: string[] = [],
+  installed: { reason: string; previousVersion?: string } | null = null,
+  invoke?: Invoke,
+  listen?: Listen,
+) {
   const g = globalThis as any
   const chrome = g.chrome
   if (!chrome) return
@@ -109,6 +120,26 @@ function shims(skip: string[] = [], installed: { reason: string; previousVersion
     } catch {}
   }
 
+  // Static declarativeNetRequest rulesets that the manifest turns on stay off: Chrome indexes them
+  // at install, Electron's loader doesn't, and Chromium skips a ruleset it has no index for.
+  // Enabling them through the API indexes them (and Chromium remembers it), which is how uBlock
+  // Origin Lite's rulesets work. Only once per version, as Chrome resets them on update, and only
+  // while none are on, so a ruleset the extension turned off stays off.
+  const dnr = chrome.declarativeNetRequest
+  if (!skip.includes('rulesets') && typeof g.ServiceWorkerGlobalScope === 'function' && dnr?.updateEnabledRulesets && chrome.storage?.local) {
+    const manifest = runtime?.getManifest?.() ?? {}
+    const resources: { id: string; enabled?: boolean }[] = manifest.declarative_net_request?.rule_resources ?? []
+    const defaults = resources.filter((r) => r.enabled).map((r) => r.id)
+    const key = 'jbrow.enabledRulesets'
+    if (defaults.length) {
+      void (async () => {
+        if ((await chrome.storage.local.get(key))[key] === manifest.version) return
+        if (!(await dnr.getEnabledRulesets()).length) await dnr.updateEnabledRulesets({ enableRulesetIds: defaults })
+        await chrome.storage.local.set({ [key]: manifest.version })
+      })().catch((error) => console.warn('[jbrow] could not enable static rulesets:', error))
+    }
+  }
+
   const event = () => {
     const listeners = new Set<(...args: any[]) => void>()
     return {
@@ -117,6 +148,7 @@ function shims(skip: string[] = [], installed: { reason: string; previousVersion
       hasListener: (fn: (...args: any[]) => void) => listeners.has(fn),
       hasListeners: () => listeners.size > 0,
       dispatch: (...args: any[]) => listeners.forEach((fn) => fn(...args)),
+      forEach: (fn: (listener: (...args: any[]) => any) => void) => listeners.forEach(fn),
     }
   }
 
@@ -211,6 +243,127 @@ function shims(skip: string[] = [], installed: { reason: string; previousVersion
       onAlarm: { addListener: onAlarm.addListener, removeListener: onAlarm.removeListener, hasListener: onAlarm.hasListener, hasListeners: onAlarm.hasListeners },
     }
   }
+
+  // ---------- APIs jbrow implements in the main process ----------
+
+  const id: string | undefined = runtime?.id
+  if (!invoke || !listen || !id) return
+  const manifest = runtime.getManifest?.() ?? {}
+  const permitted = (name: string) => ((manifest.permissions ?? []) as string[]).includes(name)
+  // Errors come back as "Error invoking remote method 'crx-msg': Error: <message>".
+  const call = (name: string, args: unknown[]) =>
+    invoke(id, name, args).catch((error: Error) => {
+      throw new Error(String(error?.message ?? error).replace(/^.*?Error: /, ''))
+    })
+  /** An API function that takes an optional trailing callback, like Chrome's. */
+  const api = (name: string) => (...args: unknown[]) => {
+    const cb = typeof args[args.length - 1] === 'function' ? (args.pop() as (v?: unknown) => void) : undefined
+    const result = call(name, args)
+    if (!cb) return result
+    result.then(cb, (error) => {
+      console.error(`chrome.${name}:`, error.message)
+      cb()
+    })
+  }
+  /** An event the main process sends. It subscribes on the first listener. */
+  const remoteEvent = (name: string, deliver?: (listeners: ReturnType<typeof event>, ...args: any[]) => void) => {
+    const ev = event()
+    let subscribed = false
+    return {
+      addListener(fn: (...args: any[]) => void) {
+        if (!subscribed) {
+          subscribed = true
+          listen(id, name, (...args) => (deliver ? deliver(ev, ...args) : ev.dispatch(...args)))
+        }
+        ev.addListener(fn)
+      },
+      removeListener: ev.removeListener,
+      hasListener: ev.hasListener,
+      hasListeners: ev.hasListeners,
+      /** For telling which listeners to call; see onUserScriptMessage. */
+      listeners: ev,
+    }
+  }
+  const define = (target: object, key: string, value: unknown) => {
+    try {
+      Object.defineProperty(target, key, { value, configurable: true, enumerable: true, writable: true })
+    } catch {}
+  }
+
+  // chrome.idle (src/main/idle.ts). Electron 44 also exposes Chromium's own, whose queryState
+  // works. jbrow's replaces it so every state comes from one powerMonitor reading, and
+  // onStateChanged goes through the library's router, which wakes a stopped service worker.
+  if (!skip.includes('idle') && permitted('idle')) {
+    define(chrome, 'idle', {
+      IdleState: { ACTIVE: 'active', IDLE: 'idle', LOCKED: 'locked' },
+      queryState: api('idle.queryState'),
+      setDetectionInterval: (seconds: number) => void call('idle.setDetectionInterval', [seconds]).catch(() => {}),
+      onStateChanged: remoteEvent('idle.onStateChanged'),
+    })
+  }
+
+  // chrome.sidePanel (src/main/side-panel.ts).
+  if (!skip.includes('sidePanel') && permitted('sidePanel') && !chrome.sidePanel) {
+    define(chrome, 'sidePanel', {
+      setOptions: api('sidePanel.setOptions'),
+      getOptions: api('sidePanel.getOptions'),
+      setPanelBehavior: api('sidePanel.setPanelBehavior'),
+      getPanelBehavior: api('sidePanel.getPanelBehavior'),
+      open: api('sidePanel.open'),
+      close: api('sidePanel.close'),
+      onOpened: remoteEvent('sidePanel.onOpened'),
+      onClosed: remoteEvent('sidePanel.onClosed'),
+    })
+  }
+
+  // chrome.userScripts (src/main/user-scripts.ts), and runtime.onUserScriptMessage for messages
+  // from user scripts in a world configured with `messaging: true`. Every context that listens
+  // answers: with the first response, or with nothing if no listener there responds.
+  if (!skip.includes('userScripts') && permitted('userScripts') && !chrome.userScripts) {
+    define(chrome, 'userScripts', {
+      ExecutionWorld: { MAIN: 'MAIN', USER_SCRIPT: 'USER_SCRIPT' },
+      register: api('userScripts.register'),
+      update: api('userScripts.update'),
+      unregister: api('userScripts.unregister'),
+      getScripts: api('userScripts.getScripts'),
+      configureWorld: api('userScripts.configureWorld'),
+      getWorldConfigurations: api('userScripts.getWorldConfigurations'),
+      resetWorldConfiguration: api('userScripts.resetWorldConfiguration'),
+      execute: api('userScripts.execute'),
+    })
+    const deliver = (ev: ReturnType<typeof event>, message: unknown, sender: unknown, replyId: string) => {
+      let replied = false
+      let waiting = false
+      const respond = (response?: unknown) => {
+        if (replied) return
+        replied = true
+        void call('userScripts.reply', [replyId, { responded: true, response }]).catch(() => {})
+      }
+      ev.forEach((fn) => {
+        try {
+          const result = fn(message, sender, respond)
+          if (result === true) waiting = true
+          else if (result && typeof result.then === 'function') {
+            waiting = true
+            result.then(respond, () => respond())
+          }
+        } catch (error) {
+          console.error(error)
+        }
+      })
+      if (!waiting && !replied) {
+        replied = true
+        void call('userScripts.reply', [replyId, {}]).catch(() => {})
+      }
+    }
+    const onUserScriptMessage = remoteEvent('runtime.onUserScriptMessage', deliver)
+    define(runtime, 'onUserScriptMessage', {
+      addListener: onUserScriptMessage.addListener,
+      removeListener: onUserScriptMessage.removeListener,
+      hasListener: onUserScriptMessage.hasListener,
+      hasListeners: onUserScriptMessage.hasListeners,
+    })
+  }
 }
 
 const isExtensionContext =
@@ -224,7 +377,13 @@ if (isExtensionContext) {
       (process as { type?: string }).type === 'service-worker' && !skip.includes('installed')
         ? ipcRenderer.sendSync('jbrow-installed')
         : null
-    contextBridge.executeInMainWorld({ func: shims, args: [skip, installed] })
+    const invoke: Invoke = (extensionId, name, args) => ipcRenderer.invoke('crx-msg', extensionId, name, ...args)
+    // The router sends `crx-<event>` to every context that asked for it with crx-add-listener.
+    const listen: Listen = (extensionId, name, listener) => {
+      ipcRenderer.on(`crx-${name}`, (_event, ...args) => listener(...args))
+      ipcRenderer.send('crx-add-listener', extensionId, name)
+    }
+    contextBridge.executeInMainWorld({ func: shims, args: [skip, installed, invoke, listen] })
   } catch (error) {
     console.error('[jbrow] extension shims failed:', error)
   }

@@ -92,6 +92,19 @@ usual (swipe again at their edge to navigate), and not over an iframe. jbrow fol
 **Swipe between pages** setting (Trackpad → More Gestures): two fingers, three fingers, both or
 off.
 
+Drag the window's edges to resize it and its toolbar to move it. jbrow keeps both in settings.json,
+so the window comes back the same after a restart. Unpinned, it keeps a size and place for each
+display and comes up on the display the pointer is on; pinned, it comes back where you left it, like
+any window. **Reset size and position** under **General** in settings goes back to the default, 72% by
+78% of the screen, centered.
+
+Showing and hiding animate the whole window with the live page in it: it moves, grows and fades
+(the style, duration and feel are under **Animation** in settings), and a playing video keeps playing
+through it. A native page can't be scaled without laying itself out again, so scale and materialize
+grow the window's edges around content that already has its final size instead of shrinking the
+content. Materialize also blurs the UI and, with a stylesheet that's gone once the window is in place,
+the page.
+
 If another app already uses ⌥Space (Raycast does by default), jbrow shows a notification. Pick
 another key under **Shortcuts** in settings; it takes effect right away.
 
@@ -175,7 +188,12 @@ zoom is remembered across restarts (on by default, kept in `zoom` in `settings.j
 listed there with **Reset**.
 
 A site that asks for a username and password (HTTP basic or digest auth) gets a sign-in form in the
-page area. jbrow doesn't store the password; Chromium remembers it until jbrow quits. If a page
+page area. Pages outside tabs get the same form on top of them, in their own window: sign-in popups
+a page opens, an extension's popup (which grows to fit the form and shrinks back after) and
+extension pop-out windows. Extension options pages open as tabs and use the tab's form. A page with
+no window on screen gets a small **Sign in** window of its own; closing it cancels. Cancel or Esc
+fails the request, as before. jbrow doesn't store the password; Chromium remembers it until jbrow
+quits, and other pages waiting on the same site get the same answer. If a page
 crashes, or macOS kills it to free memory, the page area says so and offers **Reload** (or ⌘R), and
 the tab is greyed out in the sidebar. A page that hangs gets **Wait** and **Reload**.
 
@@ -202,8 +220,16 @@ saying how many tabs, which sites and how long ago. Clicking one loads it again.
 sound stays loaded, and kept threads never sleep.
 
 Threads unseen for a week are archived (change both under **Threads** in settings, or turn them off):
-their pages close and they leave the sidebar. Type in the address bar to find one and bring the
-whole thread back. Archived threads are forgotten after 90 days.
+their pages close and they leave the sidebar. The bottom of the sidebar then says **Archived 3
+threads** with **Undo**, which puts exactly those threads back where they were (same place and app
+section, sub-threads and back and forward included) and gives them the full time again before archiving. Archiving that happens
+while jbrow is hidden shows the notice the next time you open it; it goes away when you hide jbrow after
+it's been on screen for a few seconds at a time, or with its ×.
+
+The **N archived** line at the very bottom of the sidebar opens the list under **Threads** in
+settings: each archived thread with its sites and when it was archived, and on hover **Restore**
+(back into the sidebar as seen now) and **Forget**. Typing in the address bar finds archived threads
+too and brings the whole thread back. Archived threads are forgotten after 90 days.
 
 Downloads go straight into ~/Downloads, renamed `name (1).ext` if the name is taken. Each one shows
 as a small pie in the toolbar while it runs. Click it for the name, size, speed, time left, folder and
@@ -239,7 +265,7 @@ Sonnet takes about 10 seconds. Styles are kept in `styles.json` next to `setting
 
 ## Settings
 
-The settings screen (⌘, or the sliders icon) has a sidebar of sections: **General** (pinning, search engine and
+The settings screen (⌘, or the sliders icon) has a sidebar of sections: **General** (pinning and the window's size, search engine and
 search suggestions, quiet links, the default browser), **Profiles**, **Threads** (archiving), **Apps**, **Animation**, **Restyling**,
 **Privacy** (private addresses, dangerous sites, clearing browsing data, screen sharing) and **Shortcuts** (jbrow's own and extensions').
 The search above the sections finds any setting or shortcut, and **Shortcuts** has its own search.
@@ -265,6 +291,9 @@ on first run. Restart jbrow after editing the file by hand (menu bar item, **Res
 - `linkedApps`: groups of bundle IDs that share one set of tabs for ⌥⇧Space. Under **Apps**,
   right-click an app to link or unlink it; its threads move along right away.
 - `animation`: `style` (materialize, slide, scale, fade, off), `durationMs`, `ease` (spring, snappy, smooth).
+- `panel`: the window's default size as a fraction of the screen (`widthFraction`, `heightFraction`),
+  where you left the unpinned window on each display (`displays`, by macOS display ID, relative to
+  the display's usable area) and where you left the pinned one (`pinned`, in screen coordinates).
 - `unpackedExtensions`: extension folders to load per profile, e.g. Stem.
 - `pinned`: a regular window with a Dock icon that opens at launch and stays when you click away
   (on by default). The pin in the toolbar and ⇧⌘P switch it, and jbrow remembers.
@@ -282,10 +311,12 @@ on first run. Restart jbrow after editing the file by hand (menu bar item, **Res
 - `extensionShortcuts`: your extension shortcuts per profile, extension and command (`""` removes one).
 - `archiveAfterDays`: archive threads unseen this many days; 0 turns archiving off.
 - `zoom`: `defaultPercent`, `remember`, and `sites`, each zoomed site (hostname without www) with its zoom in percent.
+- `sidePanelWidth`: width of an extension's side panel in pixels; dragging its edge sets it.
 - `restyle`: `model` for restyling (a Claude model alias such as sonnet, opus or haiku) and
   `claudePath`, the claude command if jbrow doesn't find it on its own.
 
 Tabs, folders and archived threads are in `tabs.json` next to it, and the browsing history in `visits.json`.
+Extensions' side panel options are in `side-panel.json` and their user scripts in `user-scripts.json`.
 
 ## Extensions
 
@@ -296,9 +327,27 @@ store in that profile. Right-click an extension there and choose **Pin to toolba
 button next to the puzzle icon (it shows whenever the current tab's profile has that extension);
 right-click the pinned button to unpin it. Installed extensions update every 5 hours.
 
+An extension with a side panel (`chrome.sidePanel`) shows it to the right of the page: right-click
+its button and choose **Open side panel**, or just click the button if the extension asks for that,
+as many do. Drag the gap left of the panel to resize it. Its header shows a close button on hover;
+right-click the header to switch to another extension's panel, reload or inspect it. A panel the
+extension opened for one tab stays with that tab; otherwise it shows next to every tab of that
+profile until you close it.
+
+Extensions can run user scripts (`chrome.userScripts`, for user script managers): scripts they
+register run in matching pages and are kept across restarts. Chrome also wants you to switch on
+**Allow user scripts** for each such extension; jbrow doesn't ask, the permission is enough.
+
 Extension keyboard shortcuts are under **Shortcuts** in settings. They work while jbrow is
-open, for the profile of the tab you're on. Shortcuts an extension suggests apply on their own,
-except ones jbrow already uses. Click a shortcut to record a new one.
+open, for the profile of the tab you're on, in an extension's side panel, and inside an extension's
+popup or pop-out window or a popup a page opened. There they go to that window's profile and act on
+the tab the popup opened for, or else the active tab. Shortcuts an extension suggests apply on their
+own, except ones jbrow already uses. Click a shortcut to record a new one.
+
+In a popup or pop-out window, your keys for **Close tab** (⌘W) close the window, **Reload** and
+**Reload without the cache** reload its page, and **Developer tools for the page** opens its
+DevTools; ⌘= / ⌘- / ⌘0 zoom it. **New tab**, **New tab in the next profile** and **Settings** bring
+up jbrow and do what they do there. Every other key goes to the page.
 
 See [docs/extension-checklist.md](docs/extension-checklist.md) for how your must-have extensions fare
 and what jbrow patches to make them work.
@@ -317,14 +366,23 @@ it doesn't touch your real data (add `--remote-debugging-port=9333` to inspect e
 `JBROW_BACKGROUND=1` keeps such a jbrow out of your way while it runs: its window is invisible,
 click-through and pushed off screen, it never takes focus, and it has no Dock icon, menu bar item,
 global hotkeys or notifications. Pages still load and render, so drive it and take screenshots over
-CDP (`Page.captureScreenshot`). Use it for automated runs while you keep working:
+CDP (`Page.captureScreenshot`). The window's own animation can't be seen there, since the window
+stays transparent, but `JBROW_DEBUG=1` logs how long each show waited for the first frames and how
+many frames each animation got, with the longest gap. Off screen, macOS gives the window no display
+to draw on now and then, and a show can wait the full 150 ms for the UI. Use it for automated runs
+while you keep working:
 
 ```sh
 JBROW_USER_DATA=/tmp/jb JBROW_BACKGROUND=1 npx electron . --show --remote-debugging-port=9333
 ```
 
 `JBROW_ALLOW_CAPTURE=1` lets you screenshot the panel. `JBROW_NO_SHIMS=1` and
-`JBROW_SHIM_SKIP=alarms,storage,browser` turn the extension shims off for comparison.
+`JBROW_SHIM_SKIP=alarms,storage,browser,rulesets` turn the extension shims off for comparison (`idle`,
+`sidePanel` and `userScripts` work there too).
+
+Don't add `session.webRequest` listeners: one is enough to switch off every extension's
+`declarativeNetRequest` rules in that session. Request rewrites jbrow needs go in its own extension
+(`src/main/jbrow-extension.ts`) as rules.
 
 Layout: `src/main` (Electron main process: panel, tabs, profiles, hotkeys), `src/preload` (UI
 bridge and extension shims), `src/ui` (the toolbar and sidebar), `src/shared` (thread logic both
@@ -333,10 +391,8 @@ The log is at `~/Library/Logs/jbrow/main.log` (menu bar item, **Show log file**)
 
 ## Not built yet
 
-- Undo for archiving (reopening from the address bar is the way back for now).
-- The sign-in form covers tabs only; basic auth in extension pages and sign-in popups still fails.
-- Known rough edges: the native page view can't take part in the CSS animation, so a snapshot of
-  the page animates in its place; and the panel opens at a fixed fraction of the screen.
+- A username and password asked of an extension's service worker has no page to ask in; jbrow
+  doesn't ask and the request fails.
 
 ## License
 
