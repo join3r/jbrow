@@ -40,6 +40,8 @@ export interface Settings {
   hideFromScreenCapture: boolean
   /** A regular window with a Dock icon that stays when you click away, shown at launch. Off, jbrow only appears on its hotkey. */
   pinned: boolean
+  /** Links from other apps with no click or key press just before open in the background, counted in the menu bar. */
+  quietLinks: boolean
   /** Addresses matching these show as "Private" in the address bar until clicked. `*` matches anything. */
   privateUrls: string[]
   /** Threads unseen this many days unload their pages and show as a one-line summary, unless kept. 0 never does. */
@@ -76,6 +78,7 @@ const DEFAULTS: Settings = {
   panel: { widthFraction: 0.72, heightFraction: 0.78 },
   hideFromScreenCapture: true,
   pinned: true,
+  quietLinks: true,
   privateUrls: [],
   summarizeAfterDays: 3,
   archiveAfterDays: 7,

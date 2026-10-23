@@ -47,6 +47,8 @@ export interface Folder {
 
 export interface UiTab extends TabRecord {
   loading: boolean
+  /** Its page crashed and hasn't been reloaded. */
+  crashed?: boolean
 }
 
 export interface UiState {
@@ -71,6 +73,10 @@ export interface UiState {
   restyle: RestyleView | null
   /** The active tab's certificate. Null for pages not loaded over https. */
   cert: CertView | null
+  /** A site asking the active tab for a username and password. */
+  login: LoginView | null
+  /** The active tab's page crashed or stopped responding. */
+  crash: CrashView | null
   /** Every site with a restyle, for the settings screen. */
   styledSites: StyledSite[]
   nav: { canGoBack: boolean; canGoForward: boolean; loading: boolean }
@@ -86,6 +92,8 @@ export interface Prefs {
   /** Addresses matching one of these show as "Private" until clicked. `*` matches anything. */
   privateUrls: string[]
   hideFromScreenCapture: boolean
+  /** Links from other apps you didn't click open in the background. */
+  quietLinks: boolean
   /** Threads unseen this many days unload their pages and show as one line. 0 never does. */
   summarizeAfterDays: number
   /** Threads unseen this many days are archived. 0 never archives. */
@@ -115,6 +123,26 @@ export interface MiniPlayerPrefs {
   /** Address patterns, as for private addresses. Both lists are kept whichever `sites` uses. */
   onlySites: string[]
   exceptSites: string[]
+}
+
+/** HTTP basic or digest auth: a site (or proxy) wants a username and password. */
+export interface LoginView {
+  /** Changes with each new question, so the form can start empty. */
+  id: number
+  /** With the port when it isn't the usual one. */
+  host: string
+  realm: string
+  proxy: boolean
+  /** The username and password just tried were wrong. */
+  retry: boolean
+}
+
+/** A page whose renderer is gone or stuck. */
+export interface CrashView {
+  /** Electron's render-process-gone reason, e.g. `crashed`, `oom`, `killed`. '' when it's only stuck. */
+  reason: string
+  /** The page stopped responding but is still there; it may recover. */
+  hung: boolean
 }
 
 /** A site's certificate and what's wrong with it, if anything. */

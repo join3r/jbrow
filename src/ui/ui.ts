@@ -55,6 +55,8 @@ const ICONS: Record<string, string> = {
     '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
   pip: '<path d="M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h4"/><rect width="10" height="7" x="12" y="13" rx="2"/>',
   keyboard: '<path d="M10 8h.01M12 12h.01M14 8h.01M16 12h.01M18 8h.01M6 8h.01M7 16h10M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/>',
+  up: '<path d="m18 15-6-6-6 6"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
 }
 const icon = (name: string) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`
 document.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => (el.innerHTML = icon(el.dataset.icon!)))
@@ -95,6 +97,8 @@ const profile = (id: string): Profile | undefined => S?.profiles.find((p) => p.i
 const activeTab = () => S?.tabs.find((t) => t.id === S!.activeId)
 /** The active tab's address, or the one a bad certificate stopped it from loading. */
 const activeUrl = () => (S?.cert?.blocked ? S.cert.url : (activeTab()?.url ?? ''))
+/** jbrow shows its own screen where the active tab's page would be: certificate, sign-in or crash. */
+const pageCovered = () => !!(S?.cert?.blocked || S?.login || S?.crash)
 /** The address as it may be shown on screen. */
 const shownUrl = (url: string) => (isPrivate(url) ? 'Private' : url)
 const HOUR_MS = 60 * 60 * 1000
@@ -168,6 +172,8 @@ function render() {
   renderPinnedActions()
   renderRestyle()
   renderCert()
+  renderLogin()
+  renderCrash()
 
   const scope = $('scope')
   scope.hidden = !S.scope
@@ -189,6 +195,7 @@ function render() {
       ['⌘1–9', 'Jump to a thread'],
       [keyLabel('previousTab'), 'Previous tab'],
       [keyLabel('closeTab'), 'Close tab'],
+      [keyLabel('reopenTab'), 'Reopen closed tab'],
       [keyLabel('pin'), 'Pin the window'],
     ]
     $('blankKeys').innerHTML = keys
@@ -196,7 +203,7 @@ function render() {
       .map(([k, what]) => `<div><dt>${esc(k)}</dt><dd>${esc(what)}</dd></div>`)
       .join('')
   }
-  snapshot.hidden = blank || snapshotTab !== S.activeId || !!S.cert?.blocked
+  snapshot.hidden = blank || snapshotTab !== S.activeId || pageCovered()
   syncCovering()
 }
 
@@ -370,6 +377,7 @@ function row(t: UiTab, depth: number, thread: ThreadView<UiTab> | null, number?:
     thread && open ? 'open' : '',
     t.loading ? 'loading' : '',
     t.unread ? 'unread' : '',
+    t.crashed ? 'crashed' : '',
     asleep ? 'asleep' : '',
   ].join(' ')
   const color = profile(t.profile)?.color ?? ''
@@ -457,7 +465,7 @@ function syncOverlay() {
 
 /** While jbrow's UI is above a live page, the page area turns clear so the page shows through. */
 function syncCovering() {
-  root.classList.toggle('covering', overlaySent && !!activeTab()?.url && !S?.cert?.blocked)
+  root.classList.toggle('covering', overlaySent && !!activeTab()?.url && !pageCovered())
 }
 function moveHighlight(delta: number) {
   if (!current.length) return
@@ -953,6 +961,7 @@ const hideCapture = $<HTMLInputElement>('hideCapture')
 const pinWindow = $<HTMLInputElement>('pinWindow')
 const pipOnlySites = $<HTMLTextAreaElement>('pipOnlySites')
 const pipExceptSites = $<HTMLTextAreaElement>('pipExceptSites')
+const quietLinks = $<HTMLInputElement>('quietLinks')
 const settingsSearch = $<HTMLInputElement>('settingsSearch')
 const shortcutSearch = $<HTMLInputElement>('shortcutSearch')
 const SECTION_NAMES: Record<string, string> = {
@@ -1119,6 +1128,7 @@ function renderSettings(all = false) {
   if (all || document.activeElement !== pipOnlySites) pipOnlySites.value = mp.onlySites.join('\n')
   if (all || document.activeElement !== pipExceptSites) pipExceptSites.value = mp.exceptSites.join('\n')
   pinWindow.checked = S.pinned
+  quietLinks.checked = S.prefs.quietLinks
   $('showHotkey').textContent = keyLabel('show') || 'its hotkey'
   $('appHotkey').textContent = keyLabel('showApp') || 'The app hotkey'
   renderActionKeys()
@@ -1228,6 +1238,7 @@ styledSitesEl.addEventListener('click', (e) => {
 })
 hideCapture.addEventListener('change', () => sendPrefs({ hideFromScreenCapture: hideCapture.checked }))
 pinWindow.addEventListener('change', () => send('pin', { on: pinWindow.checked }))
+quietLinks.addEventListener('change', () => sendPrefs({ quietLinks: quietLinks.checked }))
 $('openSettingsFile').addEventListener('click', () => send('open-settings-file'))
 $('settingsButton').addEventListener('click', () => setSettings(!!settingsEl.hidden))
 $('closeSettings').addEventListener('click', () => setSettings(false))
@@ -1498,6 +1509,128 @@ document.addEventListener('keydown', (e) => {
   else if (!settingsEl.hidden) setSettings(false)
 })
 
+// ---------- find in page ----------
+
+const findBar = $('find')
+const findInput = $<HTMLInputElement>('findInput')
+const findCount = $('findCount')
+
+/** Searches for what's typed: a new query from the first match, the same one a match further on. */
+function find(forward = true) {
+  send('find', { text: findInput.value, forward })
+}
+
+function showFindCount(matches: number, active: number) {
+  findCount.textContent = findInput.value ? `${active} of ${matches}` : ''
+  findBar.classList.toggle('none', !!findInput.value && matches === 0)
+}
+
+/** ⌘F: opens the bar with the last query selected and found again, or selects it if it's open. */
+function openFind() {
+  const reopen = findBar.hidden
+  findBar.hidden = false
+  focusUi()
+  findInput.focus()
+  findInput.select()
+  if (reopen && findInput.value) find()
+}
+
+/** Closes the bar and clears the highlight; the query stays for next time. */
+function closeFind(focusPage = true) {
+  if (findBar.hidden) return
+  findBar.hidden = true
+  findCount.textContent = ''
+  findBar.classList.remove('none')
+  send('find-stop')
+  if (focusPage) send('focus-page')
+}
+
+findInput.addEventListener('input', () => find())
+findInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.isComposing) {
+    e.preventDefault()
+    find(!e.shiftKey)
+  } else if (e.key === 'Escape') {
+    // Only the bar closes, not a popover or settings behind it.
+    e.stopPropagation()
+    closeFind()
+  }
+})
+$('findPrev').addEventListener('click', () => find(false))
+$('findNext').addEventListener('click', () => find(true))
+$('findClose').addEventListener('click', () => closeFind())
+
+window.jbrow.on('find', (m: { open?: boolean; step?: 1 | -1; close?: boolean; matches?: number; active?: number }) => {
+  if (m.open) openFind()
+  else if (m.step && !findBar.hidden) find(m.step === 1)
+  else if (m.close) closeFind(false)
+  else if (m.matches !== undefined && !findBar.hidden) showFindCount(m.matches, m.active ?? 0)
+})
+
+// ---------- sign-in (HTTP auth) ----------
+
+const loginUser = $<HTMLInputElement>('loginUser')
+const loginPass = $<HTMLInputElement>('loginPass')
+/** The question the form shows, so a new one starts empty and takes focus. */
+let loginShown = 0
+function renderLogin() {
+  const l = S?.login
+  $('loginWarn').hidden = !l
+  if (!l) return void (loginShown = 0)
+  const realm = l.realm ? ` It says: “${esc(l.realm)}”` : ''
+  $('loginText').innerHTML = `${l.proxy ? 'The proxy ' : ''}<b>${esc(l.host)}</b> wants a username and password.${realm}`
+  $('loginError').hidden = !l.retry
+  if (loginShown === l.id) return
+  loginShown = l.id
+  // After a wrong try, keep the username and retype the password.
+  if (!l.retry) loginUser.value = ''
+  loginPass.value = ''
+  // Main hands jbrow's UI the keyboard (focusActive); this picks the field.
+  ;(l.retry && loginUser.value ? loginPass : loginUser).focus()
+}
+$('loginForm').addEventListener('submit', (e) => {
+  e.preventDefault()
+  if (S?.login) send('login', { id: S.login.id, username: loginUser.value, password: loginPass.value })
+  loginPass.value = ''
+})
+const cancelLogin = () => {
+  if (S?.login) send('login', { id: S.login.id })
+  loginPass.value = ''
+}
+$('loginCancel').addEventListener('click', cancelLogin)
+$('loginForm').addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return
+  // Esc cancels the sign-in and nothing else.
+  e.stopPropagation()
+  cancelLogin()
+})
+
+// ---------- crashed pages ----------
+
+/** Why a page's process went away, from render-process-gone. */
+const CRASH_REASONS: Record<string, string> = {
+  crashed: 'Its process crashed.',
+  oom: 'It ran out of memory.',
+  killed: 'Its process was stopped, possibly by macOS to free memory.',
+  'abnormal-exit': 'Its process quit unexpectedly.',
+  'launch-failed': "Its process couldn't start.",
+  'integrity-failure': 'Its process failed a code integrity check.',
+  'memory-eviction': 'It was unloaded to free memory.',
+}
+function renderCrash() {
+  const c = S?.crash
+  $('crashWarn').hidden = !c
+  if (!c) return
+  const reload = keyLabel('reload') ? ` (${keyLabel('reload')})` : ''
+  $('crashTitle').textContent = c.hung ? "This page isn't responding" : 'This page crashed'
+  $('crashText').textContent = c.hung
+    ? `You can wait for it, or reload it${reload}. Reloading loses anything you haven't saved on it.`
+    : `${CRASH_REASONS[c.reason] ?? `Its process ended (${c.reason}).`} Reload to try again${reload}.`
+  $('crashWait').hidden = !c.hung
+}
+$('crashReload').addEventListener('click', () => send('crash', { action: 'reload' }))
+$('crashWait').addEventListener('click', () => send('crash', { action: 'wait' }))
+
 // ---------- certificates ----------
 
 /** What each certificate error means, finishing "…sent a certificate jbrow can't trust:". */
@@ -1621,6 +1754,8 @@ let toastTimer: number | undefined
 window.jbrow.on('state', (state: UiState) => {
   // Another tab coming to the front (a new tab, ⌘1–9, a link) takes over from settings.
   if (S && S.activeId !== state.activeId) showSettings(false)
+  // The find bar searches the page it opened on, so it goes when another tab comes up.
+  if (S && S.activeId !== state.activeId) closeFind(false)
   S = state
   render()
 })

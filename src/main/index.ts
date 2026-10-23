@@ -7,9 +7,12 @@ import type { AppEntry, AppLabel, Folder, Prefs, Profile, TabRecord, UiState } f
 import { AppDirectory, bundleIdOf } from './apps'
 import { BACKGROUND } from './background'
 import { Certificates } from './certs'
+import { Logins } from './logins'
 import { ExtensionCommands } from './commands'
 import { Downloads, type DownloadAction } from './downloads'
+import { FindInPage } from './find'
 import { frontmostApp, type FrontApp } from './frontmost'
+import { secondsSinceInput } from './input'
 import { logPath, setupLogging } from './log'
 import { Panel } from './panel'
 import { SitePermissions } from './permissions'
@@ -19,10 +22,13 @@ import { installTestExtensions, loadUnpacked, partitionFor, setupProfile, setupP
 import { Restyler } from './restyle'
 import { loadSettings, saveSettings, scopeForApp, settingsPath, type Settings } from './settings'
 import { Tabs } from './tabs'
-import { rm } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const AWAY_FOCUS_MS = 60 * 1000
+/** A link this long after your last click or key press opens quietly. */
+const QUIET_AFTER_S = 2
 const AWAY_FRESH_MS = 4 * 60 * 60 * 1000
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
@@ -37,6 +43,7 @@ let commands: ExtensionCommands
 let downloads: Downloads
 let restyler: Restyler
 let certs: Certificates
+let logins: Logins
 let permissions: SitePermissions
 let profileDeps: ProfileDeps
 /** The settings screen is recording a shortcut: key presses go to it, not to jbrow or extensions. */
@@ -114,6 +121,8 @@ function state(): UiState {
     pinned: panel.pinned,
     restyle: active ? restyler.view(active.url) : null,
     cert: active ? certs.view(active.id, active.profile, active.url) : null,
+    login: active ? logins.view(active.id) : null,
+    crash: active ? tabs.crash(active.id) : null,
     styledSites: restyler.styledSites(),
     nav: tabs.navState(),
     keys: actionKeys(settings.shortcuts),
@@ -121,6 +130,7 @@ function state(): UiState {
       animation: settings.animation,
       privateUrls: settings.privateUrls,
       hideFromScreenCapture: settings.hideFromScreenCapture,
+      quietLinks: settings.quietLinks,
       summarizeAfterDays: settings.summarizeAfterDays,
       archiveAfterDays: settings.archiveAfterDays,
       earlierAfterHours: settings.earlierAfterHours,
@@ -162,6 +172,7 @@ function pushState() {
   queueMicrotask(() => {
     pushQueued = false
     if (!panel.win.isDestroyed()) panel.ui.send('state', state())
+    updateTray()
   })
 }
 
@@ -176,11 +187,17 @@ function focusAddressBar() {
   panel.ui.send('focus-omnibox')
 }
 
-/** Focus the active page, or the address bar for a new tab. Only while jbrow is on screen. */
+/**
+ * Focus the active page, or the address bar for a new tab. A page jbrow covers with its own
+ * screen (sign-in, crash, certificate) leaves focus with jbrow's UI, which picks the field.
+ * Only while jbrow is on screen.
+ */
 function focusActive() {
   if (!panel.visible || panel.win.isDestroyed()) return
   const wc = tabs.activeWebContents()
-  if (wc && tabs.active()?.url) wc.focus()
+  const rec = tabs.active()
+  if (rec && wc && tabs.covered(rec.id)) panel.ui.focus()
+  else if (wc && rec?.url) wc.focus()
   else focusAddressBar()
 }
 
@@ -195,11 +212,22 @@ function closeDownloadOnlyTab(wc: Electron.WebContents) {
   if (!id || !rec?.parent) return
   const committed = wc.getURL()
   if (wc.navigationHistory.canGoBack() || (committed && committed !== 'about:blank')) return
-  setTimeout(() => closeTab(id), 0)
+  setTimeout(() => closeTab(id, false), 0)
 }
 
 const toast = (text: string) => {
   if (!panel.win.isDestroyed()) panel.ui.send('toast', text)
+}
+
+const finder = new FindInPage((update) => {
+  if (!panel.win.isDestroyed()) panel.ui.send('find', update)
+})
+
+/** Opens the find bar, or selects its query if it's open. Only for a tab with a page. */
+function openFind() {
+  if (!tabs.activeWebContents() || !tabs.active()?.url || panel.win.isDestroyed()) return
+  panel.ui.focus()
+  panel.ui.send('find', { open: true })
 }
 
 // ---------- profiles and scopes ----------
@@ -423,6 +451,8 @@ function runAction(id: ActionId) {
       if (tabs.activeId) tabs.close(tabs.activeId)
       if (!tabs.active()) tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
       return
+    case 'reopenTab':
+      return void tabs.reopen()
     case 'previousTab': {
       const prev = tabs.previous()
       if (prev) tabs.activate(prev)
@@ -430,8 +460,12 @@ function runAction(id: ActionId) {
     }
     case 'address':
       return focusAddressBar()
+    case 'find':
+      return openFind()
     case 'reload':
-      return wc?.reload()
+      return tabs.activeId ? tabs.reload(tabs.activeId) : undefined
+    case 'print':
+      return wc && tabs.active()?.url ? printPage(wc) : undefined
     case 'back':
       return wc?.navigationHistory.goBack()
     case 'forward':
@@ -455,6 +489,11 @@ function onKey(input: Electron.Input): boolean {
     const action = ACTIONS.find((a) => keys[a.id] === shortcut && !isGlobal(a.id))
     if (action) {
       runAction(action.id)
+      return true
+    }
+    // ⌘G and ⇧⌘G step through the matches while the find bar is open.
+    if (finder.open && (shortcut === 'Command+G' || shortcut === 'Command+Shift+G')) {
+      panel.ui.send('find', { step: shortcut === 'Command+G' ? 1 : -1 })
       return true
     }
   }
@@ -518,6 +557,7 @@ function updatePrefs(prefs: Partial<Prefs>) {
     settings.hideFromScreenCapture = prefs.hideFromScreenCapture
     panel.applyContentProtection()
   }
+  if (prefs.quietLinks !== undefined) settings.quietLinks = prefs.quietLinks
   if (prefs.restyleAgent === 'claude' || prefs.restyleAgent === 'codex') settings.restyle = { ...settings.restyle, agent: prefs.restyleAgent }
   if (prefs.restyleModel) settings.restyle = { ...settings.restyle, model: prefs.restyleModel }
   if (prefs.restyleCodexModel !== undefined) settings.restyle = { ...settings.restyle, codexModel: prefs.restyleCodexModel.trim() }
@@ -562,8 +602,59 @@ async function addExtensionFromFolder() {
   }
 }
 
-function closeTab(id: string) {
-  tabs.close(id)
+/** Dialogs jbrow has up for a page. The panel doesn't hide on click-away while one is. */
+let dialogsOpen = 0
+
+/** Runs a dialog for a page, keeping the panel up and giving it the keyboard back afterwards. */
+async function whileDialog<T>(run: () => Promise<T>): Promise<T> {
+  dialogsOpen++
+  try {
+    return await run()
+  } finally {
+    dialogsOpen--
+    if (panel.visible && !panel.win.isDestroyed()) panel.win.focus()
+  }
+}
+
+/**
+ * The system print dialog, which also has Save as PDF. It's an app-modal window rather than a
+ * sheet, so jbrow comes to the front first; the non-activating panel alone can't give it the keyboard.
+ */
+function printPage(wc: Electron.WebContents) {
+  app.focus({ steal: true })
+  void whileDialog(
+    () =>
+      new Promise<void>((resolve) =>
+        wc.print({}, (ok, reason) => {
+          if (!ok && reason && !/cancel/i.test(reason)) toast(`Couldn't print: ${reason}`)
+          resolve()
+        }),
+      ),
+  )
+}
+
+/** Saves the page as a PDF, asking where; ~/Downloads/<title>.pdf to start with. */
+async function savePageAsPdf(wc: Electron.WebContents) {
+  const name = wc.getTitle().replace(/[/\\:]/g, '-').trim().slice(0, 120) || 'Page'
+  const { canceled, filePath } = await whileDialog(() =>
+    dialog.showSaveDialog(panel.win, {
+      title: 'Save as PDF',
+      defaultPath: path.join(app.getPath('downloads'), `${name}.pdf`),
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    }),
+  )
+  if (canceled || !filePath || wc.isDestroyed()) return
+  try {
+    await writeFile(filePath, await wc.printToPDF({}))
+    toast(`Saved ${path.basename(filePath)}.`)
+  } catch (error) {
+    console.error('[print] could not save a PDF:', error)
+    toast(`Couldn't save the PDF: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+function closeTab(id: string, remember = true) {
+  tabs.close(id, remember)
   if (!tabs.active()) tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
 }
 
@@ -598,15 +689,23 @@ function threadMenu(id: string) {
 }
 
 function newTabMenu() {
-  Menu.buildFromTemplate(
-    settings.profiles.map((p) => ({
+  const reopenKey = actionKeys(settings.shortcuts).reopenTab
+  Menu.buildFromTemplate([
+    ...settings.profiles.map((p) => ({
       label: `New tab in ${p.name}`,
       click: () => {
         tabs.create({ profile: p.id, ...scopeFields() })
         focusAddressBar()
       },
     })),
-  ).popup({ window: panel.win })
+    { type: 'separator' },
+    {
+      label: 'Reopen closed tab',
+      accelerator: reopenKey || undefined,
+      enabled: tabs.canReopen(),
+      click: () => void tabs.reopen(),
+    },
+  ]).popup({ window: panel.win })
 }
 
 function newFolder(parent?: string) {
@@ -669,8 +768,8 @@ function certAction(action: 'proceed' | 'back' | 'distrust') {
  * Opens a link another app handed to jbrow, in that app's profile and its section of the sidebar,
  * and brings jbrow up on it. The app the link came from is still in front when it arrives.
  */
-async function openFromApp(url: string) {
-  const front = await frontmostApp()
+async function openFromApp(url: string, clicked = false) {
+  const [front, quiet] = await Promise.all([frontmostApp(), !clicked && openQuietly()])
   const from = front && front.pid !== process.pid ? front : null
   let fields = {}
   if (from) {
@@ -680,6 +779,13 @@ async function openFromApp(url: string) {
     fields = { scope: key, scopeName: scopeName(key), app: from.bundleId }
   }
   const profile = (from && settings.appProfiles[from.bundleId]) || settings.defaultProfile
+  if (quiet) {
+    const rec = tabs.create({ profile, url, ...fields, activate: false, unread: true })
+    quietLinks.add(rec.id)
+    tabs.webContentsFor(rec.id)?.setAudioMuted(true)
+    console.log(`[links] opened quietly: ${url}`)
+    return
+  }
   if (filter !== 'all' && filter !== profile) filter = 'all'
   if (scope && scope.key !== (fields as { scope?: string }).scope) scope = null
   if (!panel.visible) sweep()
@@ -687,6 +793,48 @@ async function openFromApp(url: string) {
   pushState()
   await panel.show()
   focusActive()
+}
+
+/**
+ * Whether a link another app just handed over should open in the background. macOS doesn't say
+ * if you clicked it, so a link with no click or key press in the last couple of seconds counts
+ * as one a script or a notification opened on its own. Open, or unsure, jbrow comes up as usual.
+ */
+async function openQuietly(): Promise<boolean> {
+  if (!settings.quietLinks || panel.visible) return false
+  const seconds = await secondsSinceInput()
+  console.log(`[links] last click or key press ${seconds?.toFixed(1) ?? '?'} s ago`)
+  return seconds !== null && seconds > QUIET_AFTER_S
+}
+
+/** Threads opened quietly that you haven't looked at yet. Their pages stay muted until you do. */
+const quietLinks = new Set<string>()
+
+/** Quiet threads still unseen, newest first. */
+function unseenQuietLinks(): TabRecord[] {
+  for (const id of quietLinks) if (!tabs.get(id)?.unread) {
+    quietLinks.delete(id)
+    tabs.webContentsFor(id)?.setAudioMuted(false)
+  }
+  return [...quietLinks].map((id) => tabs.get(id)!).reverse()
+}
+
+/** Shows the newest quiet thread. */
+function showQuietLink() {
+  const rec = unseenQuietLinks()[0]
+  if (!rec) return
+  filter = 'all'
+  scope = null
+  if (!panel.visible) sweep()
+  tabs.activate(rec.id)
+  pushState()
+  void panel.show().then(focusActive)
+}
+
+/** The menu bar item counts quiet threads you haven't seen. */
+function updateTray() {
+  const n = tray ? unseenQuietLinks().length : 0
+  tray?.setTitle(n ? `jb •${n}` : 'jb')
 }
 
 /** Whether jbrow opens web links: 'dev' when it runs from source, which macOS won't offer. */
@@ -1084,7 +1232,7 @@ function wireIpc() {
     if (!wc) return
     if (action === 'back') wc.navigationHistory.goBack()
     else if (action === 'forward') wc.navigationHistory.goForward()
-    else if (action === 'reload') wc.reload()
+    else if (action === 'reload') tabs.reload(tabs.activeId!)
     else wc.stop()
   })
   on<{ prompt: string }>('restyle', ({ prompt }) => {
@@ -1092,6 +1240,16 @@ function wireIpc() {
     if (wc) void restyler.restyle(wc, prompt)
   })
   on<{ action: 'proceed' | 'back' | 'distrust' }>('cert', ({ action }) => certAction(action))
+  on<{ id: number; username?: string; password?: string }>('login', ({ id, username, password }) => {
+    // Only the question the form showed: a newer one may have taken its place.
+    const tabId = tabs.activeId
+    if (tabId && logins.view(tabId)?.id === id) logins.answer(tabId, username, password)
+  })
+  on<{ action: 'reload' | 'wait' }>('crash', ({ action }) => {
+    if (!tabs.activeId) return
+    if (action === 'reload') tabs.reload(tabs.activeId)
+    else tabs.wait(tabs.activeId)
+  })
   on<{ host: string; action: 'undo' | 'reset' | 'on' | 'off' | 'cancel' }>('restyle-site', ({ host, action }) => {
     if (action === 'undo') restyler.undo(host)
     else if (action === 'reset') restyler.reset(host)
@@ -1102,6 +1260,11 @@ function wireIpc() {
   on('hide', () => void panel.hide())
   on('focus-ui', () => panel.ui.focus())
   on('focus-page', () => focusActive())
+  on<{ text: string; forward?: boolean }>('find', ({ text, forward }) => {
+    const wc = tabs.activeWebContents()
+    if (wc) finder.find(wc, text, forward !== false)
+  })
+  on('find-stop', () => finder.stop())
   on('shortcuts', () => sendShortcuts())
   on('apps', () => sendApps())
   on<{ key: string; profile: string }>('app-profile', ({ key, profile }) => setAppProfile(key, profile))
@@ -1140,12 +1303,19 @@ function wireIpc() {
 
 // ---------- menu bar item ----------
 
+function quietMenuItems(): Electron.MenuItemConstructorOptions[] {
+  const n = unseenQuietLinks().length
+  if (!n) return []
+  return [{ label: n === 1 ? 'Show quiet link' : `Show quiet links (${n})`, click: showQuietLink }, { type: 'separator' }]
+}
+
 function buildTray() {
   tray = new Tray(nativeImage.createEmpty())
   tray.setTitle('jb')
   tray.setToolTip('jbrow')
   const menu = () =>
     Menu.buildFromTemplate([
+      ...quietMenuItems(),
       { label: `Show jbrow (${shortcutLabel(actionKeys(settings.shortcuts).show)})`, click: () => void onHotkey() },
       { type: 'separator' },
       {
@@ -1246,6 +1416,12 @@ app.whenReady().then(async () => {
     tabs.layout()
     pushState()
   })
+  logins = new Logins((tabId) => {
+    tabs.layout()
+    pushState()
+    // The sign-in form needs the keyboard; once it's answered, the page gets it back.
+    if (tabId === tabs.activeId) focusActive()
+  })
   tabs = new Tabs({
     window: () => panel.win,
     runtime: (id) => runtimes.get(id),
@@ -1261,7 +1437,10 @@ app.whenReady().then(async () => {
     searchUrl: () => settings.searchUrl,
     permissions,
     certs,
+    logins,
     onNavigate: (wc) => restyler.onNavigate(wc),
+    print: (wc) => printPage(wc),
+    saveAsPdf: (wc) => void savePageAsPdf(wc),
   })
 
   downloads = new Downloads({
@@ -1306,7 +1485,7 @@ app.whenReady().then(async () => {
     if (panel.pinned && panel.visible && settings.miniPlayer.onHide) toMiniPlayer(tabs.activeWebContents())
   })
   app.on('browser-window-blur', () =>
-    panel.checkClickAway(async () => (await frontmostApp())?.pid === process.pid),
+    panel.checkClickAway(async () => dialogsOpen > 0 || (await frontmostApp())?.pid === process.pid),
   )
   const keys = actionKeys(settings.shortcuts)
   console.log(`[jbrow] ready. ${keys.show} for everything, ${keys.showApp || 'no key'} for the app in front.`)
@@ -1318,7 +1497,8 @@ app.whenReady().then(async () => {
     console.log(`[extensions] ${installInto.profile.id}:\n  ${results.join('\n  ')}`)
   }
   started = true
-  for (const url of waitingLinks.splice(0)) await openFromApp(url)
+  // macOS launched jbrow to open these, which you asked for.
+  for (const url of waitingLinks.splice(0)) await openFromApp(url, true)
   // Pinned, jbrow opens its window at launch like any browser. `npm start -- --show` does too.
   if (settings.pinned || process.argv.includes('--show')) setTimeout(() => void onHotkey(), 600)
 })

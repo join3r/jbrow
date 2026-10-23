@@ -44,6 +44,13 @@ profile set for its app under **Apps**, otherwise in the default profile, and la
 section of the sidebar. HTML files opened with jbrow work the same way. Only the installed app can
 be the default browser, not `npm start`.
 
+Links you didn't click open quietly. If a link arrives with no click or key press in the last 2
+seconds (a script, a build tool, an app opening something on its own), jbrow doesn't come up: the
+thread opens in the background, muted, with a dot in the sidebar, and the menu bar item counts them
+(`jb •2`). Right-click the menu bar item for **Show quiet links**, or just look at them; viewing a
+thread clears its dot and unmutes it. Links that arrive while jbrow is up, or that launch it, open
+as usual. Turn this off with **Quiet links** under **General** in settings.
+
 To change the icon, edit `build/icon.svg` and run `npm run icon`.
 
 If jbrow disappears a few seconds after you hide it, something is quitting apps that have no
@@ -65,6 +72,9 @@ These are the defaults; change any of them under **Shortcuts** in settings. ⌘1
 | ⌘1–9 | Jump to a thread |
 | ⌃Tab | Previous tab |
 | ⌘W | Close tab |
+| ⇧⌘T | Reopen the last closed tab (again for the one before) |
+| ⌘F | Find in page (Return / ⌘G next, ⇧Return / ⇧⌘G previous, Esc closes) |
+| ⌘P | Print, or Save as PDF from the print dialog |
 | ⌘L | Address bar |
 | ⇧⌘P | Pin: a regular window with a Dock icon, which stays put when you click elsewhere |
 | ⌘, | Settings |
@@ -86,7 +96,16 @@ and icon (linked apps share one). Kept threads stay in Kept.
 
 Right-click a tab to rename it, keep it, move it to a folder, open it in another profile, copy its
 link or close it. Its close
-button shows on hover.
+button shows on hover. ⇧⌘T, or right-click **+** → **Reopen closed tab**, brings back the last 25
+closed tabs one by one, in their old place with their back/forward history and any threads that were
+under them. The list is kept only until jbrow quits.
+
+Right-click a page for **Print…** and **Save as PDF…** (saved to ~/Downloads by default).
+
+A site that asks for a username and password (HTTP basic or digest auth) gets a sign-in form in the
+page area. jbrow doesn't store the password; Chromium remembers it until jbrow quits. If a page
+crashes, or macOS kills it to free memory, the page area says so and offers **Reload** (or ⌘R), and
+the tab is greyed out in the sidebar. A page that hangs gets **Wait** and **Reload**.
 
 Kept can hold folders: hover the Kept heading and click the folder icon. Drag threads onto a folder,
 click it to fold it away, and right-click it to rename, delete (its threads stay kept) or set its
@@ -135,7 +154,7 @@ Sonnet takes about 10 seconds. Styles are kept in `styles.json` next to `setting
 
 ## Settings
 
-The settings screen (⌘, or the sliders icon) has a sidebar of sections: **General** (pinning, the
+The settings screen (⌘, or the sliders icon) has a sidebar of sections: **General** (pinning, quiet links, the
 default browser), **Profiles**, **Threads** (archiving), **Apps**, **Animation**, **Restyling**,
 **Privacy** (private addresses, screen sharing) and **Shortcuts** (jbrow's own and extensions').
 The search above the sections finds any setting or shortcut, and **Shortcuts** has its own search.
@@ -160,6 +179,7 @@ on first run. Restart jbrow after editing the file by hand (menu bar item, **Res
 - `unpackedExtensions`: extension folders to load per profile, e.g. Stem.
 - `pinned`: a regular window with a Dock icon that opens at launch and stays when you click away
   (on by default). The pin in the toolbar and ⇧⌘P switch it, and jbrow remembers.
+- `quietLinks`: open links you didn't click in the background (on by default).
 - `hideFromScreenCapture`: keeps jbrow out of screen shares (on by default). While it's on, private
   addresses don't matter for streaming: nobody sees jbrow at all.
 - `privateUrls`: the private address patterns.
@@ -220,9 +240,8 @@ The log is at `~/Library/Logs/jbrow/main.log` (menu bar item, **Show log file**)
 
 ## Not built yet
 
-- Quiet background opening for links you didn't click. Every link from another app brings jbrow up.
 - Undo for archiving (reopening from the address bar is the way back for now).
-- PiP when hiding a playing video.
+- The sign-in form covers tabs only; basic auth in extension pages and sign-in popups still fails.
 - Known rough edges: the native page view can't take part in the CSS animation, so a snapshot of
   the page animates in its place; and the panel opens at a fixed fraction of the screen.
 

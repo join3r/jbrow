@@ -63,7 +63,7 @@ export class MiniPlayer {
   }
 
   async enter(wc: WebContents | null, mutedToo = false) {
-    if (!wc || wc.isDestroyed() || (this.frame && this.wc === wc) || (!mutedToo && wc.isAudioMuted())) return
+    if (!wc || wc.isDestroyed() || wc.isCrashed() || (this.frame && this.wc === wc) || (!mutedToo && wc.isAudioMuted())) return
     const frames = wc.mainFrame.framesInSubtree
     const sizes = await Promise.all(frames.map((f) => f.executeJavaScript(probe(mutedToo)).catch(() => 0) as Promise<number>))
     const best = sizes.indexOf(Math.max(...sizes))

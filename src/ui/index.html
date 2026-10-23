@@ -40,6 +40,14 @@
             </div>
             <div id="suggest" class="suggest" hidden></div>
           </div>
+          <div id="find" class="find" hidden role="search" aria-label="Find in page">
+            <span class="find-icon" data-icon="search"></span>
+            <input id="findInput" autocomplete="off" spellcheck="false" aria-label="Find in page" placeholder="Find in page" />
+            <span id="findCount" class="find-count" aria-live="polite"></span>
+            <button id="findPrev" class="icon sm" data-icon="up" title="Previous match (⇧Return)" aria-label="Previous match"></button>
+            <button id="findNext" class="icon sm" data-icon="down" title="Next match (Return)" aria-label="Next match"></button>
+            <button id="findClose" class="icon sm" data-icon="close" title="Close (Esc)" aria-label="Close find"></button>
+          </div>
           <div id="downloads" class="downloads" hidden>
             <div id="dlList" class="dl-list" role="group" aria-label="Downloads"></div>
             <div id="dlPop" class="pop dl-pop" hidden role="dialog" aria-label="Download">
@@ -137,6 +145,29 @@
             <div id="certWarnChain"></div>
           </details>
         </section>
+        <section id="loginWarn" class="cert-warn login-warn" hidden aria-live="polite">
+          <span class="cert-warn-icon" data-icon="lock"></span>
+          <h1>Sign in</h1>
+          <p id="loginText"></p>
+          <form id="loginForm" class="login-form" autocomplete="on">
+            <label>Username <input id="loginUser" name="username" autocomplete="username" spellcheck="false" autocapitalize="off" /></label>
+            <label>Password <input id="loginPass" name="password" type="password" autocomplete="current-password" /></label>
+            <p id="loginError" class="login-error" hidden>Wrong username or password.</p>
+            <div class="cert-acts">
+              <button id="loginSubmit" class="btn primary" type="submit">Sign in</button>
+              <button id="loginCancel" class="btn" type="button">Cancel</button>
+            </div>
+          </form>
+        </section>
+        <section id="crashWarn" class="cert-warn crash-warn" hidden aria-live="polite">
+          <span class="cert-warn-icon" data-icon="alert"></span>
+          <h1 id="crashTitle"></h1>
+          <p id="crashText"></p>
+          <div class="cert-acts">
+            <button id="crashReload" class="btn primary">Reload</button>
+            <button id="crashWait" class="btn">Wait</button>
+          </div>
+        </section>
         <section id="settings" class="settings" hidden tabindex="-1" aria-label="Settings">
           <nav class="set-nav" aria-label="Settings sections">
             <label class="set-search">
@@ -177,6 +208,14 @@
                 <h3>Default browser</h3>
                 <p id="defaultBrowser" class="help"></p>
                 <button id="makeDefault" class="chip" hidden>Make jbrow the default browser</button>
+              </div>
+              <div class="set-item" data-keywords="quiet links background menu bar badge scripts notifications other apps focus">
+                <h3>Quiet links</h3>
+                <label class="check">
+                  <input id="quietLinks" type="checkbox" />
+                  <span>Open links you didn't click in the background. When a script or another app opens a link on its
+                    own, jbrow stays hidden, marks the thread with a dot and counts it next to jb in the menu bar.</span>
+                </label>
               </div>
             </section>
 

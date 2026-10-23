@@ -4,8 +4,9 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { urlMatcher } from '../shared/patterns'
 import { childrenOf, isAsleep, isInFolder, isRoot, rootOf, subtree } from '../shared/threads'
-import type { Folder, TabRecord, UiTab } from '../shared/types'
+import type { CrashView, Folder, TabRecord, UiTab } from '../shared/types'
 import type { Certificates } from './certs'
+import type { Logins } from './logins'
 import type { SitePermissions } from './permissions'
 import type { ProfileRuntime } from './profiles'
 
@@ -30,8 +31,12 @@ export interface TabsDeps {
   searchUrl: () => string
   permissions: SitePermissions
   certs: Certificates
+  logins: Logins
   /** A page committed a navigation to a new document. */
   onNavigate: (wc: WebContents) => void
+  /** The page menu's Print… and Save as PDF…. */
+  print: (wc: WebContents) => void
+  saveAsPdf: (wc: WebContents) => void
 }
 
 export interface CreateOptions {
@@ -55,6 +60,21 @@ const storePath = () => path.join(app.getPath('userData'), 'tabs.json')
 /** Archived threads are forgotten after this long. */
 const ARCHIVE_KEEP_MS = 90 * 24 * 60 * 60 * 1000
 
+/** How many closed tabs ⇧⌘T can bring back. */
+const CLOSED_KEEP = 25
+
+/** A closed tab, with what it takes to put it back where it was. */
+interface ClosedTab {
+  rec: TabRecord
+  /** Its place in `records`, which orders a thread's tabs. */
+  index: number
+  /** The app section of its thread, for when it comes back as a thread of its own. */
+  root: Pick<TabRecord, 'scope' | 'scopeName' | 'app'>
+  /** Its children, which close() moved up a level, so they can move back under it. */
+  children: string[]
+  history?: { entries: Electron.NavigationEntry[]; index: number }
+}
+
 export class Tabs {
   records: TabRecord[] = []
   folders: Folder[] = []
@@ -69,6 +89,14 @@ export class Tabs {
   private addingView = false
   /** Set while jbrow takes a view away from the extensions library, which reports that as the tab closing. */
   private droppingView = false
+  /** Tabs whose page crashed or stopped responding, until it loads again. */
+  private crashed = new Map<string, CrashView>()
+  /** Stuck pages jbrow crashed on purpose, to reload once their process is gone. */
+  private killing = new Set<string>()
+  /** Recently closed tabs, most recent last, for ⇧⌘T. Not kept across restarts. */
+  private closed: ClosedTab[] = []
+  /** Back and forward lists for reopened tabs, used instead of a plain load when their view is made. */
+  private pendingHistory = new Map<string, NonNullable<ClosedTab['history']>>()
 
   constructor(private deps: TabsDeps) {}
 
@@ -137,7 +165,7 @@ export class Tabs {
     return undefined
   }
   uiTabs(): UiTab[] {
-    return this.records.map((t) => ({ ...t, loading: this.live.get(t.id)?.loading ?? false }))
+    return this.records.map((t) => ({ ...t, loading: this.live.get(t.id)?.loading ?? false, crashed: this.crashed.get(t.id)?.reason ? true : undefined }))
   }
   navState() {
     const wc = this.activeWebContents()
@@ -214,7 +242,10 @@ export class Tabs {
     } finally {
       this.addingView = false
     }
-    if (!guest && rec.url) void view.webContents.loadURL(rec.url).catch(() => {})
+    const history = this.pendingHistory.get(rec.id)
+    this.pendingHistory.delete(rec.id)
+    if (!guest && history) void view.webContents.navigationHistory.restore(history).catch(() => {})
+    else if (!guest && rec.url) void view.webContents.loadURL(rec.url).catch(() => {})
     return live
   }
 
@@ -243,11 +274,35 @@ export class Tabs {
     }
     wc.on('did-navigate', (e, url) => {
       onNav(e, url)
+      this.deps.logins.loaded(id)
       this.deps.onNavigate(wc)
     })
     wc.on('did-navigate-in-page', onNav)
     wc.on('did-start-navigation', (details) => {
-      if (details.isMainFrame && !details.isSameDocument) this.deps.certs.clear(id)
+      if (details.isMainFrame && !details.isSameDocument) {
+        this.deps.certs.clear(id)
+        this.deps.logins.clear(id)
+        this.setCrashed(id, null)
+      }
+    })
+    // HTTP auth for the page or a proxy. Logins answers once you sign in or cancel.
+    wc.on('login', (event, _details, authInfo, callback) => {
+      event.preventDefault()
+      this.deps.logins.ask(id, authInfo, callback)
+    })
+    wc.on('render-process-gone', (_e, details) => {
+      // Unloading an asleep thread's page or closing the tab drops its view first; that's no crash.
+      if (details.reason === 'clean-exit' || this.live.get(id)?.view.webContents !== wc) return
+      if (this.killing.delete(id)) return void wc.reload()
+      this.deps.logins.clear(id)
+      this.setLoading(id, false)
+      this.setCrashed(id, { reason: details.reason, hung: false })
+    })
+    wc.on('unresponsive', () => {
+      if (!this.crashed.has(id)) this.setCrashed(id, { reason: '', hung: true })
+    })
+    wc.on('responsive', () => {
+      if (this.crashed.get(id)?.hung) this.setCrashed(id, null)
     })
     wc.on('certificate-error', (event, url, error, certificate, callback, isMainFrame) => {
       event.preventDefault()
@@ -289,9 +344,45 @@ export class Tabs {
     })
 
     wc.on('destroyed', () => {
-      this.live.delete(id)
+      // A crashed page's view may have been replaced by now; only forget this one.
+      if (this.live.get(id)?.view.webContents === wc) this.live.delete(id)
+      this.killing.delete(id)
       this.deps.certs.clear(id)
+      this.deps.logins.clear(id)
+      this.setCrashed(id, null)
     })
+  }
+
+  private setCrashed(id: string, crash: CrashView | null) {
+    if (crash) this.crashed.set(id, crash)
+    else if (!this.crashed.delete(id)) return
+    this.deps.onChange()
+    if (id !== this.activeId) return
+    this.layout()
+    // Keyboard focus moves to jbrow's crash screen, so ⌘R still works, and back to the page after.
+    this.deps.onActivated()
+  }
+
+  /** Why the tab's page is gone or stuck, if it is. */
+  crash(id: string): CrashView | null {
+    return this.crashed.get(id) ?? null
+  }
+
+  /**
+   * Reloads the tab's page. A stuck page can't unload by itself, so its process is ended first
+   * and the page reloads once it's gone.
+   */
+  reload(id: string) {
+    const wc = this.webContentsFor(id)
+    if (!wc) return
+    if (!this.crashed.get(id)?.hung || wc.isCrashed()) return wc.reload()
+    this.killing.add(id)
+    wc.forcefullyCrashRenderer()
+  }
+
+  /** Wait on a stuck page: shows it again, and asks again if it stays stuck. */
+  wait(id: string) {
+    if (this.crashed.get(id)?.hung) this.setCrashed(id, null)
   }
 
   private setLoading(id: string, loading: boolean) {
@@ -323,6 +414,9 @@ export class Tabs {
       { label: 'Back', enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() },
       { label: 'Forward', enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
       { label: 'Reload', click: () => wc.reload() },
+      { type: 'separator' },
+      { label: 'Print…', click: () => this.deps.print(wc) },
+      { label: 'Save as PDF…', click: () => this.deps.saveAsPdf(wc) },
     )
     const url = wc.getURL()
     if (this.deps.permissions.has(rt.profile.id, url)) {
@@ -370,14 +464,19 @@ export class Tabs {
   }
 
   /**
-   * Positions the active view and shows it if the panel allows. A page a certificate stopped
-   * stays hidden, so jbrow's warning beneath it shows.
+   * Positions the active view and shows it if the panel allows. A page a certificate stopped,
+   * a site asking for a password, or a crashed page stays hidden, so jbrow's screen beneath it shows.
    */
   layout() {
     const live = this.activeId ? this.live.get(this.activeId) : undefined
     if (!live) return
     live.view.setBounds(this.deps.contentBounds())
-    live.view.setVisible(this.deps.contentVisible() && !this.deps.certs.isBlocked(this.activeId!))
+    live.view.setVisible(this.deps.contentVisible() && !this.covered(this.activeId!))
+  }
+
+  /** jbrow shows its own screen in place of the tab's page. */
+  covered(id: string) {
+    return this.deps.certs.isBlocked(id) || this.deps.logins.isAsking(id) || this.crashed.has(id)
   }
 
   navigate(input: string) {
@@ -390,9 +489,11 @@ export class Tabs {
     this.activate(rec.id)
   }
 
-  close(id: string) {
+  /** `remember` false leaves it out of what ⇧⌘T reopens. */
+  close(id: string, remember = true) {
     const rec = this.get(id)
     if (!rec) return
+    if (remember && rec.url) this.remember(rec)
     // Children move up to the closed tab's parent so a thread doesn't fall apart.
     for (const child of childrenOf(this.records, id)) {
       child.parent = rec.parent
@@ -413,6 +514,51 @@ export class Tabs {
       if (next) this.activate(next)
     }
     this.changed()
+  }
+
+  private remember(rec: TabRecord) {
+    const wc = this.webContentsFor(rec.id)
+    const entries = wc?.navigationHistory.getAllEntries() ?? []
+    const root = rootOf(this.records, rec)
+    this.closed.push({
+      rec: { ...rec },
+      index: this.records.indexOf(rec),
+      root: { scope: root.scope, scopeName: root.scopeName, app: root.app },
+      children: childrenOf(this.records, rec.id).map((c) => c.id),
+      history: entries.length ? { entries, index: wc!.navigationHistory.getActiveIndex() } : undefined,
+    })
+    if (this.closed.length > CLOSED_KEEP) this.closed.shift()
+  }
+
+  canReopen() {
+    return this.closed.some((c) => this.deps.runtime(c.rec.profile))
+  }
+
+  /**
+   * ⇧⌘T: brings back the most recently closed tab, under its parent if that's still open,
+   * otherwise as a thread of its own. Children it had come back under it if they're still where
+   * closing it put them. Tabs of deleted profiles are skipped.
+   */
+  reopen(): TabRecord | undefined {
+    let c: ClosedTab | undefined
+    while ((c = this.closed.pop()) && !this.deps.runtime(c.rec.profile));
+    if (!c) return undefined
+    const rec: TabRecord = { ...c.rec, id: this.get(c.rec.id) ? randomUUID() : c.rec.id, lastSeen: Date.now(), unread: undefined }
+    if (rec.parent && !this.get(rec.parent)) {
+      rec.parent = undefined
+      Object.assign(rec, c.root)
+    }
+    if (rec.folder && !this.folder(rec.folder)) rec.folder = undefined
+    for (const child of c.children.map((id) => this.get(id))) {
+      if (!child || child.profile !== rec.profile || child.parent !== rec.parent) continue
+      if (!rec.parent && (child.kept !== rec.kept || child.folder !== rec.folder)) continue
+      child.parent = rec.id
+      child.kept = child.folder = child.scope = child.scopeName = child.app = undefined
+    }
+    if (c.history) this.pendingHistory.set(rec.id, c.history)
+    this.records.splice(Math.min(c.index, this.records.length), 0, rec)
+    this.activate(rec.id)
+    return rec
   }
 
   private dropView(rec: TabRecord) {
@@ -594,6 +740,7 @@ export class Tabs {
   /** Drops a deleted profile's archived threads. Its open tabs are closed first. */
   forgetProfile(profileId: string) {
     this.archived = this.archived.filter((t) => t.profile !== profileId)
+    this.closed = this.closed.filter((c) => c.rec.profile !== profileId)
     this.changed()
   }
 

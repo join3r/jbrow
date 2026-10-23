@@ -96,6 +96,17 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .private-mask { position: absolute; inset: 0; display: flex; align-items: center; gap: 6px; padding: 0 6px; color: var(--muted); font-size: 13px; pointer-events: none; }
 .private-mask svg.i { width: 14px; height: 14px; }
 
+/* Find in page: a box like the address bar's, beside it, since nothing can draw over the page. */
+.find { flex: 0 1 272px; min-width: 180px; height: 30px; display: flex; align-items: center; gap: 0; padding: 0 2px 0 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); }
+.find:has(#findInput:focus) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.find-icon { display: inline-grid; color: var(--muted); }
+.find-icon svg.i { width: 14px; height: 14px; }
+#findInput { flex: 1; min-width: 0; height: 100%; border: 0; background: none; outline: none; color: var(--ink); padding: 0 6px; font: 13px var(--font); user-select: text; }
+#findInput::placeholder { color: var(--muted); }
+.find-count { flex: none; font: 11.5px var(--mono); color: var(--muted); padding-right: 4px; white-space: nowrap; }
+.find.none .find-count { color: var(--danger); }
+.find .icon.sm { width: 22px; height: 24px; }
+
 /* ---------- extensions popover ---------- */
 .ext { position: relative; }
 .pinned-actions { display: flex; gap: 2px; }
@@ -267,6 +278,17 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .btn.primary { background: var(--accent); border-color: transparent; color: #fff; font-weight: 600; }
 .btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, #000); }
 .cert-warn details summary { color: var(--muted); font-size: 12.5px; margin-bottom: 12px; }
+
+/* ---------- sign-in and crashed pages ---------- */
+.login-warn .cert-warn-icon, .crash-warn .cert-warn-icon { color: var(--muted); }
+.login-form { display: grid; gap: 10px; max-width: 320px; }
+.login-form label { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.login-form input { height: 30px; padding: 0 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--selected); color: var(--ink); font: 13px var(--font); user-select: text; }
+.login-form input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.login-form .cert-acts { margin: 6px 0 0; }
+.cert-warn .login-error { color: var(--danger); margin: 0; font-size: 12.5px; }
+.row.crashed .fav { filter: grayscale(1); opacity: 0.45; }
+.row.crashed .t { color: var(--muted); }
 .cert-button { color: var(--muted); }
 .cert-button.bad { color: var(--danger); }
 .cert-pop { left: 0; right: auto; width: 340px; padding: 6px 8px 8px; user-select: text; }
