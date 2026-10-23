@@ -171,7 +171,7 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 #pin[aria-pressed='true'] svg.i { fill: currentColor; }
 .icon.sm { width: 24px; height: 26px; border-radius: 6px; }
 .icon.sm svg.i { width: 15px; height: 15px; }
-/* The box is drawn here, not on the input, so back, forward, reload and the profile pill sit inside it. */
+/* The box is drawn here, not on the input, so back, forward, reload and the profile's color sit inside it. */
 .omni { position: relative; flex: 1; min-width: 0; height: 30px; display: flex; align-items: center; gap: 4px; padding: 0 4px 0 2px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); }
 .omni:has(#omnibox:focus) { outline: 2px solid var(--accent); outline-offset: 1px; }
 .nav { flex: none; display: flex; align-items: center; gap: 0; padding-right: 4px; margin-right: 2px; border-right: 1px solid var(--line); }
@@ -179,9 +179,16 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .omni-field { position: relative; flex: 1; min-width: 0; height: 100%; }
 #omnibox { width: 100%; height: 100%; border: 0; background: none; outline: none; color: var(--ink); padding: 0 6px; font: 13px var(--font); user-select: text; }
 #omnibox::placeholder { color: var(--muted); }
-.profile-pill { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; margin-right: -4px; border-radius: 10px; font-size: 11px; font-weight: 600; color: var(--ink); background: color-mix(in srgb, var(--pc, var(--muted)) 20%, transparent); white-space: nowrap; }
-.profile-pill.typed { box-shadow: inset 0 0 0 1.5px var(--pc, var(--muted)); }
-.profile-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--pc, var(--muted)); }
+/* The profile's color fills the box from its left edge through back, reload and the profile's name, top to bottom.
+   It recolors the tokens the buttons use rather than the buttons themselves. Stripes mean Tab picked another profile for what's typed. */
+.profile-band { flex: none; align-self: stretch; display: flex; align-items: center; margin-left: -2px; padding-left: 2px; border-radius: 7px 0 0 7px; }
+.profile-band.on { padding-right: 10px; --muted: color-mix(in srgb, var(--pc) 45%, var(--ink)); --line: color-mix(in srgb, var(--pc) 35%, transparent); --hover: color-mix(in srgb, var(--pc) 22%, transparent); background: color-mix(in srgb, var(--pc) 22%, transparent); }
+.profile-band.on.typed { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--pc) 28%, transparent) 0 6px, color-mix(in srgb, var(--pc) 12%, transparent) 6px 12px); }
+:root[data-profile-style='edge'] .profile-band.on { box-shadow: inset -2px 0 0 var(--pc); }
+:root[data-profile-style='solid'] .profile-band.on { --ink: #fff; --muted: rgba(255, 255, 255, 0.85); --line: rgba(255, 255, 255, 0.35); --hover: rgba(255, 255, 255, 0.18); background: var(--pc); }
+:root[data-profile-style='solid'] .profile-band.on.typed { background: repeating-linear-gradient(135deg, var(--pc) 0 6px, color-mix(in srgb, var(--pc) 80%, transparent) 6px 12px); }
+.profile-name { padding-left: 4px; font-size: 11px; font-weight: 600; white-space: nowrap; color: color-mix(in srgb, var(--pc) 55%, var(--ink)); }
+:root[data-profile-style='solid'] .profile-name { color: var(--ink); }
 #reload { color: var(--muted); }
 .private-mask { position: absolute; inset: 0; display: flex; align-items: center; gap: 6px; padding: 0 6px; color: var(--muted); font-size: 13px; pointer-events: none; }
 .private-mask svg.i { width: 14px; height: 14px; }

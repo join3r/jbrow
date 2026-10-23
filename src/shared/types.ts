@@ -99,11 +99,14 @@ export const THEMES = [
 export type ThemeId = (typeof THEMES)[number]['id']
 /** Light or dark, or whichever macOS is using. Pages see it as prefers-color-scheme too. */
 export type Appearance = 'system' | 'light' | 'dark'
+/** How the address bar shows the tab's profile: a tint behind back, reload and its name, the tint with a solid edge, or the full color. */
+export type ProfileStyle = 'tint' | 'edge' | 'solid'
 
 /** The settings the settings screen edits. Everything else stays in settings.json. */
 export interface Prefs {
   appearance: Appearance
   theme: ThemeId
+  profileStyle: ProfileStyle
   animation: { style: AnimMessage['style']; durationMs: number; ease: AnimMessage['ease'] }
   /** Addresses matching one of these show as "Private" until clicked. `*` matches anything. */
   privateUrls: string[]

@@ -148,7 +148,7 @@ function render() {
   $<HTMLButtonElement>('back').disabled = !S.nav.canGoBack
   // Forward is rarely possible, so it only takes room when it is.
   $('forward').hidden = !S.nav.canGoForward
-  renderProfilePill()
+  renderProfileBand()
   const reload = $('reload')
   const reloadIcon = S.nav.loading ? 'close' : 'reload'
   if (reload.dataset.icon !== reloadIcon) {
@@ -242,17 +242,20 @@ function refreshPinnedActions() {
 
 /** Fills the address bar while it isn't being edited, masking private addresses. */
 /** The address bar's profile: the tab's own, or the one Tab picked for what's being typed. */
-function renderProfilePill() {
+function renderProfileBand() {
   const active = activeTab()
   const p = active && profile(typedProfile ?? active.profile)
-  const pill = $('profilePill')
-  pill.hidden = !p || S!.profiles.length < 2
+  const band = $('profileBand')
+  const name = $('profileName')
+  const shown = !!p && S!.profiles.length > 1
+  band.classList.toggle('on', shown)
+  name.hidden = !shown
   if (!p) return
   const other = !!typedProfile && typedProfile !== active.profile && !!active.url
-  pill.textContent = p.name
-  pill.style.setProperty('--pc', p.color || 'var(--muted)')
-  pill.classList.toggle('typed', other)
-  pill.title =
+  name.textContent = p.name
+  band.style.setProperty('--pc', p.color || '#8a93a1')
+  band.classList.toggle('typed', other)
+  name.title =
     document.activeElement !== omnibox ? `This tab is in the ${p.name} profile`
     : other ? `Opens in a new tab in ${p.name} (Tab to switch)`
     : `Opens in ${p.name} (Tab to switch)`
@@ -496,7 +499,7 @@ omnibox.addEventListener('focus', () => {
   omnibox.placeholder = 'Search or type a tab name'
   privateMask.hidden = true
   typedProfile = null
-  renderProfilePill()
+  renderProfileBand()
   omnibox.select()
   showSuggestions()
 })
@@ -507,7 +510,7 @@ omnibox.addEventListener('blur', () => {
   if (typedProfile) {
     typedProfile = null
     render()
-  } else renderProfilePill()
+  } else renderProfileBand()
 })
 omnibox.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown') (e.preventDefault(), moveHighlight(1))
@@ -1110,6 +1113,7 @@ function renderSettings(all = false) {
     $(id).querySelectorAll<HTMLElement>('[data-value]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === value)))
   seg('appearance', S.prefs.appearance)
   seg('themes', S.prefs.theme)
+  seg('profileStyle', S.prefs.profileStyle)
   seg('animStyle', animation.style)
   seg('animEase', animation.ease)
   seg('summarizeAfter', String(S.prefs.summarizeAfterDays))
@@ -1215,6 +1219,10 @@ $('themes').innerHTML = THEMES.map(
 $('themes').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ theme: b.dataset.value as Prefs['theme'] })
+})
+$('profileStyle').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b) sendPrefs({ profileStyle: b.dataset.value as Prefs['profileStyle'] })
 })
 $('appearance').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
@@ -1780,6 +1788,7 @@ window.jbrow.on('state', (state: UiState) => {
   if (S && S.activeId !== state.activeId) closeFind(false)
   S = state
   document.documentElement.dataset.theme = state.prefs.theme
+  document.documentElement.dataset.profileStyle = state.prefs.profileStyle
   render()
 })
 window.jbrow.on('snapshot', ({ dataUrl, tabId }: { dataUrl: string; tabId: string }) => {

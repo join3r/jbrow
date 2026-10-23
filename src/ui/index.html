@@ -18,12 +18,14 @@
         </div>
         <div class="tools">
           <div class="omni">
-            <div class="nav">
-              <button id="back" class="icon sm" data-icon="back" title="Back" aria-label="Back"></button>
-              <button id="forward" class="icon sm" data-icon="forward" title="Forward" aria-label="Forward" hidden></button>
-              <button id="reload" class="icon sm" title="Reload" aria-label="Reload"></button>
+            <div id="profileBand" class="profile-band">
+              <div class="nav">
+                <button id="back" class="icon sm" data-icon="back" title="Back" aria-label="Back"></button>
+                <button id="forward" class="icon sm" data-icon="forward" title="Forward" aria-label="Forward" hidden></button>
+                <button id="reload" class="icon sm" title="Reload" aria-label="Reload"></button>
+              </div>
+              <span id="profileName" class="profile-name" hidden></span>
             </div>
-            <span id="profilePill" class="profile-pill" hidden></span>
             <button id="certButton" class="icon sm cert-button" hidden aria-expanded="false"></button>
             <div id="certPop" class="pop cert-pop" hidden role="dialog" aria-label="Certificate">
               <div id="certHead" class="pop-head"></div>
@@ -237,6 +239,18 @@
               <div class="set-item" data-keywords="theme themes color colour accent palette">
                 <h3>Theme</h3>
                 <div id="themes" class="themes" role="group" aria-label="Theme"></div>
+              </div>
+              <div class="set-item" data-keywords="profile color colour address bar url tint edge solid">
+                <h3>Profile color</h3>
+                <div class="field">
+                  <span class="label">Address bar</span>
+                  <div id="profileStyle" class="seg" role="group" aria-label="Profile color in the address bar">
+                    <button data-value="tint">Tint</button>
+                    <button data-value="edge">Edge</button>
+                    <button data-value="solid">Solid</button>
+                  </div>
+                </div>
+                <p class="help">The left end of the address bar, behind back and reload, takes the color of the tab's profile. Edge adds a solid line where the color ends. Shown when you have more than one profile.</p>
               </div>
             </section>
 
