@@ -2,6 +2,7 @@ import { app, Notification } from 'electron'
 import { appendFileSync, mkdirSync, renameSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { format } from 'node:util'
+import { BACKGROUND } from './background'
 
 let file: string | null = null
 
@@ -31,7 +32,7 @@ export function setupLogging() {
   const onError = (kind: string) => (error: unknown) => {
     console.error(`[${kind}]`, error)
     // One notification a minute at most, so a looping error doesn't spam.
-    if (Date.now() - lastNotice > 60_000 && app.isReady()) {
+    if (Date.now() - lastNotice > 60_000 && app.isReady() && !BACKGROUND) {
       lastNotice = Date.now()
       const message = error instanceof Error ? error.message : String(error)
       new Notification({ title: 'jbrow hit an error', body: `${message}\nDetails are in ~/Library/Logs/jbrow/main.log` }).show()

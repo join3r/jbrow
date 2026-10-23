@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import type { DownloadInfo } from '../shared/types'
+import { BACKGROUND } from './background'
 
 /** A finished download leaves the toolbar when jbrow hides, when you open its details, or after this long. */
 const KEEP_FINISHED_MS = 60 * 60 * 1000
@@ -268,6 +269,7 @@ export class Downloads {
   }
 
   private notify(e: Entry) {
+    if (BACKGROUND) return
     const ok = e.info.state === 'completed'
     const n = new Notification({
       title: ok ? 'Download finished' : 'Download failed',

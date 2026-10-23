@@ -201,6 +201,15 @@ npm run typecheck
 
 `JBROW_USER_DATA=/some/dir` runs a second jbrow with its own tabs, profiles, extensions and log, so
 it doesn't touch your real data (add `--remote-debugging-port=9333` to inspect extensions over CDP).
+`JBROW_BACKGROUND=1` keeps such a jbrow out of your way while it runs: its window is invisible,
+click-through and pushed off screen, it never takes focus, and it has no Dock icon, menu bar item,
+global hotkeys or notifications. Pages still load and render, so drive it and take screenshots over
+CDP (`Page.captureScreenshot`). Use it for automated runs while you keep working:
+
+```sh
+JBROW_USER_DATA=/tmp/jb JBROW_BACKGROUND=1 npx electron . --show --remote-debugging-port=9333
+```
+
 `JBROW_ALLOW_CAPTURE=1` lets you screenshot the panel. `JBROW_NO_SHIMS=1` and
 `JBROW_SHIM_SKIP=alarms,storage,browser` turn the extension shims off for comparison.
 

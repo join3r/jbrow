@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { ACTIONS, actionKeys, canonical, FIXED, shortcutFromKey } from '../shared/shortcuts'
 import type { ExtensionShortcut } from '../shared/types'
+import { BACKGROUND } from './background'
 import type { ProfileRuntime } from './profiles'
 import type { Settings } from './settings'
 
@@ -185,6 +186,7 @@ export class ExtensionCommands {
   /** Commands marked global work while jbrow is hidden, as in Chrome. */
   registerGlobal() {
     this.unregisterGlobal()
+    if (BACKGROUND) return
     for (const profileId of this.runtimes().keys()) {
       for (const cmd of this.list(profileId)) {
         if (!cmd.global || !cmd.shortcut || this.globals.includes(cmd.shortcut)) continue

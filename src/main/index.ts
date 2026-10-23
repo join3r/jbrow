@@ -5,6 +5,7 @@ import { urlMatcher } from '../shared/patterns'
 import { flatFolders, isInFolder, numberedThreads, rootOf, sections, type FolderView } from '../shared/threads'
 import type { AppEntry, AppLabel, Folder, Prefs, Profile, TabRecord, UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
+import { BACKGROUND } from './background'
 import { Certificates } from './certs'
 import { ExtensionCommands } from './commands'
 import { Downloads, type DownloadAction } from './downloads'
@@ -309,6 +310,7 @@ let hotkeysHeld: string[] = []
 /** Registers the summon keys. `notify` tells you when another app holds one. */
 function registerHotkeys(notify = false) {
   unregisterHotkeys()
+  if (BACKGROUND) return
   const keys = actionKeys(settings.shortcuts)
   const failed: string[] = []
   for (const [id, run] of [['show', onHotkey], ['showApp', onAppHotkey]] as const) {
@@ -1293,7 +1295,7 @@ app.whenReady().then(async () => {
   else tabs.newTab({ profile: settings.defaultProfile })
 
   registerHotkeys(true)
-  buildTray()
+  if (!BACKGROUND) buildTray()
   // Back from picture-in-picture whenever jbrow is in front again, unless the video belongs to
   // another tab you switched away from: that one waits until you're on its tab.
   panel.win.on('focus', () => {

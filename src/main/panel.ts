@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, screen, WebContentsView, type Rectangle, t
 import path from 'node:path'
 import { bezier, EASE } from '../shared/ease'
 import type { AnimMessage } from '../shared/types'
+import { BACKGROUND } from './background'
 import type { Settings } from './settings'
 
 const debug = (...args: unknown[]) => process.env.JBROW_DEBUG && console.log('[panel]', ...args)
@@ -20,6 +21,11 @@ export interface PanelHooks {
   onHiding: () => void
   onShown: () => void
   onHidden: () => void
+}
+
+/** Past the right edge of every display, for a JBROW_BACKGROUND panel. */
+function offScreen() {
+  return { x: Math.max(...screen.getAllDisplays().map((d) => d.bounds.x + d.bounds.width)) + 1000, y: 0 }
 }
 
 /**
@@ -56,7 +62,7 @@ export class Panel {
       vibrancy: 'under-window',
       visualEffectState: 'active',
       roundedCorners: true,
-      hasShadow: true,
+      hasShadow: !BACKGROUND,
       resizable: true,
       minimizable: false,
       maximizable: false,
@@ -81,6 +87,7 @@ export class Panel {
     this.win.setAlwaysOnTop(true, 'floating')
     this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     this.applyContentProtection()
+    if (BACKGROUND) this.win.setIgnoreMouseEvents(true)
     // The installed app keeps the UI outside app.asar (asarUnpack in package.json): with the
     // grantFileProtocolExtraPrivileges fuse off, as in Chrome, file:// pages can't read inside it.
     void this.ui.loadFile(path.join(__dirname.replace(/\.asar(?=[\\/]|$)/, '.asar.unpacked'), 'ui', 'index.html'))
@@ -89,7 +96,7 @@ export class Panel {
       this.hooks.setPageVisible(this.pageVisible())
     })
     // A panel never activates jbrow on its own, so a pinned one does it when clicked.
-    this.win.on('focus', () => this.pinned && app.focus({ steal: true }))
+    this.win.on('focus', () => this.pinned && !BACKGROUND && app.focus({ steal: true }))
   }
 
   /**
@@ -102,6 +109,7 @@ export class Panel {
     this.pinned = on
     this.win.setAlwaysOnTop(!on, 'floating')
     this.win.setVisibleOnAllWorkspaces(!on, { visibleOnFullScreen: !on })
+    if (BACKGROUND) return
     if (on) {
       void app.dock?.show().then(() => {
         if (this.visible && !this.win.isDestroyed()) app.focus({ steal: true })
@@ -161,6 +169,7 @@ export class Panel {
     const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
     const width = Math.round(area.width * panel.widthFraction)
     const height = Math.round(area.height * panel.heightFraction)
+    if (BACKGROUND) return this.win.setBounds({ ...offScreen(), width, height })
     this.win.setBounds({
       x: Math.round(area.x + (area.width - width) / 2),
       y: Math.round(area.y + (area.height - height) / 2.4),
@@ -191,6 +200,14 @@ export class Panel {
     return msg
   }
 
+  /**
+   * A JBROW_BACKGROUND panel stays invisible: macOS keeps a sliver of any window on screen, so
+   * moving it away isn't enough.
+   */
+  private setOpacity(value: number) {
+    this.win.setOpacity(BACKGROUND ? 0 : value)
+  }
+
   /** Fades the whole native window (glass included) alongside the UI's CSS animation. */
   private fade(from: number, to: number, ms: number, curve: (t: number) => number): Promise<void> {
     // A new fade (hotkey pressed mid-animation) ends the previous one, so its caller moves on.
@@ -198,11 +215,11 @@ export class Panel {
     return new Promise((resolve) => {
       if (this.win.isDestroyed()) return resolve()
       if (ms <= 0) {
-        this.win.setOpacity(to)
+        this.setOpacity(to)
         return resolve()
       }
       const start = performance.now()
-      this.win.setOpacity(from)
+      this.setOpacity(from)
       const end = () => {
         if (this.tween) clearInterval(this.tween)
         this.tween = null
@@ -214,7 +231,7 @@ export class Panel {
         // The window goes away when jbrow quits mid-animation.
         if (this.win.isDestroyed()) return end()
         const t = Math.min(1, (performance.now() - start) / ms)
-        this.win.setOpacity(from + (to - from) * Math.min(1, curve(t)))
+        this.setOpacity(from + (to - from) * Math.min(1, curve(t)))
         if (t >= 1) end()
       }, 1000 / 120)
     })
@@ -223,7 +240,7 @@ export class Panel {
   async show() {
     if (this.win.isDestroyed()) return
     if (this.visible && !this.animating) {
-      this.win.focus()
+      if (!BACKGROUND) this.win.focus()
       return
     }
     debug('show')
@@ -238,9 +255,15 @@ export class Panel {
     const msg = this.send('in')
     const ms = msg.style === 'off' ? 0 : msg.durationMs
     const ended = this.fromUi('anim-end', ms + 400)
-    this.win.setOpacity(ms ? 0 : 1)
-    this.win.show()
-    this.win.focus()
+    this.setOpacity(ms ? 0 : 1)
+    if (BACKGROUND) {
+      this.win.showInactive()
+      // macOS pulls a window back on screen as it orders it in, so push it out as far as it lets.
+      this.win.setPosition(offScreen().x, offScreen().y)
+    } else {
+      this.win.show()
+      this.win.focus()
+    }
     if (ms) await started
     if (run !== this.run || this.win.isDestroyed()) return
     // The window turns opaque on the curve the content moves on, so it settles together with the
