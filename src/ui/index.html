@@ -23,6 +23,16 @@
           </div>
           <div class="omni">
             <span id="profilePill" class="profile-pill" hidden></span>
+            <button id="certButton" class="icon sm cert-button" hidden aria-expanded="false"></button>
+            <div id="certPop" class="pop cert-pop" hidden role="dialog" aria-label="Certificate">
+              <div id="certHead" class="pop-head"></div>
+              <p id="certStatus" class="pop-help"></p>
+              <div id="certChain"></div>
+              <div id="certDistrustRow" hidden>
+                <div class="pop-sep"></div>
+                <button id="certDistrust" class="pop-item"><span data-icon="lock"></span>Stop trusting this certificate</button>
+              </div>
+            </div>
             <div class="omni-field">
               <input id="omnibox" autocomplete="off" spellcheck="false" aria-label="Address bar" placeholder="Search or type a tab name" />
               <div id="privateMask" class="private-mask" hidden><span data-icon="eyeOff"></span>Private</div>
@@ -110,6 +120,19 @@
             <div id="blankProfile" class="seg" role="group" aria-label="Profile for this tab"></div>
           </div>
           <dl id="blankKeys" class="keys"></dl>
+        </section>
+        <section id="certWarn" class="cert-warn" hidden aria-live="polite">
+          <span class="cert-warn-icon" data-icon="warn"></span>
+          <h1>This connection isn't private</h1>
+          <p id="certWarnText"></p>
+          <div class="cert-acts">
+            <button id="certBack" class="btn primary"></button>
+            <button id="certProceed" class="btn"></button>
+          </div>
+          <details id="certWarnDetails">
+            <summary>Certificate details</summary>
+            <div id="certWarnChain"></div>
+          </details>
         </section>
         <section id="settings" class="settings" hidden tabindex="-1" aria-label="Settings">
           <header class="set-head">

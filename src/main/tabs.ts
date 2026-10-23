@@ -5,6 +5,7 @@ import path from 'node:path'
 import { urlMatcher } from '../shared/patterns'
 import { childrenOf, isAsleep, isRoot, rootOf, subtree } from '../shared/threads'
 import type { Folder, TabRecord, UiTab } from '../shared/types'
+import type { Certificates } from './certs'
 import type { SitePermissions } from './permissions'
 import type { ProfileRuntime } from './profiles'
 
@@ -26,6 +27,7 @@ export interface TabsDeps {
   onKey: (input: Electron.Input) => boolean
   searchUrl: () => string
   permissions: SitePermissions
+  certs: Certificates
   /** A page committed a navigation to a new document. */
   onNavigate: (wc: WebContents) => void
 }
@@ -241,6 +243,13 @@ export class Tabs {
       this.deps.onNavigate(wc)
     })
     wc.on('did-navigate-in-page', onNav)
+    wc.on('did-start-navigation', (details) => {
+      if (details.isMainFrame && !details.isSameDocument) this.deps.certs.clear(id)
+    })
+    wc.on('certificate-error', (event, url, error, certificate, callback, isMainFrame) => {
+      event.preventDefault()
+      callback(this.deps.certs.onError(id, rec()?.profile ?? rt.profile.id, url, error, certificate, isMainFrame))
+    })
     wc.on('did-start-loading', () => this.setLoading(id, true))
     wc.on('did-stop-loading', () => this.setLoading(id, false))
     wc.on('before-input-event', (event, input) => {
@@ -278,6 +287,7 @@ export class Tabs {
 
     wc.on('destroyed', () => {
       this.live.delete(id)
+      this.deps.certs.clear(id)
     })
   }
 
@@ -356,17 +366,15 @@ export class Tabs {
     this.deps.onActivated()
   }
 
-  /** Positions the active view and shows it if the panel allows. */
+  /**
+   * Positions the active view and shows it if the panel allows. A page a certificate stopped
+   * stays hidden, so jbrow's warning beneath it shows.
+   */
   layout() {
     const live = this.activeId ? this.live.get(this.activeId) : undefined
     if (!live) return
     live.view.setBounds(this.deps.contentBounds())
-    live.view.setVisible(this.deps.contentVisible())
-  }
-
-  setActiveVisible(visible: boolean) {
-    const live = this.activeId ? this.live.get(this.activeId) : undefined
-    live?.view.setVisible(visible)
+    live.view.setVisible(this.deps.contentVisible() && !this.deps.certs.isBlocked(this.activeId!))
   }
 
   navigate(input: string) {

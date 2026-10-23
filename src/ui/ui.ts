@@ -1,7 +1,7 @@
 import { urlMatcher } from '../shared/patterns'
 import { childrenOf, displayName, isAsleep, numberedThreads, sections, type AppView, type FolderView, type ThreadView } from '../shared/threads'
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
-import type { AnimMessage, AppEntry, DownloadInfo, ExtensionShortcut, Prefs, Profile, UiState, UiTab } from '../shared/types'
+import type { AnimMessage, AppEntry, CertInfo, DownloadInfo, ExtensionShortcut, Prefs, Profile, UiState, UiTab } from '../shared/types'
 
 declare global {
   interface Window {
@@ -18,7 +18,7 @@ const EASE: Record<AnimMessage['ease'], string> = {
   smooth: 'cubic-bezier(.45,0,.2,1)',
 }
 
-/** 24×24 stroke icons. The puzzle, pin, eye, eye-off, folder, store, open, copy, wand, undo and trash paths are from Lucide (ISC). */
+/** 24×24 stroke icons. The puzzle, pin, eye, eye-off, folder, store, open, copy, wand, undo, trash, lock and warn paths are from Lucide (ISC). */
 const ICONS: Record<string, string> = {
   back: '<path d="m15 18-6-6 6-6"/>',
   forward: '<path d="m9 18 6-6-6-6"/>',
@@ -48,6 +48,8 @@ const ICONS: Record<string, string> = {
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
   eye: '<path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/>',
   trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+  lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
 }
 const icon = (name: string) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`
 document.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => (el.innerHTML = icon(el.dataset.icon!)))
@@ -66,6 +68,7 @@ const settingsEl = $('settings')
 const privateMask = $('privateMask')
 const rulesPop = $('rulesPop')
 const folderRules = $<HTMLTextAreaElement>('folderRules')
+const certPop = $('certPop')
 const send = window.jbrow.send
 
 let S: UiState | null = null
@@ -83,6 +86,8 @@ let typedProfile: string | null = null
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const profile = (id: string): Profile | undefined => S?.profiles.find((p) => p.id === id)
 const activeTab = () => S?.tabs.find((t) => t.id === S!.activeId)
+/** The active tab's address, or the one a bad certificate stopped it from loading. */
+const activeUrl = () => (S?.cert?.blocked ? S.cert.url : (activeTab()?.url ?? ''))
 /** The address as it may be shown on screen. */
 const shownUrl = (url: string) => (isPrivate(url) ? 'Private' : url)
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -154,6 +159,7 @@ function render() {
   else actions.removeAttribute('tab')
   renderPinnedActions()
   renderRestyle()
+  renderCert()
 
   const scope = $('scope')
   scope.hidden = !S.scope
@@ -182,7 +188,7 @@ function render() {
       .map(([k, what]) => `<div><dt>${esc(k)}</dt><dd>${esc(what)}</dd></div>`)
       .join('')
   }
-  snapshot.hidden = blank || snapshotTab !== S.activeId
+  snapshot.hidden = blank || snapshotTab !== S.activeId || !!S.cert?.blocked
 }
 
 /**
@@ -247,7 +253,7 @@ function cycleTypedProfile(step: number) {
 }
 
 function showAddress() {
-  const url = activeTab()?.url ?? ''
+  const url = activeUrl()
   const masked = isPrivate(url)
   omnibox.value = masked ? '' : url
   omnibox.placeholder = masked ? '' : 'Search or type a tab name'
@@ -413,7 +419,7 @@ function hideSuggestions() {
 /** The page hides while anything of jbrow's own covers it; see Panel.setOverlay. */
 let overlaySent = false
 function syncOverlay() {
-  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !restylePop.hidden || !settingsEl.hidden
+  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !restylePop.hidden || !certPop.hidden || !settingsEl.hidden
   if (on !== overlaySent) {
     overlaySent = on
     send('overlay', { on })
@@ -435,7 +441,7 @@ function pick(s: Suggestion | undefined) {
 
 omnibox.addEventListener('focus', () => {
   // Clicking the address bar is how a private address is revealed.
-  omnibox.value = activeTab()?.url ?? ''
+  omnibox.value = activeUrl()
   omnibox.placeholder = 'Search or type a tab name'
   privateMask.hidden = true
   typedProfile = null
@@ -1154,10 +1160,129 @@ document.addEventListener('mousedown', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || renaming || e.target === omnibox) return
   if (!rulesPop.hidden) closeRules()
+  else if (!certPop.hidden) setCert(false)
   else if (!restylePop.hidden) setRestyle(false)
   else if (!extPop.hidden) setExtensions(false)
   else if (dlOpen) setDownload(null)
   else if (!settingsEl.hidden) setSettings(false)
+})
+
+// ---------- certificates ----------
+
+/** What each certificate error means, finishing "…sent a certificate jbrow can't trust:". */
+const CERT_PROBLEMS: Record<string, string> = {
+  CERT_AUTHORITY_INVALID: "it isn't signed by an authority your Mac trusts. It may be self-signed.",
+  CERT_COMMON_NAME_INVALID: 'it was issued for a different site.',
+  CERT_DATE_INVALID: "it has expired, or isn't valid yet. Check your Mac's clock too.",
+  CERT_REVOKED: 'whoever issued it has revoked it.',
+  CERT_INVALID: "it couldn't be read.",
+  CERT_WEAK_SIGNATURE_ALGORITHM: 'it is signed with an algorithm too weak to rely on.',
+  CERT_WEAK_KEY: 'its key is too weak to rely on.',
+  CERT_NAME_CONSTRAINT_VIOLATION: 'it names a site its issuer may not issue for.',
+  CERT_VALIDITY_TOO_LONG: 'it is valid for longer than certificates may be.',
+  CERT_NON_UNIQUE_NAME: "it is for a name that isn't unique on the internet.",
+  CERT_SYMANTEC_LEGACY: 'its issuer is no longer trusted.',
+  CERT_KNOWN_INTERCEPTION_BLOCKED: 'software that intercepts connections issued it.',
+  CERTIFICATE_TRANSPARENCY_REQUIRED: "it wasn't publicly logged, as it must be.",
+  SSL_PINNED_KEY_NOT_IN_CERT_CHAIN: "it isn't one this site is known to use.",
+}
+const certProblem = (error: string) => CERT_PROBLEMS[error] ?? `Chromium refused it (${error}).`
+
+const certDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+
+/** The site's certificate, then each one that signed it. */
+function certChainHtml(chain: CertInfo[]): string {
+  const now = Date.now()
+  const who = (name: string, org: string) => `${esc(name)}${org ? ` <small>${esc(org)}</small>` : ''}`
+  return chain
+    .map((c, i) => {
+      const role = i === 0 ? 'Site' : i === chain.length - 1 && c.subject === c.issuer ? 'Root' : 'Intermediate'
+      const dated = now < c.validFrom || now > c.validTo
+      const rows: [string, string, string?][] = [
+        ['Issued to', who(c.subject, c.subjectOrg)],
+        ['Issued by', who(c.issuer, c.issuerOrg)],
+        ['Valid', `${certDate(c.validFrom)} – ${certDate(c.validTo)}`, dated ? 'bad' : ''],
+      ]
+      if (i === 0 && c.names.length) rows.push(['Names', c.names.map(esc).join(', ')])
+      rows.push(['Serial', esc(c.serial), 'mono'], ...(c.sha256 ? [['SHA-256', esc(c.sha256), 'mono'] as [string, string, string]] : []))
+      const dl = rows.map(([dt, dd, cls]) => `<dt>${dt}</dt><dd${cls ? ` class="${cls}"` : ''}>${dd}</dd>`).join('')
+      return `<div class="cert"><div class="cert-role">${role}</div><dl class="cert-meta">${dl}</dl></div>`
+    })
+    .join('')
+}
+
+/** Chains are redrawn only when they change, so a selection or an open <details> survives. */
+let certShown = ''
+let certPopShown = ''
+function renderCert() {
+  if (!S) return
+  const c = S.cert
+  const button = $<HTMLButtonElement>('certButton')
+  button.hidden = !c
+  $('certWarn').hidden = !c?.blocked
+  if (!c) return setCert(false)
+  const bad = !!c.error
+  const iconName = bad ? 'warn' : 'lock'
+  if (button.dataset.icon !== iconName) {
+    button.dataset.icon = iconName
+    button.innerHTML = icon(iconName)
+  }
+  button.classList.toggle('bad', bad)
+  const label = !bad ? 'Secure connection: certificate details' : c.trusted ? 'Not secure: you chose to trust this certificate' : 'Not secure: certificate details'
+  button.title = label
+  button.setAttribute('aria-label', label)
+
+  if (c.blocked) {
+    $('certWarnText').innerHTML =
+      `<b>${esc(c.host)}</b> sent a certificate jbrow can't trust: ${esc(certProblem(c.error))} ` +
+      (c.fatal ? "You can't go ahead to this site." : 'Someone could be posing as the site to read what you send it, such as passwords or card numbers.')
+    $('certBack').textContent = S.nav.canGoBack ? 'Go back' : 'Close tab'
+    $('certProceed').hidden = c.fatal
+    $('certProceed').textContent = `Go to ${c.host} anyway`
+    const key = c.chain.map((x) => x.sha256).join()
+    if (key !== certShown) {
+      certShown = key
+      $('certWarnChain').innerHTML = certChainHtml(c.chain)
+    }
+  }
+
+  if (certPop.hidden) return
+  $('certHead').textContent = `Certificate · ${c.host}`
+  $('certStatus').textContent =
+    !bad ? 'The connection is encrypted and the certificate is valid.'
+    : c.trusted ? `Not secure: ${certProblem(c.error)} You chose to go ahead anyway, until jbrow quits.`
+    : `Not trusted: ${certProblem(c.error)}`
+  $('certDistrustRow').hidden = !c.trusted
+  const key = c.chain.map((x) => x.sha256).join()
+  if (key !== certPopShown) {
+    certPopShown = key
+    $('certChain').innerHTML = certChainHtml(c.chain)
+  }
+}
+
+function setCert(open: boolean) {
+  if (open === !certPop.hidden) return
+  if (open && !S?.cert) return
+  certPop.hidden = !open
+  $('certButton').setAttribute('aria-expanded', String(open))
+  if (open) {
+    setExtensions(false)
+    setRestyle(false)
+    renderCert()
+    focusUi()
+  } else certPopShown = ''
+  syncOverlay()
+}
+$('certButton').addEventListener('mousedown', (e) => e.preventDefault())
+$('certButton').addEventListener('click', () => setCert(!!certPop.hidden))
+$('certDistrust').addEventListener('click', () => {
+  setCert(false)
+  send('cert', { action: 'distrust' })
+})
+$('certBack').addEventListener('click', () => send('cert', { action: 'back' }))
+$('certProceed').addEventListener('click', () => send('cert', { action: 'proceed' }))
+document.addEventListener('mousedown', (e) => {
+  if (!certPop.hidden && !(e.target as HTMLElement).closest('#certPop, #certButton')) setCert(false)
 })
 
 // ---------- messages from main ----------
@@ -1249,6 +1374,7 @@ window.jbrow.on('anim', (m: AnimMessage) => {
   setExtensions(false)
   setDownload(null)
   setRestyle(false)
+  setCert(false)
   setSettings(false)
   closeRules()
   if (renaming) commitRename()

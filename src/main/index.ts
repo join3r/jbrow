@@ -4,6 +4,7 @@ import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, t
 import { numberedThreads, rootOf, sections } from '../shared/threads'
 import type { AppEntry, AppLabel, Prefs, UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
+import { Certificates } from './certs'
 import { ExtensionCommands } from './commands'
 import { Downloads, type DownloadAction } from './downloads'
 import { frontmostApp, type FrontApp } from './frontmost'
@@ -30,6 +31,7 @@ let tray: Tray | null = null
 let commands: ExtensionCommands
 let downloads: Downloads
 let restyler: Restyler
+let certs: Certificates
 /** The settings screen is recording a shortcut: key presses go to it, not to jbrow or extensions. */
 let recordingShortcut = false
 
@@ -85,6 +87,7 @@ function state(): UiState {
     apps: appLabels(),
     pinned: panel.pinned,
     restyle: active ? restyler.view(active.url) : null,
+    cert: active ? certs.view(active.id, active.profile, active.url) : null,
     styledSites: restyler.styledSites(),
     nav: tabs.navState(),
     keys: actionKeys(settings.shortcuts),
@@ -555,6 +558,26 @@ function folderMenu(id: string) {
   ]).popup({ window: panel.win })
 }
 
+/** The certificate warning's buttons, for the active tab. */
+function certAction(action: 'proceed' | 'back' | 'distrust') {
+  const rec = tabs.active()
+  const wc = tabs.activeWebContents()
+  if (!rec || !wc) return
+  if (action === 'proceed') {
+    const url = certs.proceed(rec.id, rec.profile)
+    if (url) void wc.loadURL(url).catch(() => {})
+  } else if (action === 'back') {
+    if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
+    else closeTab(rec.id)
+  } else {
+    const view = certs.view(rec.id, rec.profile, rec.url)
+    if (!view) return
+    certs.distrust(rec.profile, view.host)
+    // An open connection would carry on without checking the certificate again.
+    void wc.session.closeAllConnections().then(() => wc.reload())
+  }
+}
+
 // ---------- apps ----------
 
 /** Rows for the Apps list in settings: every app with threads, a profile or a link. */
@@ -809,6 +832,7 @@ function wireIpc() {
     const wc = tabs.activeWebContents()
     if (wc) void restyler.restyle(wc, prompt)
   })
+  on<{ action: 'proceed' | 'back' | 'distrust' }>('cert', ({ action }) => certAction(action))
   on<{ host: string; action: 'undo' | 'reset' | 'on' | 'off' | 'cancel' }>('restyle-site', ({ host, action }) => {
     if (action === 'undo') restyler.undo(host)
     else if (action === 'reset') restyler.reset(host)
@@ -950,6 +974,10 @@ app.whenReady().then(async () => {
     notify: toast,
   })
   restyler.load()
+  certs = new Certificates(() => {
+    tabs.layout()
+    pushState()
+  })
   tabs = new Tabs({
     window: () => panel.win,
     runtime: (id) => runtimes.get(id),
@@ -960,6 +988,7 @@ app.whenReady().then(async () => {
     onKey,
     searchUrl: () => settings.searchUrl,
     permissions,
+    certs,
     onNavigate: (wc) => restyler.onNavigate(wc),
   })
 
@@ -972,7 +1001,10 @@ app.whenReady().then(async () => {
 
   wireIpc()
   runtimes = await setupProfiles(settings, tabHooks, (callback) => void pickShareSource(panel.win, callback), permissions)
-  for (const rt of runtimes.values()) downloads.attach(rt.session, rt.profile.id)
+  for (const rt of runtimes.values()) {
+    downloads.attach(rt.session, rt.profile.id)
+    certs.attach(rt.session, rt.profile.id)
+  }
   // Pin and unpin from the menu an extension's button shows on right-click (see scripts/patch-deps.mjs).
   for (const rt of runtimes.values()) {
     rt.extensions.on('jbrow-action-context-menu', ({ menu, extensionId }: { menu: Menu; extensionId: string }) => {

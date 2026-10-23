@@ -67,6 +67,8 @@ export interface UiState {
   pinned: boolean
   /** Restyling of the active tab's site. Null when its page isn't a website. */
   restyle: RestyleView | null
+  /** The active tab's certificate. Null for pages not loaded over https. */
+  cert: CertView | null
   /** Every site with a restyle, for the settings screen. */
   styledSites: StyledSite[]
   nav: { canGoBack: boolean; canGoForward: boolean; loading: boolean }
@@ -89,6 +91,36 @@ export interface Prefs {
   pinnedExtensions: string[]
   /** Claude model alias for restyling sites. */
   restyleModel: string
+}
+
+/** A site's certificate and what's wrong with it, if anything. */
+export interface CertView {
+  host: string
+  url: string
+  /** Why it isn't trusted, e.g. `CERT_DATE_INVALID`. '' when it is. */
+  error: string
+  /** The page didn't load because of it. */
+  blocked: boolean
+  /** You chose to go ahead despite the error. */
+  trusted: boolean
+  /** An error you can't go past, such as a revoked certificate. */
+  fatal: boolean
+  /** The site's certificate first, then each one that signed it. */
+  chain: CertInfo[]
+}
+
+export interface CertInfo {
+  /** Common name. */
+  subject: string
+  subjectOrg: string
+  issuer: string
+  issuerOrg: string
+  validFrom: number
+  validTo: number
+  serial: string
+  sha256: string
+  /** Names it's valid for (subject alternative names). */
+  names: string[]
 }
 
 /** One site's restyle, as the restyle popover shows it. */
