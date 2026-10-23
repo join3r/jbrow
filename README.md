@@ -22,11 +22,13 @@ open windows, which is jbrow's normal state. Vorssaint does this; add jbrow to i
 jbrow runs from the menu bar (**jb**) with no Dock icon. Quit it from the menu bar item's
 right-click menu, ⌘Q, or Ctrl+C in the terminal.
 
+These are the defaults; change any of them under **Shortcuts** in settings. ⌘1–9 and zoom stay fixed.
+
 | Key | Does |
 |---|---|
 | ⌥Space | Show or hide jbrow with every thread |
 | ⌥⇧Space | Show only the threads of the app you were in |
-| ⌘T / ⇧⌘N | New tab / new tab in the other profile |
+| ⌘T / ⇧⌘N | New tab / new tab in the next profile |
 | Tab | In the address bar: switch the profile what you type opens in |
 | ⌘1–9 | Jump to a thread |
 | ⌃Tab | Previous tab |
@@ -36,8 +38,8 @@ right-click menu, ⌘Q, or Ctrl+C in the terminal.
 | ⌘, | Settings |
 | ⌥⌘I | DevTools for the page |
 
-If another app already uses ⌥Space (Raycast does by default), jbrow shows a notification. Change
-`hotkeys` in settings.json and restart.
+If another app already uses ⌥Space (Raycast does by default), jbrow shows a notification. Pick
+another key under **Shortcuts** in settings; it takes effect right away.
 
 The profile filter at the top of the sidebar shows each profile's color, the same color as the bar
 on its tabs. A new tab says which profile it opens in and lets you switch; right-click **+** for a
@@ -79,7 +81,7 @@ a new tab only to start a download closes that tab again.
 ## Settings
 
 The settings screen (⌘, or the sliders icon) covers the summon animation, archiving, apps, private
-addresses, screen sharing and extension shortcuts, and changes there apply right away. Private addresses: any address that contains
+addresses, screen sharing, jbrow's own shortcuts and extension shortcuts, and changes there apply right away. Private addresses: any address that contains
 one of your patterns (`*` matches anything, e.g. `*.corp.example`) shows as **Private** in the
 address bar, the tab list tooltips and the address suggestions until you click the address bar.
 Page titles still show.
@@ -98,6 +100,9 @@ on first run. Restart jbrow after editing the file by hand (menu bar item, **Res
   addresses don't matter for streaming: nobody sees jbrow at all.
 - `privateUrls`: the private address patterns.
 - `pinnedExtensions`: IDs of extensions pinned to the toolbar.
+- `shortcuts`: your keys for jbrow's own commands, e.g. `"newTab": "Command+Y"` (`""` removes one).
+  Commands not listed use their defaults. Older settings files kept the summon keys under
+  `hotkeys`; jbrow still reads those and writes them here the next time it saves settings.
 - `extensionShortcuts`: your extension shortcuts per profile, extension and command (`""` removes one).
 - `archiveAfterDays`: archive threads unseen this many days; 0 turns archiving off.
 
@@ -143,7 +148,7 @@ The log is at `~/Library/Logs/jbrow/main.log` (menu bar item, **Show log file**)
 - Opening links from other apps (needs a packaged app that declares itself a browser), including
   the quiet background opening for links you didn't click.
 - Undo for archiving (reopening from the address bar is the way back for now).
-- Settings screen entries for hotkeys and profiles; those are settings.json only.
+- A settings screen entry for profiles; they're settings.json only.
 - PiP when hiding a playing video.
 - Known rough edges: the native page view can't take part in the CSS animation, so a snapshot of
   the page animates in its place; and the panel opens at a fixed fraction of the screen.

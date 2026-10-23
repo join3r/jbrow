@@ -1,3 +1,5 @@
+import type { ActionId } from './shortcuts'
+
 export interface Profile {
   id: string
   name: string
@@ -64,6 +66,8 @@ export interface UiState {
   apps: Record<string, AppLabel>
   pinned: boolean
   nav: { canGoBack: boolean; canGoForward: boolean; loading: boolean }
+  /** The key of each of jbrow's own commands, '' for none. */
+  keys: Record<ActionId, string>
   prefs: Prefs
   now: number
 }

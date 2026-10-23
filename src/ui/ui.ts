@@ -1,6 +1,6 @@
 import { urlMatcher } from '../shared/patterns'
 import { childrenOf, displayName, isAsleep, numberedThreads, sections, type AppView, type FolderView, type ThreadView } from '../shared/threads'
-import { shortcutFromKey, shortcutLabel } from '../shared/shortcuts'
+import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import type { AnimMessage, AppEntry, DownloadInfo, ExtensionShortcut, Prefs, Profile, UiState, UiTab } from '../shared/types'
 
 declare global {
@@ -79,6 +79,10 @@ const activeTab = () => S?.tabs.find((t) => t.id === S!.activeId)
 /** The address as it may be shown on screen. */
 const shownUrl = (url: string) => (isPrivate(url) ? 'Private' : url)
 const DAY_MS = 24 * 60 * 60 * 1000
+/** A command's key as a menu writes it, '' when it has none. */
+const keyLabel = (id: ActionId) => (S?.keys[id] ? shortcutLabel(S.keys[id]) : '')
+/** " (⌘T)" for a tooltip. */
+const keyHint = (id: ActionId) => (keyLabel(id) ? ` (${keyLabel(id)})` : '')
 
 /** What an asleep thread held, e.g. "4 tabs · github.com, mozilla.org +1 · 5 d". */
 function sleepSummary(v: ThreadView<UiTab>, now: number): string {
@@ -124,14 +128,17 @@ function render() {
   if (reload.dataset.icon !== reloadIcon) {
     reload.dataset.icon = reloadIcon
     reload.innerHTML = icon(reloadIcon)
-    reload.title = S.nav.loading ? 'Stop' : 'Reload (⌘R)'
     reload.setAttribute('aria-label', S.nav.loading ? 'Stop' : 'Reload')
   }
+  reload.title = S.nav.loading ? 'Stop' : `Reload${keyHint('reload')}`
+  $('back').title = `Back${keyHint('back')}`
+  $('forward').title = `Forward${keyHint('forward')}`
+  $('settingsButton').title = `Settings${keyHint('settings')}`
   $('pin').setAttribute('aria-pressed', String(S.pinned))
-  $('pin').title = S.pinned ? 'Pinned: a regular window with a Dock icon (⇧⌘P)' : 'Pin: keep as a regular window with a Dock icon (⇧⌘P)'
+  $('pin').title = `${S.pinned ? 'Pinned: a regular window' : 'Pin: keep as a regular window'} with a Dock icon${keyHint('pin')}`
   if (document.activeElement !== omnibox) showAddress()
   $('extHead').textContent = `Extensions · ${p?.name ?? ''}`
-  $('newTab').title = `New tab${S.filter !== 'all' ? ` in ${profile(S.filter)?.name ?? S.filter}` : ''} (⌘T)`
+  $('newTab').title = `New tab${S.filter !== 'all' ? ` in ${profile(S.filter)?.name ?? S.filter}` : ''}${keyHint('newTab')}, right-click for a profile`
   renderSettings()
   renderDownloadPop()
 
@@ -152,6 +159,19 @@ function render() {
     const opensIn = typedProfile ?? active?.profile
     $('blankProfile').innerHTML = S.profiles
       .map((x) => `<button data-profile="${esc(x.id)}" aria-pressed="${x.id === opensIn}">${dot(x)}${esc(x.name)}</button>`)
+      .join('')
+    const keys: [string, string][] = [
+      [keyLabel('newTab'), 'New tab'],
+      [keyLabel('newTabNextProfile'), 'New tab in the next profile'],
+      ['Tab', 'Switch the profile a typed address opens in'],
+      ['⌘1–9', 'Jump to a thread'],
+      [keyLabel('previousTab'), 'Previous tab'],
+      [keyLabel('closeTab'), 'Close tab'],
+      [keyLabel('pin'), 'Pin the window'],
+    ]
+    $('blankKeys').innerHTML = keys
+      .filter(([k]) => k)
+      .map(([k, what]) => `<div><dt>${esc(k)}</dt><dd>${esc(what)}</dd></div>`)
       .join('')
   }
   snapshot.hidden = blank || snapshotTab !== S.activeId
@@ -822,6 +842,8 @@ function renderSettings(all = false) {
   for (const id of ['animSpeed', 'animEase', 'animPreview']) $(id).closest('.field')!.classList.toggle('off', animation.style === 'off')
   if (all || document.activeElement !== privateUrls) privateUrls.value = S.prefs.privateUrls.join('\n')
   hideCapture.checked = hideFromScreenCapture
+  $('appHotkey').textContent = keyLabel('showApp') || 'The app hotkey'
+  renderActionKeys()
 }
 
 const sendPrefs = (prefs: Partial<Prefs>) => send('prefs', prefs)
@@ -873,7 +895,8 @@ let appList: { entries: AppEntry[]; profiles: Profile[] } = { entries: [], profi
 function renderApps() {
   const { entries, profiles } = appList
   if (!entries.length) {
-    appListEl.innerHTML = `<p class="help">No apps yet. Open jbrow with ⌥⇧Space from an app, or add one.</p>`
+    const via = keyLabel('showApp') ? `Open jbrow with ${esc(keyLabel('showApp'))} from an app, or add one.` : 'Add one.'
+    appListEl.innerHTML = `<p class="help">No apps yet. ${via}</p>`
     return
   }
   const options = [{ id: '', name: 'Auto', color: '' }, ...profiles]
@@ -913,13 +936,37 @@ appListEl.addEventListener('contextmenu', (e) => {
 })
 $('addApp').addEventListener('click', () => send('add-app'))
 
-// ---------- extension shortcuts ----------
+// ---------- shortcuts ----------
 
+const actionKeysEl = $('actionKeys')
 const shortcutsEl = $('shortcuts')
 let shortcuts: { profiles: Profile[]; commands: ExtensionShortcut[] } = { profiles: [], commands: [] }
-/** The command whose shortcut is being recorded. */
-let recording: ExtensionShortcut | null = null
+/** The shortcut being recorded: `action <id>` for jbrow's own, else an extension command's key. */
+let recording: string | null = null
 const commandKey = (c: ExtensionShortcut) => `${c.profile} ${c.extensionId} ${c.name}`
+
+/** A shortcut you click to record a new one. */
+function keyButton(rec: string, shortcut: string): string {
+  const now = recording === rec
+  const label = now ? 'Press keys…' : shortcut ? shortcutLabel(shortcut) : 'Not set'
+  return `<button class="chip sc-key${shortcut || now ? '' : ' none'}" data-rec="${esc(rec)}" aria-pressed="${now}">${esc(label)}</button>`
+}
+
+let actionKeysHtml = ''
+function renderActionKeys() {
+  if (!S) return
+  const fixed = (label: string, keys: string) =>
+    `<div class="sc-row"><span>${label}</span><span class="chip sc-key fixed" title="This one can't change">${keys}</span></div>`
+  const html =
+    ACTIONS.map((a) => {
+      const note = 'global' in a ? '<em>works in any app</em>' : ''
+      return `<div class="sc-row"><span title="${esc(a.label)}">${esc(a.label)}${note}</span>${keyButton(`action ${a.id}`, S!.keys[a.id])}</div>`
+    }).join('') +
+    fixed('Jump to a thread', '⌘1–9') +
+    fixed('Zoom in, out, reset', '⌘+ ⌘− ⌘0')
+  // State arrives often; rebuilding the same rows would only cost a repaint.
+  if (html !== actionKeysHtml) actionKeysEl.innerHTML = actionKeysHtml = html
+}
 
 function renderShortcuts() {
   const { profiles, commands } = shortcuts
@@ -937,36 +984,42 @@ function renderShortcuts() {
         ext = c.extensionId
         html += `<div class="sc-ext">${esc(c.extensionName)}</div>`
       }
-      const rec = recording && commandKey(recording) === commandKey(c)
-      const label = rec ? 'Press keys…' : c.shortcut ? shortcutLabel(c.shortcut) : 'Not set'
       html += `<div class="sc-row"><span title="${esc(c.description)}">${esc(c.description)}${c.global ? '<em>works while jbrow is hidden</em>' : ''}</span>
-        <button class="chip sc-key${c.shortcut || rec ? '' : ' none'}" data-cmd="${esc(commandKey(c))}" aria-pressed="${!!rec}">${esc(label)}</button></div>`
+        ${keyButton(commandKey(c), c.shortcut)}</div>`
     }
   }
   shortcutsEl.innerHTML = html
+}
+
+function renderRecording() {
+  renderActionKeys()
+  renderShortcuts()
 }
 
 function stopRecording() {
   if (!recording) return
   recording = null
   send('recording-shortcut', { on: false })
-  renderShortcuts()
+  renderRecording()
 }
 
-function saveShortcut(c: ExtensionShortcut, shortcut: string) {
-  send('set-shortcut', { profile: c.profile, extensionId: c.extensionId, name: c.name, shortcut })
+function saveShortcut(rec: string, shortcut: string) {
+  if (rec.startsWith('action ')) send('set-action-key', { id: rec.slice(7), shortcut })
+  else {
+    const c = shortcuts.commands.find((c) => commandKey(c) === rec)
+    if (c) send('set-shortcut', { profile: c.profile, extensionId: c.extensionId, name: c.name, shortcut })
+  }
   stopRecording()
 }
 
-shortcutsEl.addEventListener('click', (e) => {
-  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-cmd]')
+settingsEl.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-rec]')
   if (!b) return
-  const c = shortcuts.commands.find((c) => commandKey(c) === b.dataset.cmd)
-  if (!c || (recording && commandKey(recording) === commandKey(c))) return stopRecording()
-  recording = c
+  if (recording === b.dataset.rec) return stopRecording()
+  if (!recording) send('recording-shortcut', { on: true })
   // Until it's done, key presses come here instead of running jbrow's or an extension's shortcuts.
-  send('recording-shortcut', { on: true })
-  renderShortcuts()
+  recording = b.dataset.rec!
+  renderRecording()
 })
 // Capture phase, so Esc cancels recording without also closing settings.
 document.addEventListener(
@@ -986,7 +1039,7 @@ document.addEventListener(
 )
 window.addEventListener('blur', stopRecording)
 document.addEventListener('mousedown', (e) => {
-  if (recording && !(e.target as HTMLElement).closest('[data-cmd]')) stopRecording()
+  if (recording && !(e.target as HTMLElement).closest('[data-rec]')) stopRecording()
 })
 
 document.addEventListener('keydown', (e) => {

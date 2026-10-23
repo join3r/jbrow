@@ -14,12 +14,12 @@
       <header id="toolbar">
         <div class="side-tools">
           <div id="filter" class="seg" role="group" aria-label="Show profile"></div>
-          <button id="newTab" class="icon" data-icon="plus" title="New tab (⌘T, right-click for a profile)" aria-label="New tab"></button>
+          <button id="newTab" class="icon" data-icon="plus" title="New tab" aria-label="New tab"></button>
         </div>
         <div class="tools">
           <div class="nav">
-            <button id="back" class="icon sm" data-icon="back" title="Back (⌘[)" aria-label="Back"></button>
-            <button id="forward" class="icon sm" data-icon="forward" title="Forward (⌘])" aria-label="Forward" hidden></button>
+            <button id="back" class="icon sm" data-icon="back" title="Back" aria-label="Back"></button>
+            <button id="forward" class="icon sm" data-icon="forward" title="Forward" aria-label="Forward" hidden></button>
           </div>
           <div class="omni">
             <span id="profilePill" class="profile-pill" hidden></span>
@@ -27,7 +27,7 @@
               <input id="omnibox" autocomplete="off" spellcheck="false" aria-label="Address bar" placeholder="Search or type a tab name" />
               <div id="privateMask" class="private-mask" hidden><span data-icon="eyeOff"></span>Private</div>
             </div>
-            <button id="reload" class="icon sm" title="Reload (⌘R)" aria-label="Reload"></button>
+            <button id="reload" class="icon sm" title="Reload" aria-label="Reload"></button>
             <div id="suggest" class="suggest" hidden></div>
           </div>
           <div id="downloads" class="downloads" hidden>
@@ -64,8 +64,8 @@
               <button id="openStore" class="pop-item"><span data-icon="store"></span>Chrome Web Store</button>
             </div>
           </div>
-          <button id="pin" class="icon" data-icon="pin" title="Pin: keep as a regular window with a Dock icon (⇧⌘P)" aria-label="Pin" aria-pressed="false"></button>
-          <button id="settingsButton" class="icon" data-icon="settings" title="Settings (⌘,)" aria-label="Settings" aria-pressed="false"></button>
+          <button id="pin" class="icon" data-icon="pin" title="Pin: keep as a regular window with a Dock icon" aria-label="Pin" aria-pressed="false"></button>
+          <button id="settingsButton" class="icon" data-icon="settings" title="Settings" aria-label="Settings" aria-pressed="false"></button>
         </div>
       </header>
       <aside id="sidebar">
@@ -90,15 +90,7 @@
             <span>Opens in</span>
             <div id="blankProfile" class="seg" role="group" aria-label="Profile for this tab"></div>
           </div>
-          <dl class="keys">
-            <div><dt>⌘T</dt><dd>New tab</dd></div>
-            <div><dt>⇧⌘N</dt><dd>New tab in the other profile</dd></div>
-            <div><dt>Tab</dt><dd>Switch the profile a typed address opens in</dd></div>
-            <div><dt>⌘1–9</dt><dd>Jump to a thread</dd></div>
-            <div><dt>⌃Tab</dt><dd>Previous tab</dd></div>
-            <div><dt>⌘W</dt><dd>Close tab</dd></div>
-            <div><dt>⇧⌘P</dt><dd>Pin the window</dd></div>
-          </dl>
+          <dl id="blankKeys" class="keys"></dl>
         </section>
         <section id="settings" class="settings" hidden tabindex="-1" aria-label="Settings">
           <header class="set-head">
@@ -164,7 +156,7 @@
 
           <h2>Apps</h2>
           <p class="help">
-            <b>⌥⇧Space</b> shows only the threads of the app you were in, and the sidebar groups each app's threads
+            <b id="appHotkey">⌥⇧Space</b> shows only the threads of the app you were in, and the sidebar groups each app's threads
             under its name. Pick the profile an app's new tabs open in; <b>Auto</b> uses the tab you were on.
             Right-click an app to link it with another, so they share one set of threads.
           </p>
@@ -186,14 +178,21 @@
               jbrow at all, private addresses included.</span>
           </label>
 
+          <h2>Shortcuts</h2>
+          <p class="help">
+            Click a shortcut and press the new keys; <b>Delete</b> removes it, <b>Esc</b> keeps the old one. The first two
+            work in any app.
+          </p>
+          <div id="actionKeys" class="shortcuts"></div>
+
           <h2>Extension shortcuts</h2>
           <p class="help">
-            Keys that run an extension's commands while jbrow is open, for the profile of the tab you're on. Click a
-            shortcut and press the new keys; <b>Delete</b> removes it, <b>Esc</b> keeps the old one.
+            Keys that run an extension's commands while jbrow is open, for the profile of the tab you're on. They change
+            the same way.
           </p>
           <div id="shortcuts" class="shortcuts"></div>
 
-          <p class="help foot">Hotkeys and profiles are in <button id="openSettingsFile" class="link">settings.json</button>; those need a restart.</p>
+          <p class="help foot">Profiles are in <button id="openSettingsFile" class="link">settings.json</button>; they need a restart.</p>
         </section>
       </main>
     </div>

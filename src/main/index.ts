@@ -1,5 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, MenuItem, nativeImage, Notification, session, shell, Tray } from 'electron'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
+import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { numberedThreads, rootOf, sections } from '../shared/threads'
 import type { AppEntry, AppLabel, Prefs, UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
@@ -82,6 +83,7 @@ function state(): UiState {
     apps: appLabels(),
     pinned: panel.pinned,
     nav: tabs.navState(),
+    keys: actionKeys(settings.shortcuts),
     prefs: {
       animation: settings.animation,
       privateUrls: settings.privateUrls,
@@ -263,15 +265,77 @@ async function onAppHotkey() {
   await summon()
 }
 
-function registerHotkeys() {
+/** Global shortcuts jbrow holds now, for unregistering. */
+let hotkeysHeld: string[] = []
+
+/** Registers the summon keys. `notify` tells you when another app holds one. */
+function registerHotkeys(notify = false) {
+  unregisterHotkeys()
+  const keys = actionKeys(settings.shortcuts)
   const failed: string[] = []
-  if (!globalShortcut.register(settings.hotkeys.all, () => void onHotkey())) failed.push(settings.hotkeys.all)
-  if (!globalShortcut.register(settings.hotkeys.app, () => void onAppHotkey())) failed.push(settings.hotkeys.app)
-  if (failed.length) {
-    const text = `Another app is using ${failed.join(' and ')}. Change "hotkeys" in settings.json and restart jbrow.`
-    console.error(`[hotkeys] ${text}`)
-    new Notification({ title: 'jbrow hotkey unavailable', body: text }).show()
+  for (const [id, run] of [['show', onHotkey], ['showApp', onAppHotkey]] as const) {
+    const key = keys[id]
+    if (!key) continue
+    if (globalShortcut.register(key, () => void run())) hotkeysHeld.push(key)
+    else failed.push(shortcutLabel(key))
   }
+  if (failed.length) {
+    const text = `Another app is using ${failed.join(' and ')}. Pick another in jbrow's settings.`
+    console.error(`[hotkeys] ${text}`)
+    if (notify) new Notification({ title: 'jbrow hotkey unavailable', body: text }).show()
+  }
+}
+
+function unregisterHotkeys() {
+  for (const key of hotkeysHeld) globalShortcut.unregister(key)
+  hotkeysHeld = []
+}
+
+/**
+ * While the settings screen records a shortcut, every key press goes to it: global shortcuts
+ * included, or pressing ⌥Space to choose it would hide jbrow instead.
+ */
+function setRecording(on: boolean) {
+  if (on === recordingShortcut) return
+  recordingShortcut = on
+  if (on) {
+    unregisterHotkeys()
+    commands.unregisterGlobal()
+  } else {
+    registerHotkeys()
+    commands.registerGlobal()
+  }
+}
+
+/** Sets your key for one of jbrow's commands; '' removes it. Returns why it can't have that key, if it can't. */
+function setActionKey(id: ActionId, shortcut: string): string | null {
+  const action = ACTIONS.find((a) => a.id === id)
+  if (!action) return null
+  if (!shortcut && id === 'show') return 'Show jbrow needs a shortcut.'
+  if (shortcut) {
+    if (FIXED.has(shortcut)) return 'jbrow keeps that shortcut for ⌘1–9, zoom or editing.'
+    const keys = actionKeys(settings.shortcuts)
+    const other = ACTIONS.find((a) => a.id !== id && keys[a.id] === shortcut)
+    if (other) return `"${other.label}" already uses that shortcut.`
+    const ext = commands.holder(shortcut)
+    if (ext) return `${ext.extensionName} uses that shortcut for "${ext.description}". Change it there first.`
+    if (isGlobal(id) && !hotkeysHeld.includes(shortcut)) {
+      // Ours are let go while recording, so this only fails when another app has it.
+      if (!globalShortcut.register(shortcut, () => {})) return 'Another app is using that shortcut.'
+      globalShortcut.unregister(shortcut)
+    }
+  }
+  if (shortcut === action.key) delete settings.shortcuts[id]
+  else settings.shortcuts[id] = shortcut
+  saveSettings(settings)
+  commands.refresh()
+  if (!recordingShortcut) {
+    registerHotkeys()
+    commands.registerGlobal()
+  }
+  pushState()
+  sendShortcuts()
+  return null
 }
 
 // ---------- keyboard shortcuts inside the panel ----------
@@ -299,17 +363,64 @@ function switchProfile(id: string, next: string) {
 
 const profileName = (id: string) => settings.profiles.find((p) => p.id === id)?.name ?? id
 
+function runAction(id: ActionId) {
+  const wc = tabs.activeWebContents()
+  switch (id) {
+    case 'show':
+      return void onHotkey()
+    case 'showApp':
+      return void onAppHotkey()
+    case 'newTab':
+      tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
+      return focusAddressBar()
+    case 'newTabNextProfile': {
+      const ids = settings.profiles.map((p) => p.id)
+      const cur = tabs.active()?.profile ?? settings.defaultProfile
+      tabs.create({ profile: ids[(ids.indexOf(cur) + 1) % ids.length], ...scopeFields() })
+      return focusAddressBar()
+    }
+    case 'closeTab':
+      if (tabs.activeId) tabs.close(tabs.activeId)
+      if (!tabs.active()) tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
+      return
+    case 'previousTab': {
+      const prev = tabs.previous()
+      if (prev) tabs.activate(prev)
+      return
+    }
+    case 'address':
+      return focusAddressBar()
+    case 'reload':
+      return wc?.reload()
+    case 'back':
+      return wc?.navigationHistory.goBack()
+    case 'forward':
+      return wc?.navigationHistory.goForward()
+    case 'pin':
+      panel.setPinned(!panel.pinned)
+      return pushState()
+    case 'settings':
+      return panel.win.webContents.send('settings', {})
+    case 'devTools':
+      return wc?.openDevTools({ mode: 'detach' })
+  }
+}
+
 function onKey(input: Electron.Input): boolean {
   if (input.type !== 'keyDown' || recordingShortcut) return false
   if (commands?.handleKey(tabs.active()?.profile, input)) return true
-  const key = input.key.toLowerCase()
-  const wc = tabs.activeWebContents()
-  if (input.control && key === 'tab') {
-    const prev = tabs.previous()
-    if (prev) tabs.activate(prev)
-    return true
+  const shortcut = shortcutFromKey({ ...input, command: input.meta })
+  if (shortcut) {
+    const keys = actionKeys(settings.shortcuts)
+    // The summon keys are global shortcuts, so they never reach a window.
+    const action = ACTIONS.find((a) => keys[a.id] === shortcut && !isGlobal(a.id))
+    if (action) {
+      runAction(action.id)
+      return true
+    }
   }
   if (!input.meta) return false
+  const key = input.key.toLowerCase()
   // Matched by code too, so zoom works on layouts where = and - sit elsewhere or need Shift.
   const zoom =
     key === '=' || key === '+' || input.code === 'Equal' || input.code === 'NumpadAdd' ? 1
@@ -317,59 +428,13 @@ function onKey(input: Electron.Input): boolean {
     : key === '0' || input.code === 'Numpad0' ? 0
     : null
   if (zoom !== null && !input.alt) {
+    const wc = tabs.activeWebContents()
     if (wc) wc.setZoomLevel(zoom === 0 ? 0 : Math.min(9, Math.max(-8, wc.getZoomLevel() + zoom * 0.5)))
     return true
   }
-  if (input.shift) {
-    if (key === 'n') {
-      const ids = settings.profiles.map((p) => p.id)
-      const cur = tabs.active()?.profile ?? settings.defaultProfile
-      tabs.create({ profile: ids[(ids.indexOf(cur) + 1) % ids.length], ...scopeFields() })
-      focusAddressBar()
-      return true
-    }
-    if (key === 'p') {
-      panel.setPinned(!panel.pinned)
-      pushState()
-      return true
-    }
-    return false
-  }
-  if (input.alt && (key === 'i' || input.code === 'KeyI')) {
-    wc?.openDevTools({ mode: 'detach' })
-    return true
-  }
-  if (input.alt) return false
-  if (/^[1-9]$/.test(key)) {
+  if (!input.alt && !input.shift && /^[1-9]$/.test(key)) {
     openThread(Number(key))
     return true
-  }
-  switch (key) {
-    case 't':
-      tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
-      focusAddressBar()
-      return true
-    case 'w': {
-      const id = tabs.activeId
-      if (id) tabs.close(id)
-      if (!tabs.active()) tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
-      return true
-    }
-    case 'l':
-      focusAddressBar()
-      return true
-    case 'r':
-      wc?.reload()
-      return true
-    case '[':
-      wc?.navigationHistory.goBack()
-      return true
-    case ']':
-      wc?.navigationHistory.goForward()
-      return true
-    case ',':
-      panel.win.webContents.send('settings', {})
-      return true
   }
   return false
 }
@@ -743,7 +808,11 @@ function wireIpc() {
   on<{ key: string; profile: string }>('app-profile', ({ key, profile }) => setAppProfile(key, profile))
   on<{ key: string }>('app-menu', ({ key }) => appMenu(key))
   on('add-app', () => void addApp())
-  on<{ on: boolean }>('recording-shortcut', ({ on: recording }) => (recordingShortcut = recording))
+  on<{ on: boolean }>('recording-shortcut', ({ on: recording }) => setRecording(recording))
+  on<{ id: ActionId; shortcut: string }>('set-action-key', ({ id, shortcut }) => {
+    const error = setActionKey(id, shortcut)
+    if (error) toast(error)
+  })
   on<{ profile: string; extensionId: string; name: string; shortcut: string }>('set-shortcut', ({ profile, extensionId, name, shortcut }) => {
     const error = commands.set(profile, extensionId, name, shortcut)
     if (error) toast(error)
@@ -772,7 +841,7 @@ function buildTray() {
   tray.setToolTip('jbrow')
   const menu = () =>
     Menu.buildFromTemplate([
-      { label: `Show jbrow (${settings.hotkeys.all})`, click: () => void onHotkey() },
+      { label: `Show jbrow (${shortcutLabel(actionKeys(settings.shortcuts).show)})`, click: () => void onHotkey() },
       { type: 'separator' },
       {
         label: 'Install test extensions',
@@ -907,7 +976,7 @@ app.whenReady().then(async () => {
   if (first) tabs.activate(first.id)
   else tabs.newTab({ profile: settings.defaultProfile })
 
-  registerHotkeys()
+  registerHotkeys(true)
   buildTray()
   // Back from picture-in-picture whenever jbrow is in front again.
   panel.win.on('focus', () => miniPlayer.exit())
@@ -918,7 +987,8 @@ app.whenReady().then(async () => {
   app.on('browser-window-blur', () =>
     panel.checkClickAway(async () => (await frontmostApp())?.pid === process.pid),
   )
-  console.log(`[jbrow] ready. ${settings.hotkeys.all} for everything, ${settings.hotkeys.app} for the app in front.`)
+  const keys = actionKeys(settings.shortcuts)
+  console.log(`[jbrow] ready. ${keys.show} for everything, ${keys.showApp || 'no key'} for the app in front.`)
   // `npm start -- --install-extensions=personal` installs the test extensions into that profile.
   const installArg = process.argv.find((a) => a.startsWith('--install-extensions='))
   const installInto = installArg && runtimes.get(installArg.split('=')[1])

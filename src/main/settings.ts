@@ -1,13 +1,15 @@
 import { app } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import type { ActionId } from '../shared/shortcuts'
 import type { Profile } from '../shared/types'
 
 export type AnimationStyle = 'materialize' | 'slide' | 'scale' | 'fade' | 'off'
 export type AnimationEase = 'spring' | 'snappy' | 'smooth'
 
 export interface Settings {
-  hotkeys: { all: string; app: string }
+  /** Your keys for jbrow's own commands, as Electron accelerators, '' for none. Unlisted commands use their defaults (see ACTIONS). */
+  shortcuts: Partial<Record<ActionId, string>>
   profiles: Profile[]
   /** Profile used when nothing else decides. */
   defaultProfile: string
@@ -37,7 +39,7 @@ export interface Settings {
 }
 
 const DEFAULTS: Settings = {
-  hotkeys: { all: 'Alt+Space', app: 'Alt+Shift+Space' },
+  shortcuts: {},
   profiles: [
     { id: 'work', name: 'Work', color: '#2f9aab' },
     { id: 'personal', name: 'Personal', color: '#d0679a' },
@@ -70,8 +72,13 @@ export function loadSettings(): Settings {
     return structuredClone(DEFAULTS)
   }
   try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<Settings>
-    return { ...structuredClone(DEFAULTS), ...parsed }
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<Settings> & { hotkeys?: { all?: string; app?: string } }
+    // Older settings kept the two summon keys under "hotkeys".
+    const { hotkeys, ...rest } = parsed
+    const settings = { ...structuredClone(DEFAULTS), ...rest }
+    if (hotkeys?.all && settings.shortcuts.show === undefined) settings.shortcuts.show = hotkeys.all
+    if (hotkeys?.app && settings.shortcuts.showApp === undefined) settings.shortcuts.showApp = hotkeys.app
+    return settings
   } catch (error) {
     console.error(`[settings] ${file} is not valid JSON, using defaults:`, error)
     return structuredClone(DEFAULTS)

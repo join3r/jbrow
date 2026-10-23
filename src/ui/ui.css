@@ -246,6 +246,7 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .shortcuts .sc-key { min-width: 88px; justify-content: center; font: 12px var(--mono); }
 .shortcuts .sc-key.none { color: var(--muted); }
 .shortcuts .sc-key[aria-pressed='true'] { border-color: var(--accent); color: var(--accent); }
+.shortcuts .sc-key.fixed { color: var(--muted); border-style: dashed; }
 .link { border: 0; background: none; padding: 0; color: var(--accent); text-decoration: underline; font: inherit; }
 
 .app-list { margin-bottom: 10px; }
