@@ -655,8 +655,15 @@ function wireIpc() {
     tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
     focusAddressBar()
   })
-  on<{ input: string }>('navigate', ({ input }) => {
-    if (!tabs.active()) tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
+  on<{ input: string; profile?: string }>('navigate', ({ input, profile }) => {
+    const cur = tabs.active()
+    if (!cur) tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
+    else if (profile && profile !== cur.profile && settings.profiles.some((p) => p.id === profile)) {
+      // Picked with Tab in the address bar. A loaded page stays put; what was typed opens next to it.
+      if (cur.url) tabs.create({ profile, ...scopeFields() })
+      else cur.profile = profile
+      if (filter !== 'all' && filter !== profile) filter = 'all'
+    }
     tabs.navigate(input)
   })
   on<{ id: string }>('close', ({ id }) => closeTab(id))

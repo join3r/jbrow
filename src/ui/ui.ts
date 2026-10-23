@@ -64,6 +64,8 @@ let isPrivate: (url: string) => boolean = () => false
 let privateKey = ''
 /** Folder whose auto-file rules are being edited. */
 let rulesFor: string | null = null
+/** Profile picked with Tab in the address bar, for what's typed there; null while it's the tab's own. */
+let typedProfile: string | null = null
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const profile = (id: string): Profile | undefined => S?.profiles.find((p) => p.id === id)
@@ -110,13 +112,7 @@ function render() {
   $<HTMLButtonElement>('back').disabled = !S.nav.canGoBack
   // Forward is rarely possible, so it only takes room when it is.
   $('forward').hidden = !S.nav.canGoForward
-  const pill = $('profilePill')
-  pill.hidden = !p || S.profiles.length < 2
-  if (p) {
-    pill.textContent = p.name
-    pill.style.setProperty('--pc', p.color || 'var(--muted)')
-    pill.title = `This tab is in the ${p.name} profile`
-  }
+  renderProfilePill()
   const reload = $('reload')
   const reloadIcon = S.nav.loading ? 'close' : 'reload'
   if (reload.dataset.icon !== reloadIcon) {
@@ -146,8 +142,9 @@ function render() {
   const blank = !active?.url
   $('blank').hidden = !blank
   if (blank) {
+    const opensIn = typedProfile ?? active?.profile
     $('blankProfile').innerHTML = S.profiles
-      .map((x) => `<button data-profile="${esc(x.id)}" aria-pressed="${x.id === active?.profile}">${dot(x)}${esc(x.name)}</button>`)
+      .map((x) => `<button data-profile="${esc(x.id)}" aria-pressed="${x.id === opensIn}">${dot(x)}${esc(x.name)}</button>`)
       .join('')
   }
   snapshot.hidden = blank || snapshotTab !== S.activeId
@@ -185,6 +182,35 @@ function refreshPinnedActions() {
 )
 
 /** Fills the address bar while it isn't being edited, masking private addresses. */
+/** The address bar's profile: the tab's own, or the one Tab picked for what's being typed. */
+function renderProfilePill() {
+  const active = activeTab()
+  const p = active && profile(typedProfile ?? active.profile)
+  const pill = $('profilePill')
+  pill.hidden = !p || S!.profiles.length < 2
+  if (!p) return
+  const other = !!typedProfile && typedProfile !== active.profile && !!active.url
+  pill.textContent = p.name
+  pill.style.setProperty('--pc', p.color || 'var(--muted)')
+  pill.classList.toggle('typed', other)
+  pill.title =
+    document.activeElement !== omnibox ? `This tab is in the ${p.name} profile`
+    : other ? `Opens in a new tab in ${p.name} (Tab to switch)`
+    : `Opens in ${p.name} (Tab to switch)`
+}
+
+/** Tab and ⇧Tab in the address bar step through the profiles what's typed will open in. */
+function cycleTypedProfile(step: number) {
+  const active = activeTab()
+  if (!S || !active) return
+  const ids = S.profiles.map((p) => p.id)
+  const i = ids.indexOf(typedProfile ?? active.profile)
+  typedProfile = ids[(i + step + ids.length) % ids.length]
+  // An empty tab has nothing to lose, so it moves over right away.
+  if (!active.url) send('set-profile', { profile: typedProfile })
+  render()
+}
+
 function showAddress() {
   const url = activeTab()?.url ?? ''
   const masked = isPrivate(url)
@@ -369,7 +395,7 @@ function pick(s: Suggestion | undefined) {
   omnibox.blur()
   if (s?.kind === 'tab' && s.id) send('activate', { id: s.id })
   else if (s?.kind === 'archived' && s.id) send('restore', { id: s.id })
-  else if (text.trim()) send('navigate', { input: text })
+  else if (text.trim()) send('navigate', { input: text, profile: typedProfile ?? undefined })
 }
 
 omnibox.addEventListener('focus', () => {
@@ -377,6 +403,8 @@ omnibox.addEventListener('focus', () => {
   omnibox.value = activeTab()?.url ?? ''
   omnibox.placeholder = 'Search or type a tab name'
   privateMask.hidden = true
+  typedProfile = null
+  renderProfilePill()
   omnibox.select()
   showSuggestions()
 })
@@ -384,6 +412,10 @@ omnibox.addEventListener('input', showSuggestions)
 omnibox.addEventListener('blur', () => {
   hideSuggestions()
   showAddress()
+  if (typedProfile) {
+    typedProfile = null
+    render()
+  } else renderProfilePill()
 })
 omnibox.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown') (e.preventDefault(), moveHighlight(1))
@@ -393,6 +425,10 @@ omnibox.addEventListener('keydown', (e) => {
     // With no suggestion chosen by the arrows, Enter on a typed address or query navigates.
     pick(current[highlighted])
   } else if (e.key === 'Escape') omnibox.blur()
+  else if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey && (S?.profiles.length ?? 0) > 1) {
+    e.preventDefault()
+    cycleTypedProfile(e.shiftKey ? -1 : 1)
+  }
 })
 suggest.addEventListener('mousedown', (e) => e.preventDefault())
 suggest.addEventListener('click', (e) => {
@@ -556,6 +592,7 @@ $('blankProfile').addEventListener('mousedown', (e) => e.preventDefault())
 $('blankProfile').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-profile]')
   if (!b) return
+  typedProfile = null
   send('set-profile', { profile: b.dataset.profile })
   omnibox.focus()
 })

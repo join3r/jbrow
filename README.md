@@ -27,6 +27,7 @@ right-click menu, ⌘Q, or Ctrl+C in the terminal.
 | ⌥Space | Show or hide jbrow with every thread |
 | ⌥⇧Space | Show only the threads of the app you were in |
 | ⌘T / ⇧⌘N | New tab / new tab in the other profile |
+| Tab | In the address bar: switch the profile what you type opens in |
 | ⌘1–9 | Jump to a thread |
 | ⌃Tab | Previous tab |
 | ⌘W | Close tab |
@@ -41,6 +42,10 @@ If another app already uses ⌥Space (Raycast does by default), jbrow shows a no
 The profile filter at the top of the sidebar shows each profile's color, the same color as the bar
 on its tabs. A new tab says which profile it opens in and lets you switch; right-click **+** for a
 new tab in a specific profile.
+
+While you type in the address bar, Tab (⇧Tab goes back) switches the profile the address opens in; the
+profile in the address bar changes to match. On a new tab the tab itself moves over. On a tab with a page,
+the page stays where it is and what you typed opens in a new tab in the chosen profile.
 
 Threads opened from an app with ⌥⇧Space get their own section in the sidebar, under the app's name
 and icon (linked apps share one). Kept threads stay in Kept.
