@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ActionId } from '../shared/shortcuts'
-import type { Profile, RestyleAgent } from '../shared/types'
+import type { MiniPlayerPrefs, Profile, RestyleAgent } from '../shared/types'
 
 export type AnimationStyle = 'materialize' | 'slide' | 'scale' | 'fade' | 'off'
 export type AnimationEase = 'spring' | 'snappy' | 'smooth'
@@ -54,6 +54,8 @@ export interface Settings {
   extensionShortcuts: Record<string, Record<string, Record<string, string>>>
   /** Restyling sites with Claude Code or Codex. */
   restyle: RestyleSettings
+  /** When a playing video moves into the picture-in-picture window. */
+  miniPlayer: MiniPlayerPrefs
 }
 
 const DEFAULTS: Settings = {
@@ -81,6 +83,7 @@ const DEFAULTS: Settings = {
   pinnedExtensions: [],
   extensionShortcuts: {},
   restyle: { agent: 'claude', model: 'sonnet', codexModel: '', claudePath: '', codexPath: '' },
+  miniPlayer: { onHide: true, onTabSwitch: false, mutedToo: false, sites: 'all', onlySites: [], exceptSites: [] },
 }
 
 export const settingsPath = () => path.join(app.getPath('userData'), 'settings.json')
@@ -99,6 +102,7 @@ export function loadSettings(): Settings {
     const settings = { ...structuredClone(DEFAULTS), ...rest }
     // Older settings have fewer restyle keys.
     settings.restyle = { ...DEFAULTS.restyle, ...rest.restyle }
+    settings.miniPlayer = { ...DEFAULTS.miniPlayer, ...rest.miniPlayer }
     if (hotkeys?.all && settings.shortcuts.show === undefined) settings.shortcuts.show = hotkeys.all
     if (hotkeys?.app && settings.shortcuts.showApp === undefined) settings.shortcuts.showApp = hotkeys.app
     return settings

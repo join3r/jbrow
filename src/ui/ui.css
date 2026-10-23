@@ -327,6 +327,7 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .settings textarea { display: block; width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 8px; background: var(--selected); color: var(--ink); padding: 8px 10px; }
 .check { display: flex; gap: 10px; align-items: flex-start; line-height: 1.45; }
 .check input { margin: 2px 0 0; accent-color: var(--accent); }
+.set-item > .check + .check { margin-top: 8px; }
 .shortcuts .sc-profile { display: flex; align-items: center; gap: 6px; margin: 18px 0 6px; font-weight: 600; }
 .shortcuts .sc-profile .dot { width: 8px; height: 8px; border-radius: 50%; }
 .shortcuts .sc-ext { margin: 12px 0 4px; color: var(--muted); font-size: 12px; font-weight: 600; }

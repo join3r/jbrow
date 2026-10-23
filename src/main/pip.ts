@@ -2,18 +2,20 @@ import type { WebContents, WebFrameMain } from 'electron'
 
 const debug = (...args: unknown[]) => process.env.JBROW_DEBUG && console.log('[pip]', ...args)
 
-/** The page's biggest video that is playing with sound, by area; 0 when there isn't one. */
-const PROBE = `(() => {
+/** Which videos can go: playing, allowed PiP, and with sound unless muted ones may too. */
+const playable = (mutedToo: boolean) =>
+  `(v) => !v.paused && !v.ended && ${mutedToo ? '' : '!v.muted && v.volume > 0 && '}v.readyState > 2 && !v.disablePictureInPicture`
+
+/** The page's biggest playable video, by area; 0 when there isn't one. */
+const probe = (mutedToo: boolean) => `(() => {
   if (!document.pictureInPictureEnabled || document.pictureInPictureElement) return 0
-  const v = [...document.querySelectorAll('video')].filter(
-    (v) => !v.paused && !v.ended && !v.muted && v.volume > 0 && v.readyState > 2 && !v.disablePictureInPicture,
-  )
+  const v = [...document.querySelectorAll('video')].filter(${playable(mutedToo)})
   return Math.max(0, ...v.map((v) => v.clientWidth * v.clientHeight))
 })()`
 
-const ENTER = `(async () => {
+const enter = (mutedToo: boolean) => `(async () => {
   const v = [...document.querySelectorAll('video')]
-    .filter((v) => !v.paused && !v.ended && !v.muted && v.volume > 0 && v.readyState > 2 && !v.disablePictureInPicture)
+    .filter(${playable(mutedToo)})
     .sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0]
   if (!v) return false
   await v.requestPictureInPicture()
@@ -40,25 +42,30 @@ const WORLD = 1077
 const EXIT = `document.pictureInPictureElement ? document.exitPictureInPicture().then(() => true) : false`
 
 /**
- * Moves the active tab's playing video into Chromium's picture-in-picture window while jbrow
- * is out of sight, and back when it returns. Only jbrow's own PiP is undone; one a page or
- * extension opened stays.
+ * Moves a tab's playing video into Chromium's picture-in-picture window while it is out of
+ * sight, and back when it returns. Only jbrow's own PiP is undone; one a page or extension
+ * opened stays. Chromium has one PiP window, so a video from another tab takes its place.
  */
 export class MiniPlayer {
   private frame: WebFrameMain | null = null
   private wc: WebContents | null = null
 
-  /** `backToTab` runs when the PiP window's "back to tab" button closes it. */
-  constructor(private backToTab: () => void) {}
+  /** `backToTab` runs with the video's page when the PiP window's "back to tab" button closes it. */
+  constructor(private backToTab: (wc: WebContents) => void) {}
 
   get active() {
     return this.frame !== null
   }
 
-  async enter(wc: WebContents | null) {
-    if (this.frame || !wc || wc.isDestroyed() || wc.isAudioMuted()) return
+  /** The page whose video is in PiP, if jbrow put it there. */
+  get webContents() {
+    return this.frame ? this.wc : null
+  }
+
+  async enter(wc: WebContents | null, mutedToo = false) {
+    if (!wc || wc.isDestroyed() || (this.frame && this.wc === wc) || (!mutedToo && wc.isAudioMuted())) return
     const frames = wc.mainFrame.framesInSubtree
-    const sizes = await Promise.all(frames.map((f) => f.executeJavaScript(PROBE).catch(() => 0) as Promise<number>))
+    const sizes = await Promise.all(frames.map((f) => f.executeJavaScript(probe(mutedToo)).catch(() => 0) as Promise<number>))
     const best = sizes.indexOf(Math.max(...sizes))
     if (best < 0 || !sizes[best]) return
     const frame = frames[best]
@@ -70,7 +77,7 @@ export class MiniPlayer {
       trusted ? wc.executeJavaScriptInIsolatedWorld(WORLD, [{ code }], gesture) : frame.executeJavaScript(code, gesture)
     try {
       // A user gesture: Chromium only opens PiP in response to one.
-      if (!(await run(ENTER, true))) return
+      if (!(await run(enter(mutedToo), true))) return
     } catch (err) {
       debug('enter failed', err)
       return
@@ -83,7 +90,7 @@ export class MiniPlayer {
         if (this.frame !== frame) return
         this.frame = null
         debug('left; playing =', playing)
-        if (playing && trusted) this.backToTab()
+        if (playing && trusted) this.backToTab(wc)
       })
       .catch(() => {
         if (this.frame === frame) this.frame = null

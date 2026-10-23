@@ -148,6 +148,7 @@
               <button class="set-nav-item" data-section="profiles"><span data-icon="user"></span>Profiles</button>
               <button class="set-nav-item" data-section="threads"><span data-icon="archive"></span>Threads</button>
               <button class="set-nav-item" data-section="apps"><span data-icon="grid"></span>Apps</button>
+              <button class="set-nav-item" data-section="miniPlayer"><span data-icon="pip"></span>Mini player</button>
               <button class="set-nav-item" data-section="animation"><span data-icon="sparkles"></span>Animation</button>
               <button class="set-nav-item" data-section="restyling"><span data-icon="wand"></span>Restyling</button>
               <button class="set-nav-item" data-section="privacy"><span data-icon="shield"></span>Privacy</button>
@@ -249,6 +250,47 @@
                 </p>
                 <div id="appList" class="app-list"></div>
                 <button id="addApp" class="chip">Add app…</button>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="miniPlayer">
+              <h2 class="set-section-title">Mini player</h2>
+              <div class="set-item" data-keywords="mini player pip picture in picture video floating tab switch hide">
+                <h3>When</h3>
+                <p class="help">
+                  A playing video moves into a small floating window, and comes back when you return to it. The window's
+                  back-to-tab button brings you to the video's tab.
+                </p>
+                <label class="check">
+                  <input id="pipOnHide" type="checkbox" />
+                  <span>When jbrow hides or you switch to another app.</span>
+                </label>
+                <label class="check">
+                  <input id="pipOnTabSwitch" type="checkbox" />
+                  <span>When you switch to another tab. It stays while you browse other tabs and goes back into the page when you
+                    open the video's tab again.</span>
+                </label>
+                <label class="check">
+                  <input id="pipMutedToo" type="checkbox" />
+                  <span>Muted videos too. Off, only videos playing with sound move.</span>
+                </label>
+              </div>
+              <div class="set-item" data-keywords="mini player pip sites whitelist blacklist allow block only except list">
+                <h3>Sites</h3>
+                <div class="field">
+                  <span class="label">Use on</span>
+                  <div id="pipSites" class="seg" role="group" aria-label="Sites for the mini player">
+                    <button data-value="all">All sites</button>
+                    <button data-value="only">Only these</button>
+                    <button data-value="except">All except these</button>
+                  </div>
+                </div>
+                <p id="pipSitesHelp" class="help">
+                  One address per line; <code>*</code> matches anything, so <code>*.youtube.com</code> covers every
+                  YouTube page.
+                </p>
+                <textarea id="pipOnlySites" rows="5" spellcheck="false" placeholder="youtube.com&#10;*.twitch.tv" aria-label="Only these sites"></textarea>
+                <textarea id="pipExceptSites" rows="5" spellcheck="false" placeholder="meet.google.com&#10;*.zoom.us" aria-label="All sites except these"></textarea>
               </div>
             </section>
 

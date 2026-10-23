@@ -99,6 +99,22 @@ export interface Prefs {
   restyleCodexModel: string
   /** Profile for links from other apps and new tabs when nothing else decides. */
   defaultProfile: string
+  miniPlayer: MiniPlayerPrefs
+}
+
+/** When a playing video moves into the picture-in-picture window. */
+export interface MiniPlayerPrefs {
+  /** When jbrow hides or you switch to another app. */
+  onHide: boolean
+  /** When you switch to another tab; it comes back when you return to the video's tab. */
+  onTabSwitch: boolean
+  /** Muted videos too, not only ones playing with sound. */
+  mutedToo: boolean
+  /** Which sites: every one, only those in `onlySites`, or every one but those in `exceptSites`. */
+  sites: 'all' | 'only' | 'except'
+  /** Address patterns, as for private addresses. Both lists are kept whichever `sites` uses. */
+  onlySites: string[]
+  exceptSites: string[]
 }
 
 /** A site's certificate and what's wrong with it, if anything. */

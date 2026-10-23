@@ -1,6 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, MenuItem, nativeImage, Notification, session, shell, Tray } from 'electron'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
+import { urlMatcher } from '../shared/patterns'
 import { flatFolders, isInFolder, numberedThreads, rootOf, sections, type FolderView } from '../shared/threads'
 import type { AppEntry, AppLabel, Folder, Prefs, Profile, TabRecord, UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
@@ -44,12 +45,17 @@ let filter = 'all'
 let scope: { key: string; name: string } | null = null
 let lastFront: FrontApp | null = null
 let hiddenAt = 0
-// The PiP window's "back to tab" brings jbrow back. A page can make its video leave PiP while
-// playing too, so it only counts if a click just made jbrow the frontmost app: showing the
-// panel takes keyboard focus from whatever you're typing in.
-const miniPlayer = new MiniPlayer(async () => {
-  if ((await frontmostApp())?.pid === process.pid) void panel.show()
+// The PiP window's "back to tab" brings jbrow back on the video's tab. A page can make its video
+// leave PiP while playing too, so it only counts if a click just made jbrow the frontmost app:
+// showing the panel takes keyboard focus from whatever you're typing in.
+const miniPlayer = new MiniPlayer(async (wc) => {
+  if ((await frontmostApp())?.pid !== process.pid) return
+  const id = tabs.idForWebContents(wc)
+  if (id && id !== tabs.activeId) tabs.activate(id)
+  void panel.show()
 })
+/** The page that was in front, for moving its video into the mini player when you switch tabs. */
+let shownPage: Electron.WebContents | null = null
 /** Names and icons of apps, for the sidebar's app sections and the Apps settings. */
 const apps = new AppDirectory(() => {
   if (!panel) return
@@ -122,6 +128,7 @@ function state(): UiState {
       restyleModel: settings.restyle.model,
       restyleCodexModel: settings.restyle.codexModel,
       defaultProfile: settings.defaultProfile,
+      miniPlayer: settings.miniPlayer,
     },
     now: Date.now(),
   }
@@ -481,6 +488,27 @@ function setPinned(on: boolean) {
   pushState()
 }
 
+/** Moves a page's playing video into the mini player, if the mini player settings allow its site. */
+function toMiniPlayer(wc: Electron.WebContents | null) {
+  // A tab being closed has already left `tabs`.
+  if (!wc || wc.isDestroyed() || !tabs.idForWebContents(wc)) return
+  const { sites, onlySites, exceptSites, mutedToo } = settings.miniPlayer
+  const url = wc.getURL()
+  if (sites === 'only' && !urlMatcher(onlySites)(url)) return
+  if (sites === 'except' && urlMatcher(exceptSites)(url)) return
+  void miniPlayer.enter(wc, mutedToo)
+}
+
+/** On switching tabs, the old tab's video goes into the mini player and the new tab's comes back. */
+function tabSwitched() {
+  const wc = tabs.activeWebContents()
+  const prev = shownPage
+  shownPage = wc
+  if (prev === wc) return
+  if (wc && miniPlayer.webContents === wc) miniPlayer.exit()
+  if (settings.miniPlayer.onTabSwitch && panel.visible) toMiniPlayer(prev)
+}
+
 function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.animation) settings.animation = { ...settings.animation, ...prefs.animation }
   if (prefs.privateUrls) settings.privateUrls = prefs.privateUrls.map((p) => p.trim()).filter(Boolean)
@@ -492,6 +520,11 @@ function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.restyleModel) settings.restyle = { ...settings.restyle, model: prefs.restyleModel }
   if (prefs.restyleCodexModel !== undefined) settings.restyle = { ...settings.restyle, codexModel: prefs.restyleCodexModel.trim() }
   if (prefs.earlierAfterHours !== undefined) settings.earlierAfterHours = Math.max(1, prefs.earlierAfterHours)
+  if (prefs.miniPlayer) {
+    const mp = { ...settings.miniPlayer, ...prefs.miniPlayer }
+    const clean = (list: string[]) => list.map((p) => p.trim()).filter(Boolean)
+    settings.miniPlayer = { ...mp, onlySites: clean(mp.onlySites), exceptSites: clean(mp.exceptSites) }
+  }
   if (prefs.archiveAfterDays !== undefined || prefs.summarizeAfterDays !== undefined) {
     if (prefs.archiveAfterDays !== undefined) settings.archiveAfterDays = Math.max(0, prefs.archiveAfterDays)
     if (prefs.summarizeAfterDays !== undefined) settings.summarizeAfterDays = Math.max(0, prefs.summarizeAfterDays)
@@ -1183,7 +1216,9 @@ app.whenReady().then(async () => {
         return null
       }
     },
-    onHiding: () => void miniPlayer.enter(tabs.activeWebContents()),
+    onHiding: () => {
+      if (settings.miniPlayer.onHide) toMiniPlayer(tabs.activeWebContents())
+    },
     onShown: () => pushState(),
     onHidden: () => {
       hiddenAt = Date.now()
@@ -1216,7 +1251,10 @@ app.whenReady().then(async () => {
     contentVisible: () => panel.pageVisible(),
     onViewAdded: () => panel.keepOrder(),
     onChange: () => pushState(),
-    onActivated: () => focusActive(),
+    onActivated: () => {
+      focusActive()
+      tabSwitched()
+    },
     onKey,
     searchUrl: () => settings.searchUrl,
     permissions,
@@ -1256,11 +1294,14 @@ app.whenReady().then(async () => {
 
   registerHotkeys(true)
   buildTray()
-  // Back from picture-in-picture whenever jbrow is in front again.
-  panel.win.on('focus', () => miniPlayer.exit())
+  // Back from picture-in-picture whenever jbrow is in front again, unless the video belongs to
+  // another tab you switched away from: that one waits until you're on its tab.
+  panel.win.on('focus', () => {
+    if (!settings.miniPlayer.onTabSwitch || miniPlayer.webContents === tabs.activeWebContents()) miniPlayer.exit()
+  })
   // A pinned jbrow stays on screen behind other apps; its video follows you out anyway.
   app.on('did-resign-active', () => {
-    if (panel.pinned && panel.visible) void miniPlayer.enter(tabs.activeWebContents())
+    if (panel.pinned && panel.visible && settings.miniPlayer.onHide) toMiniPlayer(tabs.activeWebContents())
   })
   app.on('browser-window-blur', () =>
     panel.checkClickAway(async () => (await frontmostApp())?.pid === process.pid),

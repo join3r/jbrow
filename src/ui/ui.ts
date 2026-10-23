@@ -53,6 +53,7 @@ const ICONS: Record<string, string> = {
     '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>',
   shield:
     '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
+  pip: '<path d="M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h4"/><rect width="10" height="7" x="12" y="13" rx="2"/>',
   keyboard: '<path d="M10 8h.01M12 12h.01M14 8h.01M16 12h.01M18 8h.01M6 8h.01M7 16h10M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/>',
 }
 const icon = (name: string) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`
@@ -950,6 +951,8 @@ const animSpeed = $<HTMLInputElement>('animSpeed')
 const privateUrls = $<HTMLTextAreaElement>('privateUrls')
 const hideCapture = $<HTMLInputElement>('hideCapture')
 const pinWindow = $<HTMLInputElement>('pinWindow')
+const pipOnlySites = $<HTMLTextAreaElement>('pipOnlySites')
+const pipExceptSites = $<HTMLTextAreaElement>('pipExceptSites')
 const settingsSearch = $<HTMLInputElement>('settingsSearch')
 const shortcutSearch = $<HTMLInputElement>('shortcutSearch')
 const SECTION_NAMES: Record<string, string> = {
@@ -957,6 +960,7 @@ const SECTION_NAMES: Record<string, string> = {
   profiles: 'Profiles',
   threads: 'Threads',
   apps: 'Apps',
+  miniPlayer: 'Mini player',
   animation: 'Animation',
   restyling: 'Restyling',
   privacy: 'Privacy',
@@ -989,6 +993,7 @@ function showSettings(show: boolean) {
   } else {
     stopRecording()
     savePrivateUrls()
+    savePipSites()
     send('focus-page')
   }
   syncOverlay()
@@ -1103,6 +1108,16 @@ function renderSettings(all = false) {
   for (const id of ['animSpeed', 'animEase', 'animPreview']) $(id).closest('.field')!.classList.toggle('off', animation.style === 'off')
   if (all || document.activeElement !== privateUrls) privateUrls.value = S.prefs.privateUrls.join('\n')
   hideCapture.checked = hideFromScreenCapture
+  const mp = S.prefs.miniPlayer
+  $<HTMLInputElement>('pipOnHide').checked = mp.onHide
+  $<HTMLInputElement>('pipOnTabSwitch').checked = mp.onTabSwitch
+  $<HTMLInputElement>('pipMutedToo').checked = mp.mutedToo
+  seg('pipSites', mp.sites)
+  pipOnlySites.hidden = mp.sites !== 'only'
+  pipExceptSites.hidden = mp.sites !== 'except'
+  $('pipSitesHelp').hidden = mp.sites === 'all'
+  if (all || document.activeElement !== pipOnlySites) pipOnlySites.value = mp.onlySites.join('\n')
+  if (all || document.activeElement !== pipExceptSites) pipExceptSites.value = mp.exceptSites.join('\n')
   pinWindow.checked = S.pinned
   $('showHotkey').textContent = keyLabel('show') || 'its hotkey'
   $('appHotkey').textContent = keyLabel('showApp') || 'The app hotkey'
@@ -1138,6 +1153,33 @@ privateUrls.addEventListener('input', () => {
   privateTimer = window.setTimeout(savePrivateUrls, 400)
 })
 privateUrls.addEventListener('blur', savePrivateUrls)
+function pipPrefs(change: Partial<Prefs['miniPlayer']>) {
+  if (S) sendPrefs({ miniPlayer: { ...S.prefs.miniPlayer, ...change } })
+}
+$('pipOnHide').addEventListener('change', (e) => pipPrefs({ onHide: (e.target as HTMLInputElement).checked }))
+$('pipOnTabSwitch').addEventListener('change', (e) => pipPrefs({ onTabSwitch: (e.target as HTMLInputElement).checked }))
+$('pipMutedToo').addEventListener('change', (e) => pipPrefs({ mutedToo: (e.target as HTMLInputElement).checked }))
+$('pipSites').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b) pipPrefs({ sites: b.dataset.value as Prefs['miniPlayer']['sites'] })
+})
+let pipTimer: number | undefined
+function savePipSites() {
+  clearTimeout(pipTimer)
+  const lines = (el: HTMLTextAreaElement) => el.value.split('\n').map((l) => l.trim()).filter(Boolean)
+  const onlySites = lines(pipOnlySites)
+  const exceptSites = lines(pipExceptSites)
+  const mp = S?.prefs.miniPlayer
+  if (mp && (onlySites.join('\n') !== mp.onlySites.join('\n') || exceptSites.join('\n') !== mp.exceptSites.join('\n')))
+    pipPrefs({ onlySites, exceptSites })
+}
+for (const el of [pipOnlySites, pipExceptSites]) {
+  el.addEventListener('input', () => {
+    clearTimeout(pipTimer)
+    pipTimer = window.setTimeout(savePipSites, 400)
+  })
+  el.addEventListener('blur', savePipSites)
+}
 $('summarizeAfter').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ summarizeAfterDays: Number(b.dataset.value) })
