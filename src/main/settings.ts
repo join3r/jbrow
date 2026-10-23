@@ -64,6 +64,8 @@ export interface Settings {
   restyle: RestyleSettings
   /** When a playing video moves into the picture-in-picture window. */
   miniPlayer: MiniPlayerPrefs
+  /** Page zoom: the default in percent, and whether each site's zoom is kept across restarts (`sites`, hostname without www → percent). */
+  zoom: { defaultPercent: number; remember: boolean; sites: Record<string, number> }
 }
 
 const DEFAULTS: Settings = {
@@ -96,6 +98,7 @@ const DEFAULTS: Settings = {
   extensionShortcuts: {},
   restyle: { agent: 'claude', model: 'sonnet', codexModel: '', claudePath: '', codexPath: '' },
   miniPlayer: { onHide: true, onTabSwitch: false, mutedToo: false, sites: 'all', onlySites: [], exceptSites: [] },
+  zoom: { defaultPercent: 100, remember: true, sites: {} },
 }
 
 export const settingsPath = () => path.join(app.getPath('userData'), 'settings.json')
@@ -115,6 +118,7 @@ export function loadSettings(): Settings {
     // Older settings have fewer restyle keys.
     settings.restyle = { ...DEFAULTS.restyle, ...rest.restyle }
     settings.miniPlayer = { ...DEFAULTS.miniPlayer, ...rest.miniPlayer }
+    settings.zoom = { ...DEFAULTS.zoom, ...rest.zoom }
     if (!['system', 'light', 'dark'].includes(settings.appearance)) settings.appearance = DEFAULTS.appearance
     if (!THEMES.some((t) => t.id === settings.theme)) settings.theme = DEFAULTS.theme
     if (!['tint', 'edge', 'solid'].includes(settings.profileStyle)) settings.profileStyle = DEFAULTS.profileStyle

@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { urlMatcher } from '../shared/patterns'
 import { childrenOf, isAsleep, isInFolder, isRoot, rootOf, subtree } from '../shared/threads'
-import type { CrashView, Folder, TabRecord, UiTab } from '../shared/types'
+import type { CrashView, Folder, Profile, TabRecord, UiTab } from '../shared/types'
 import type { Certificates } from './certs'
 import type { Logins } from './logins'
 import type { SitePermissions } from './permissions'
@@ -37,6 +37,13 @@ export interface TabsDeps {
   /** The page menu's Print… and Save as PDF…. */
   print: (wc: WebContents) => void
   saveAsPdf: (wc: WebContents) => void
+  /** Save link, image or video: a download you asked for. */
+  download: (wc: WebContents, url: string) => void
+  profiles: () => Profile[]
+  /** Opens a link as a new thread in another profile, next to the tab's thread. */
+  openInProfile: (fromId: string, profile: string, url: string) => void
+  /** The active page went fullscreen or left it. */
+  onFullscreen: (on: boolean, url: string) => void
 }
 
 export interface CreateOptions {
@@ -56,6 +63,14 @@ export interface CreateOptions {
 const isWebUrl = (url: string) => /^https?:/i.test(url)
 
 const storePath = () => path.join(app.getPath('userData'), 'tabs.json')
+/** Back and forward lists, apart from tabs.json because they're bigger and change with every page. */
+const historyPath = () => path.join(app.getPath('userData'), 'history.json')
+
+/** A tab's back and forward list, as navigationHistory.restore takes it. */
+type NavHistory = { entries: Electron.NavigationEntry[]; index: number }
+
+/** How many back and forward entries a tab keeps, as in Chrome. */
+const HISTORY_KEEP = 50
 
 /** Archived threads are forgotten after this long. */
 const ARCHIVE_KEEP_MS = 90 * 24 * 60 * 60 * 1000
@@ -72,7 +87,7 @@ interface ClosedTab {
   root: Pick<TabRecord, 'scope' | 'scopeName' | 'app'>
   /** Its children, which close() moved up a level, so they can move back under it. */
   children: string[]
-  history?: { entries: Electron.NavigationEntry[]; index: number }
+  history?: NavHistory
 }
 
 export class Tabs {
@@ -95,8 +110,14 @@ export class Tabs {
   private killing = new Set<string>()
   /** Recently closed tabs, most recent last, for ⇧⌘T. Not kept across restarts. */
   private closed: ClosedTab[] = []
-  /** Back and forward lists for reopened tabs, used instead of a plain load when their view is made. */
-  private pendingHistory = new Map<string, NonNullable<ClosedTab['history']>>()
+  /** The tab whose page is fullscreen. */
+  private fullscreenId: string | null = null
+  /**
+   * Back and forward lists of tabs without a page (asleep, archived, or not opened since launch),
+   * used instead of a plain load when their view is made. Saved to history.json.
+   */
+  private histories = new Map<string, NavHistory>()
+  private historyTimer: NodeJS.Timeout | null = null
 
   constructor(private deps: TabsDeps) {}
 
@@ -121,6 +142,13 @@ export class Tabs {
     } catch (error) {
       console.error('[tabs] could not read tabs.json, starting empty:', error)
     }
+    if (!existsSync(historyPath())) return
+    try {
+      const histories = JSON.parse(readFileSync(historyPath(), 'utf8')) as Record<string, NavHistory>
+      for (const [id, h] of Object.entries(histories)) if (h.entries?.length) this.histories.set(id, h)
+    } catch (error) {
+      console.error('[tabs] could not read history.json, tabs start without back and forward:', error)
+    }
   }
 
   private save() {
@@ -133,6 +161,40 @@ export class Tabs {
     this.saveTimer = null
     const data = { tabs: this.records, activeId: this.activeId, folders: this.folders, archived: this.archived }
     writeFileSync(storePath(), JSON.stringify(data, null, 2))
+    this.flushHistory()
+  }
+
+  /** A page went somewhere; its back and forward list is saved a little later. */
+  private saveHistory() {
+    if (this.historyTimer) return
+    this.historyTimer = setTimeout(() => this.flushHistory(), 3000)
+  }
+
+  private flushHistory() {
+    if (this.historyTimer) clearTimeout(this.historyTimer)
+    this.historyTimer = null
+    for (const id of this.live.keys()) this.captureHistory(id)
+    const ids = new Set([...this.records, ...this.archived].map((t) => t.id))
+    for (const id of this.histories.keys()) if (!ids.has(id)) this.histories.delete(id)
+    writeFileSync(historyPath(), JSON.stringify(Object.fromEntries(this.histories)))
+  }
+
+  /** The back and forward list of a tab's page, or the saved one if it has no page. */
+  private historyOf(id: string): NavHistory | undefined {
+    const wc = this.webContentsFor(id)
+    if (!wc) return this.histories.get(id)
+    const entries = wc.navigationHistory.getAllEntries()
+    if (!entries.length) return undefined
+    let index = wc.navigationHistory.getActiveIndex()
+    // Keep the entries nearest the current one.
+    const start = Math.max(0, Math.min(index - HISTORY_KEEP / 2, entries.length - HISTORY_KEEP))
+    index -= start
+    return { entries: entries.slice(start, start + HISTORY_KEEP), index }
+  }
+
+  private captureHistory(id: string) {
+    const history = this.historyOf(id)
+    if (history) this.histories.set(id, history)
   }
 
   private changed() {
@@ -242,10 +304,19 @@ export class Tabs {
     } finally {
       this.addingView = false
     }
-    const history = this.pendingHistory.get(rec.id)
-    this.pendingHistory.delete(rec.id)
-    if (!guest && history) void view.webContents.navigationHistory.restore(history).catch(() => {})
-    else if (!guest && rec.url) void view.webContents.loadURL(rec.url).catch(() => {})
+    const history = this.histories.get(rec.id)
+    if (guest) return live
+    // A tab that was asleep or archived comes back where it was, with back and forward. One you
+    // just typed an address into goes there after, so that address is one step further.
+    const url = rec.url
+    const load = () => (url ? view.webContents.loadURL(url) : undefined)
+    if (!history) void load()?.catch(() => {})
+    else {
+      void view.webContents.navigationHistory
+        .restore(history)
+        .then(() => (history.entries[history.index]?.url !== url ? load() : undefined), load)
+        .catch(() => {})
+    }
     return live
   }
 
@@ -271,6 +342,7 @@ export class Tabs {
         r.url = url
         this.changed()
       }
+      this.saveHistory()
     }
     wc.on('did-navigate', (e, url) => {
       onNav(e, url)
@@ -296,6 +368,7 @@ export class Tabs {
       if (this.killing.delete(id)) return void wc.reload()
       this.deps.logins.clear(id)
       this.setLoading(id, false)
+      if (this.fullscreenId === id) this.setFullscreen(null)
       this.setCrashed(id, { reason: details.reason, hung: false })
     })
     wc.on('unresponsive', () => {
@@ -311,9 +384,22 @@ export class Tabs {
     wc.on('did-start-loading', () => this.setLoading(id, true))
     wc.on('did-stop-loading', () => this.setLoading(id, false))
     wc.on('before-input-event', (event, input) => {
+      // Esc leaves fullscreen, as in Chrome; the page doesn't get it.
+      if (input.type === 'keyDown' && input.key === 'Escape' && this.fullscreenId === id) {
+        event.preventDefault()
+        return this.leaveFullscreen()
+      }
       if (this.deps.onKey(input)) event.preventDefault()
     })
     wc.on('context-menu', (_e, params) => this.contextMenu(id, wc, params, rt))
+    wc.on('enter-html-full-screen', () => {
+      // Only the page in front can have the screen; one in the background stays in its place.
+      if (id !== this.activeId) return void this.exitFullscreen(wc)
+      this.setFullscreen(id)
+    })
+    wc.on('leave-html-full-screen', () => {
+      if (this.fullscreenId === id) this.setFullscreen(null)
+    })
 
     wc.setWindowOpenHandler((details) => {
       // window.open with size features is usually a sign-in or payment popup. It needs a real
@@ -344,6 +430,7 @@ export class Tabs {
     })
 
     wc.on('destroyed', () => {
+      if (this.fullscreenId === id) this.setFullscreen(null)
       // A crashed page's view may have been replaced by now; only forget this one.
       if (this.live.get(id)?.view.webContents === wc) this.live.delete(id)
       this.killing.delete(id)
@@ -351,6 +438,28 @@ export class Tabs {
       this.deps.logins.clear(id)
       this.setCrashed(id, null)
     })
+  }
+
+  private setFullscreen(id: string | null) {
+    this.fullscreenId = id
+    const live = id ? this.live.get(id) : undefined
+    live?.view.setBorderRadius(0)
+    for (const [tid, l] of this.live) if (tid !== id) l.view.setBorderRadius(9)
+    this.deps.onFullscreen(!!id, (id && this.webContentsFor(id)?.getURL()) || '')
+    this.layout()
+  }
+
+  private exitFullscreen(wc: WebContents) {
+    if (!wc.isDestroyed()) void wc.executeJavaScript('document.fullscreenElement && document.exitFullscreen()', true).catch(() => {})
+  }
+
+  /** Takes the fullscreen page back into the panel: jbrow is hiding, or you went to another tab. */
+  leaveFullscreen() {
+    const id = this.fullscreenId
+    if (!id) return
+    const wc = this.webContentsFor(id)
+    this.setFullscreen(null)
+    if (wc) this.exitFullscreen(wc)
   }
 
   private setCrashed(id: string, crash: CrashView | null) {
@@ -395,21 +504,60 @@ export class Tabs {
 
   private contextMenu(id: string, wc: WebContents, params: Electron.ContextMenuParams, rt: ProfileRuntime) {
     const items: Electron.MenuItemConstructorOptions[] = []
-    if (params.linkURL) {
-      const web = isWebUrl(params.linkURL)
-      items.push(
-        { label: 'Open link in this thread', enabled: web, click: () => this.create({ profile: rt.profile.id, parent: id, url: params.linkURL }) },
-        {
-          label: 'Open link in background',
-          enabled: web,
-          click: () => this.create({ profile: rt.profile.id, parent: id, url: params.linkURL, activate: false, unread: true }),
-        },
-        { label: 'Copy link', click: () => clipboard.writeText(params.linkURL) },
-        { type: 'separator' },
+    const section = (...more: Electron.MenuItemConstructorOptions[]) => items.push(...more, { type: 'separator' })
+    const openHere = (url: string, background = false) =>
+      this.create({ profile: rt.profile.id, parent: id, url, activate: !background, unread: background || undefined })
+    const others = this.deps.profiles().filter((p) => p.id !== rt.profile.id)
+
+    if (params.misspelledWord) {
+      const suggestions = params.dictionarySuggestions.slice(0, 5)
+      section(
+        ...(suggestions.length
+          ? suggestions.map((word) => ({ label: word, click: () => wc.replaceMisspelling(word) }))
+          : [{ label: 'No suggestions', enabled: false }]),
+        { label: 'Add to dictionary', click: () => wc.session.addWordToSpellCheckerDictionary(params.misspelledWord) },
       )
     }
-    if (params.isEditable) items.push({ role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { type: 'separator' })
-    else if (params.selectionText) items.push({ role: 'copy' }, { type: 'separator' })
+    if (params.linkURL) {
+      const web = isWebUrl(params.linkURL)
+      section(
+        { label: 'Open link in this thread', enabled: web, click: () => openHere(params.linkURL) },
+        { label: 'Open link in background', enabled: web, click: () => openHere(params.linkURL, true) },
+        ...(others.length
+          ? [{
+              label: 'Open link in profile',
+              enabled: web,
+              submenu: others.map((p) => ({ label: p.name, click: () => this.deps.openInProfile(id, p.id, params.linkURL) })),
+            }]
+          : []),
+        { label: 'Save link', enabled: web, click: () => this.deps.download(wc, params.linkURL) },
+        { label: 'Copy link', click: () => clipboard.writeText(params.linkURL) },
+      )
+    }
+    const media = params.mediaType === 'image' ? 'image' : params.mediaType === 'video' ? 'video' : params.mediaType === 'audio' ? 'audio' : null
+    if (media && params.srcURL) {
+      // blob: and MediaSource addresses (most streaming video) only exist inside the page.
+      const reachable = isWebUrl(params.srcURL) || (media === 'image' && params.srcURL.startsWith('data:'))
+      section(
+        { label: `Open ${media} in this thread`, enabled: isWebUrl(params.srcURL), click: () => openHere(params.srcURL) },
+        { label: `Save ${media}`, enabled: reachable, click: () => this.deps.download(wc, params.srcURL) },
+        ...(media === 'image' ? [{ label: 'Copy image', enabled: params.hasImageContents, click: () => wc.copyImageAt(params.x, params.y) }] : []),
+        { label: `Copy ${media} address`, enabled: reachable, click: () => clipboard.writeText(params.srcURL) },
+      )
+    }
+    const selection = params.selectionText.trim().replace(/\s+/g, ' ')
+    if (params.isEditable) {
+      section({ role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'pasteAndMatchStyle' }, { role: 'selectAll' })
+    } else if (selection) {
+      section({ role: 'copy' })
+    }
+    if (selection && !params.linkURL) {
+      const short = selection.length > 32 ? `${selection.slice(0, 30)}…` : selection
+      section(
+        { label: `Search ${searchEngineName(this.deps.searchUrl())} for “${short}”`, click: () => openHere(toUrl(selection, this.deps.searchUrl(), true)) },
+        ...(process.platform === 'darwin' ? [{ label: `Look Up “${short}”`, click: () => wc.showDefinitionForSelection() }] : []),
+      )
+    }
     items.push(
       { label: 'Back', enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() },
       { label: 'Forward', enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
@@ -449,6 +597,7 @@ export class Tabs {
       this.records = this.records.filter((t) => t.id !== prev.id)
       this.mru = this.mru.filter((m) => m !== prev.id)
     }
+    if (this.fullscreenId && this.fullscreenId !== id) this.leaveFullscreen()
     for (const [tid, live] of this.live) if (tid !== id) live.view.setVisible(false)
     this.activeId = id
     rec.lastSeen = Date.now()
@@ -484,8 +633,10 @@ export class Tabs {
     const rec = this.active()
     if (!rec) return
     rec.url = url
-    const live = this.ensureView(rec)
-    if (live && live.view.webContents.getURL() !== url) void live.view.webContents.loadURL(url).catch(() => {})
+    // A tab without a page goes to the address once its view is made.
+    const live = this.live.get(rec.id)
+    if (!live) this.ensureView(rec)
+    else if (live.view.webContents.getURL() !== url) void live.view.webContents.loadURL(url).catch(() => {})
     this.activate(rec.id)
   }
 
@@ -522,15 +673,13 @@ export class Tabs {
   }
 
   private remember(rec: TabRecord) {
-    const wc = this.webContentsFor(rec.id)
-    const entries = wc?.navigationHistory.getAllEntries() ?? []
     const root = rootOf(this.records, rec)
     this.closed.push({
       rec: { ...rec },
       index: this.records.indexOf(rec),
       root: { scope: root.scope, scopeName: root.scopeName, app: root.app },
       children: childrenOf(this.records, rec.id).map((c) => c.id),
-      history: entries.length ? { entries, index: wc!.navigationHistory.getActiveIndex() } : undefined,
+      history: this.historyOf(rec.id),
     })
     if (this.closed.length > CLOSED_KEEP) this.closed.shift()
   }
@@ -560,7 +709,7 @@ export class Tabs {
       child.parent = rec.id
       child.kept = child.folder = child.scope = child.scopeName = child.app = undefined
     }
-    if (c.history) this.pendingHistory.set(rec.id, c.history)
+    if (c.history) this.histories.set(rec.id, c.history)
     this.records.splice(Math.min(c.index, this.records.length), 0, rec)
     this.activate(rec.id)
     return rec
@@ -569,6 +718,7 @@ export class Tabs {
   private dropView(rec: TabRecord) {
     const live = this.live.get(rec.id)
     if (!live) return
+    this.captureHistory(rec.id)
     this.deps.window().contentView.removeChildView(live.view)
     this.droppingView = true
     try {
@@ -771,8 +921,21 @@ export class Tabs {
   }
 }
 
-function toUrl(input: string, searchUrl: string): string {
+/** "Google" for Google's search address, otherwise the search site's name. */
+function searchEngineName(searchUrl: string): string {
+  try {
+    const host = new URL(searchUrl.replace('%s', '')).hostname.replace(/^(www|search)\./, '')
+    const name = host.split('.')[0] ?? host
+    return name === 'duckduckgo' ? 'DuckDuckGo' : name.charAt(0).toUpperCase() + name.slice(1)
+  } catch {
+    return 'the web'
+  }
+}
+
+/** `search` sends the text to the search engine even if it looks like an address. */
+function toUrl(input: string, searchUrl: string, search = false): string {
   const text = input.trim()
+  if (search) return searchUrl.replace('%s', encodeURIComponent(text))
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text) || /^(about|chrome-extension|file):/i.test(text)) return text
   if (/^(localhost|[\w-]+(\.[\w-]+)+)(:\d+)?(\/.*)?$/i.test(text) && !text.includes(' ')) return `https://${text}`
   return searchUrl.replace('%s', encodeURIComponent(text))

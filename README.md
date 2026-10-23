@@ -100,7 +100,23 @@ button shows on hover. ⇧⌘T, or right-click **+** → **Reopen closed tab**, 
 closed tabs one by one, in their old place with their back/forward history and any threads that were
 under them. The list is kept only until jbrow quits.
 
-Right-click a page for **Print…** and **Save as PDF…** (saved to ~/Downloads by default).
+Right-click a page for **Print…** and **Save as PDF…** (saved to ~/Downloads by default). The same menu
+opens a link in this thread, in the background or in another profile, saves or copies a link, image or
+video, copies an image, searches for or looks up selected text, and offers spelling suggestions in text
+fields (or **Add to dictionary**).
+
+Tabs keep their back and forward history (the last 50 pages) across restarts, sleep and archiving, in
+`history.json` next to `tabs.json`, along with each page's scroll position and form contents.
+
+A video or page that goes fullscreen fills the whole display jbrow is on, menu bar and Dock included,
+without a Space of its own. For the first 4 seconds a notice above the page names the site and says
+Press Esc to exit, so a page can't pass itself off as macOS. Esc, hiding jbrow or switching tabs brings it
+back into the panel.
+
+⌘+, ⌘− and ⌘0 zoom in Chrome's steps (90%, 100%, 110%, 125%…), every tab of a site together. Under
+**Appearance** in settings, pick the default zoom for sites you haven't zoomed and whether each site's
+zoom is remembered across restarts (on by default, kept in `zoom` in `settings.json`); zoomed sites are
+listed there with **Reset**.
 
 A site that asks for a username and password (HTTP basic or digest auth) gets a sign-in form in the
 page area. jbrow doesn't store the password; Chromium remembers it until jbrow quits. If a page
@@ -189,6 +205,7 @@ on first run. Restart jbrow after editing the file by hand (menu bar item, **Res
   `hotkeys`; jbrow still reads those and writes them here the next time it saves settings.
 - `extensionShortcuts`: your extension shortcuts per profile, extension and command (`""` removes one).
 - `archiveAfterDays`: archive threads unseen this many days; 0 turns archiving off.
+- `zoom`: `defaultPercent`, `remember`, and `sites`, each zoomed site (hostname without www) with its zoom in percent.
 - `restyle`: `model` for restyling (a Claude model alias such as sonnet, opus or haiku) and
   `claudePath`, the claude command if jbrow doesn't find it on its own.
 

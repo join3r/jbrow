@@ -130,6 +130,12 @@ export class Downloads {
     this.push(true)
   }
 
+  /** A download you asked for from the page menu. It doesn't count toward the page's own downloads. */
+  start(wc: WebContents, url: string) {
+    this.pages.delete(wc)
+    wc.downloadURL(url)
+  }
+
   /** jbrow hid: you've seen what finished while it was up. */
   clearFinished() {
     const before = this.entries.size

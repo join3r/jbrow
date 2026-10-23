@@ -252,6 +252,26 @@
                 </div>
                 <p class="help">The left end of the address bar, behind back and reload, takes the color of the tab's profile. Edge adds a solid line where the color ends. Shown when you have more than one profile.</p>
               </div>
+              <div class="set-item" data-keywords="zoom page size bigger smaller text font scale percent default site remember">
+                <h3>Page zoom</h3>
+                <div class="field">
+                  <span class="label">Default</span>
+                  <div id="zoomDefault" class="seg" role="group" aria-label="Default page zoom">
+                    <button data-value="80">80%</button>
+                    <button data-value="90">90%</button>
+                    <button data-value="100">100%</button>
+                    <button data-value="110">110%</button>
+                    <button data-value="125">125%</button>
+                    <button data-value="150">150%</button>
+                  </div>
+                </div>
+                <label class="check">
+                  <input id="zoomRemember" type="checkbox" />
+                  <span>Remember each site's zoom. ⌘+ and ⌘− zoom every tab of a site together; with this off, sites go back
+                    to the default when jbrow quits.</span>
+                </label>
+                <div id="zoomSites" class="styled-sites"></div>
+              </div>
             </section>
 
             <section class="set-section" data-section="profiles">

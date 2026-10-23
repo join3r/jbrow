@@ -49,6 +49,12 @@ export class Panel {
   /** Bumped by every show and hide, so an interrupted one knows to stop. */
   private run = 0
   private overlay = false
+  /** A page is fullscreen (a video, usually): the window covers its display and the page all of it. */
+  pageFullscreen = false
+  /** Where the window was before the page went fullscreen. */
+  private beforeFullscreen: Rectangle | null = null
+  /** "<site> is full screen. Press Esc to exit." on top of a fullscreen page for its first seconds. */
+  private notice: { view: WebContentsView; timer: NodeJS.Timeout } | null = null
 
   constructor(private settings: () => Settings, private hooks: PanelHooks) {
     this.win = new BrowserWindow({
@@ -67,6 +73,8 @@ export class Panel {
       minimizable: false,
       maximizable: false,
       fullscreenable: false,
+      // macOS otherwise keeps the window off the menu bar and Dock, which a fullscreen page covers.
+      enableLargerThanScreen: true,
       skipTaskbar: true,
       // The window's own page stays empty; the UI is in uiView.
       webPreferences: { sandbox: true, contextIsolation: true },
@@ -121,9 +129,61 @@ export class Panel {
     }
   }
 
+  /**
+   * A page's fullscreen fills the display jbrow is on, menu bar and Dock included, without moving
+   * to a Space of its own, so jbrow can still hide on its hotkey or when you click away.
+   */
+  setPageFullscreen(on: boolean, site = '') {
+    if (on === this.pageFullscreen || this.win.isDestroyed()) return
+    this.pageFullscreen = on
+    this.hideNotice()
+    if (on) {
+      this.beforeFullscreen = this.win.getBounds()
+      const { bounds } = screen.getDisplayMatching(this.beforeFullscreen)
+      this.win.setAlwaysOnTop(true, 'screen-saver')
+      this.win.setBounds(BACKGROUND ? { ...offScreen(), width: bounds.width, height: bounds.height } : bounds)
+      this.showNotice(site, bounds.width)
+    } else {
+      this.win.setAlwaysOnTop(!this.pinned, 'floating')
+      if (this.beforeFullscreen) this.win.setBounds(this.beforeFullscreen)
+      this.beforeFullscreen = null
+    }
+  }
+
+  /**
+   * A fullscreen page covers the menu bar and Dock, so it could draw fake system controls. As in
+   * Chrome, a notice the page can't cover or dismiss says whose page it is and how to leave.
+   */
+  private showNotice(site: string, width: number) {
+    const view = new WebContentsView({ webPreferences: { sandbox: true, contextIsolation: true, javascript: false } })
+    view.setBackgroundColor('#00000000')
+    const who = site ? `${site.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)} is` : 'This page is'
+    const text = `${who} full screen. Press <b>Esc</b> to exit.`
+    const html = `<!doctype html><meta charset="utf-8"><body style="margin:0;display:flex;justify-content:center;align-items:center;height:100vh;font:13px -apple-system,system-ui;background:transparent"><div style="background:rgba(30,30,30,.88);color:#fff;padding:10px 18px;border-radius:10px">${text}</div></body>`
+    void view.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+    const w = Math.min(width, 520)
+    view.setBounds({ x: Math.round((width - w) / 2), y: 24, width: w, height: 48 })
+    this.win.contentView.addChildView(view)
+    this.notice = { view, timer: setTimeout(() => this.hideNotice(), 4000) }
+  }
+
+  private hideNotice() {
+    if (!this.notice) return
+    clearTimeout(this.notice.timer)
+    if (!this.win.isDestroyed()) this.win.contentView.removeChildView(this.notice.view)
+    this.notice.view.webContents.close()
+    this.notice = null
+  }
+
+  /** A page view was added on top; the fullscreen notice stays above it. */
+  private raiseNotice() {
+    if (this.notice) this.win.contentView.addChildView(this.notice.view)
+  }
+
   /** Where the active page goes, in window coordinates. */
   contentBounds(): Rectangle {
     const [width, height] = this.win.getContentSize()
+    if (this.pageFullscreen) return { x: 0, y: 0, width, height }
     return {
       x: SIDEBAR_WIDTH,
       y: TOOLBAR_HEIGHT,
@@ -162,6 +222,7 @@ export class Panel {
     if (this.win.isDestroyed()) return
     if (this.overlay) this.win.contentView.addChildView(this.uiView)
     else this.win.contentView.addChildView(this.uiView, 0)
+    this.raiseNotice()
   }
 
   private placeOnPointerDisplay() {

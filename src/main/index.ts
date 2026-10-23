@@ -22,6 +22,7 @@ import { installTestExtensions, loadUnpacked, partitionFor, setupProfile, setupP
 import { Restyler } from './restyle'
 import { loadSettings, saveSettings, scopeForApp, settingsPath, type Settings } from './settings'
 import { Tabs } from './tabs'
+import { Zoom, ZOOM_STEPS } from './zoom'
 import { rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -124,6 +125,7 @@ function state(): UiState {
     login: active ? logins.view(active.id) : null,
     crash: active ? tabs.crash(active.id) : null,
     styledSites: restyler.styledSites(),
+    zoomSites: zoom.list(),
     nav: tabs.navState(),
     keys: actionKeys(settings.shortcuts),
     prefs: {
@@ -143,6 +145,7 @@ function state(): UiState {
       restyleCodexModel: settings.restyle.codexModel,
       defaultProfile: settings.defaultProfile,
       miniPlayer: settings.miniPlayer,
+      zoom: { defaultPercent: settings.zoom.defaultPercent, remember: settings.zoom.remember },
     },
     now: Date.now(),
   }
@@ -221,6 +224,8 @@ function closeDownloadOnlyTab(wc: Electron.WebContents) {
 const toast = (text: string) => {
   if (!panel.win.isDestroyed()) panel.ui.send('toast', text)
 }
+
+const zoom = new Zoom(() => settings, () => saveSettings(settings))
 
 const finder = new FindInPage((update) => {
   if (!panel.win.isDestroyed()) panel.ui.send('find', update)
@@ -432,6 +437,15 @@ function switchProfile(id: string, next: string) {
   tabs.create({ profile: next, url: cur.url, ...(cur.parent ? {} : { scope: cur.scope, scopeName: cur.scopeName, app: cur.app }) })
 }
 
+/** The host a page is on, for notices; '' for one without (a file, a blank page). */
+function siteName(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return ''
+  }
+}
+
 const profileName = (id: string) => settings.profiles.find((p) => p.id === id)?.name ?? id
 
 function runAction(id: ActionId) {
@@ -503,14 +517,18 @@ function onKey(input: Electron.Input): boolean {
   if (!input.meta) return false
   const key = input.key.toLowerCase()
   // Matched by code too, so zoom works on layouts where = and - sit elsewhere or need Shift.
-  const zoom =
+  const zoomKey =
     key === '=' || key === '+' || input.code === 'Equal' || input.code === 'NumpadAdd' ? 1
     : key === '-' || input.code === 'Minus' || input.code === 'NumpadSubtract' ? -1
     : key === '0' || input.code === 'Numpad0' ? 0
     : null
-  if (zoom !== null && !input.alt) {
+  if (zoomKey !== null && !input.alt) {
     const wc = tabs.activeWebContents()
-    if (wc) wc.setZoomLevel(zoom === 0 ? 0 : Math.min(9, Math.max(-8, wc.getZoomLevel() + zoom * 0.5)))
+    if (wc) {
+      const percent = zoom.step(wc, zoomKey)
+      toast(`Zoom ${percent}%`)
+      pushState()
+    }
     return true
   }
   if (!input.alt && !input.shift && /^[1-9]$/.test(key)) {
@@ -575,6 +593,11 @@ function updatePrefs(prefs: Partial<Prefs>) {
     const mp = { ...settings.miniPlayer, ...prefs.miniPlayer }
     const clean = (list: string[]) => list.map((p) => p.trim()).filter(Boolean)
     settings.miniPlayer = { ...mp, onlySites: clean(mp.onlySites), exceptSites: clean(mp.exceptSites) }
+  }
+  if (prefs.zoom) {
+    if (prefs.zoom.remember !== undefined) zoom.setRemember(prefs.zoom.remember)
+    if (ZOOM_STEPS.includes(prefs.zoom.defaultPercent)) settings.zoom.defaultPercent = prefs.zoom.defaultPercent
+    for (const wc of tabs.pages()) zoom.apply(wc)
   }
   if (prefs.archiveAfterDays !== undefined || prefs.summarizeAfterDays !== undefined) {
     if (prefs.archiveAfterDays !== undefined) settings.archiveAfterDays = Math.max(0, prefs.archiveAfterDays)
@@ -1186,6 +1209,11 @@ function wireIpc() {
   })
   on<{ id: string; action: DownloadAction }>('download', ({ id, action }) => downloads.act(id, action))
   on<{ id: string }>('activate', ({ id }) => tabs.activate(id))
+  on<{ site: string }>('zoom-reset', ({ site }) => {
+    zoom.forget(site)
+    for (const wc of tabs.pages()) zoom.apply(wc)
+    pushState()
+  })
   on('new', () => {
     tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
     focusAddressBar()
@@ -1399,6 +1427,7 @@ app.whenReady().then(async () => {
       }
     },
     onHiding: () => {
+      tabs.leaveFullscreen()
       if (settings.miniPlayer.onHide) toMiniPlayer(tabs.activeWebContents())
     },
     onShown: () => pushState(),
@@ -1448,9 +1477,21 @@ app.whenReady().then(async () => {
     permissions,
     certs,
     logins,
-    onNavigate: (wc) => restyler.onNavigate(wc),
+    onNavigate: (wc) => {
+      restyler.onNavigate(wc)
+      zoom.apply(wc)
+    },
     print: (wc) => printPage(wc),
     saveAsPdf: (wc) => void savePageAsPdf(wc),
+    download: (wc, url) => downloads.start(wc, url),
+    onFullscreen: (on, url) => panel.setPageFullscreen(on, siteName(url)),
+    profiles: () => settings.profiles,
+    openInProfile: (fromId, profile, url) => {
+      const from = tabs.get(fromId)
+      const root = from && rootOf(tabs.records, from)
+      if (filter !== 'all' && filter !== profile) filter = 'all'
+      tabs.create({ profile, url, scope: root?.scope, scopeName: root?.scopeName, app: root?.app })
+    },
   })
 
   downloads = new Downloads({

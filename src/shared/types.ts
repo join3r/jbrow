@@ -79,6 +79,8 @@ export interface UiState {
   crash: CrashView | null
   /** Every site with a restyle, for the settings screen. */
   styledSites: StyledSite[]
+  /** Sites with a zoom of their own, in percent. */
+  zoomSites: { site: string; percent: number }[]
   nav: { canGoBack: boolean; canGoForward: boolean; loading: boolean }
   /** The key of each of jbrow's own commands, '' for none. */
   keys: Record<ActionId, string>
@@ -127,6 +129,8 @@ export interface Prefs {
   /** Profile for links from other apps and new tabs when nothing else decides. */
   defaultProfile: string
   miniPlayer: MiniPlayerPrefs
+  /** Page zoom for sites you haven't zoomed, in percent, and whether each site's zoom is kept across restarts. */
+  zoom: { defaultPercent: number; remember: boolean }
 }
 
 /** When a playing video moves into the picture-in-picture window. */

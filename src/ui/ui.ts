@@ -969,6 +969,8 @@ $('restyleReset').addEventListener('click', () => restyleSite('reset'))
 const animSpeed = $<HTMLInputElement>('animSpeed')
 const privateUrls = $<HTMLTextAreaElement>('privateUrls')
 const hideCapture = $<HTMLInputElement>('hideCapture')
+const zoomRemember = $<HTMLInputElement>('zoomRemember')
+const zoomSitesEl = $('zoomSites')
 const pinWindow = $<HTMLInputElement>('pinWindow')
 const pipOnlySites = $<HTMLTextAreaElement>('pipOnlySites')
 const pipExceptSites = $<HTMLTextAreaElement>('pipExceptSites')
@@ -1126,6 +1128,9 @@ function renderSettings(all = false) {
   $('restyleCodexModelField').hidden = !codex
   if (all || document.activeElement !== restyleCodexModel) restyleCodexModel.value = S.prefs.restyleCodexModel
   renderStyledSites()
+  seg('zoomDefault', String(S.prefs.zoom.defaultPercent))
+  zoomRemember.checked = S.prefs.zoom.remember
+  renderZoomSites()
   renderProfiles()
   if (all || document.activeElement !== animSpeed) animSpeed.value = String(animation.durationMs)
   $('animSpeedOut').textContent = `${animSpeed.value} ms`
@@ -1265,6 +1270,25 @@ styledSitesEl.addEventListener('click', (e) => {
   if (!b) return
   e.preventDefault()
   send('restyle-site', { host: b.dataset.removeSite, action: 'reset' })
+})
+zoomRemember.addEventListener('change', () => S && sendPrefs({ zoom: { ...S.prefs.zoom, remember: zoomRemember.checked } }))
+$('zoomDefault').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b && S) sendPrefs({ zoom: { ...S.prefs.zoom, defaultPercent: Number(b.dataset.value) } })
+})
+function renderZoomSites() {
+  if (!S) return
+  const next = S.zoomSites
+    .map(
+      ({ site, percent }) => `<div class="check"><span>${esc(site)}<em>${percent}%</em></span>
+        <button class="link" data-zoom-site="${esc(site)}">Reset</button></div>`,
+    )
+    .join('')
+  if (zoomSitesEl.innerHTML !== next) zoomSitesEl.innerHTML = next
+}
+zoomSitesEl.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-zoom-site]')
+  if (b) send('zoom-reset', { site: b.dataset.zoomSite })
 })
 hideCapture.addEventListener('change', () => sendPrefs({ hideFromScreenCapture: hideCapture.checked }))
 pinWindow.addEventListener('change', () => send('pin', { on: pinWindow.checked }))
