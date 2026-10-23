@@ -96,7 +96,8 @@ const activeTab = () => S?.tabs.find((t) => t.id === S!.activeId)
 const activeUrl = () => (S?.cert?.blocked ? S.cert.url : (activeTab()?.url ?? ''))
 /** The address as it may be shown on screen. */
 const shownUrl = (url: string) => (isPrivate(url) ? 'Private' : url)
-const DAY_MS = 24 * 60 * 60 * 1000
+const HOUR_MS = 60 * 60 * 1000
+const DAY_MS = 24 * HOUR_MS
 /** A command's key as a menu writes it, '' when it has none. */
 const keyLabel = (id: ActionId) => (S?.keys[id] ? shortcutLabel(S.keys[id]) : '')
 /** " (⌘T)" for a tooltip. */
@@ -274,7 +275,7 @@ function renderThreads() {
   const draft = renameInput ? { value: renameInput.value, start: renameInput.selectionStart, end: renameInput.selectionEnd } : null
 
   const appNames = Object.fromEntries(Object.entries(S.apps).map(([k, l]) => [k, l.name]))
-  const s = sections(S.tabs, { filter: S.filter, scope: S.scope?.key ?? null, activeId: S.activeId, now: S.now, folders: S.folders, appNames })
+  const s = sections(S.tabs, { filter: S.filter, scope: S.scope?.key ?? null, activeId: S.activeId, now: S.now, folders: S.folders, appNames, earlierAfterMs: S.prefs.earlierAfterHours * HOUR_MS })
   const numbered = new Map(numberedThreads(s).map((v, i) => [v.root.id, i + 1]))
   const block = (v: ThreadView<UiTab>) => row(v.root, 0, v, numbered.get(v.root.id))
   // Under its app's heading a thread doesn't need the app's name again.
@@ -288,13 +289,15 @@ function renderThreads() {
         <span class="end"><button class="act" data-close-settings title="Close" aria-label="Close settings">${icon('close')}</button></span>
       </div>`
     : ''
-  html += `<div class="head" data-head="kept"><span>Kept</span><button class="head-act" data-new-folder title="New folder" aria-label="New folder">${icon('folderPlus')}</button></div>`
+  // The top section is Kept; its place says so without a label.
+  html += `<div class="head" data-head="kept" title="Kept"><span></span><button class="head-act" data-new-folder title="New folder" aria-label="New folder">${icon('folderPlus')}</button></div>`
   html += folders.map((f) => folderRow(f, block, narrowed)).join('') + s.kept.map(block).join('')
   if (!folders.length && !s.kept.length) html += `<div class="empty">Drag a thread here to keep it</div>`
-  html += `<div class="head" data-head="today">Today</div>`
+  html += `<div class="head" data-head="today">${recentLabel(S.prefs.earlierAfterHours)}</div>`
   html += s.today.length ? s.today.map(block).join('') : `<div class="empty">Nothing here yet</div>`
   html += s.apps.map((a) => appSection(a, appBlock)).join('')
-  if (s.earlier.length) html += `<div class="head" data-head="today">Earlier · unseen 12 h+</div><div class="earlier">${s.earlier.map(block).join('')}</div>`
+  // Earlier sits at the bottom of the sidebar, away from what's current.
+  if (s.earlier.length) html += `<div class="earlier-sec"><div class="head" data-head="today">Earlier</div><div class="earlier">${s.earlier.map(block).join('')}</div></div>`
   threadsEl.innerHTML = html
 
   const input = document.getElementById('ren') as HTMLInputElement | null
@@ -305,6 +308,13 @@ function renderThreads() {
     } else input.select()
     input.focus()
   }
+}
+
+/** Heading for threads seen within the Earlier cutoff. */
+function recentLabel(hours: number): string {
+  if (hours <= 24) return 'Today'
+  if (hours < 168) return `Last ${Math.round(hours / 24)} days`
+  return 'This week'
 }
 
 function appSection(a: AppView<UiTab>, block: (v: ThreadView<UiTab>) => string): string {
@@ -1079,6 +1089,7 @@ function renderSettings(all = false) {
   seg('animEase', animation.ease)
   seg('summarizeAfter', String(S.prefs.summarizeAfterDays))
   seg('archiveAfter', String(S.prefs.archiveAfterDays))
+  seg('earlierAfter', String(S.prefs.earlierAfterHours))
   seg('restyleAgent', S.prefs.restyleAgent)
   seg('restyleModel', S.prefs.restyleModel)
   const codex = S.prefs.restyleAgent === 'codex'
@@ -1134,6 +1145,10 @@ $('summarizeAfter').addEventListener('click', (e) => {
 $('archiveAfter').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ archiveAfterDays: Number(b.dataset.value) })
+})
+$('earlierAfter').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b) sendPrefs({ earlierAfterHours: Number(b.dataset.value) })
 })
 $('restyleAgent').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')

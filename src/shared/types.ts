@@ -90,6 +90,8 @@ export interface Prefs {
   summarizeAfterDays: number
   /** Threads unseen this many days are archived. 0 never archives. */
   archiveAfterDays: number
+  /** Threads unseen this many hours leave the top of the sidebar for Earlier at the bottom. */
+  earlierAfterHours: number
   pinnedExtensions: string[]
   /** Claude model alias for restyling sites. */
   restyleAgent: RestyleAgent

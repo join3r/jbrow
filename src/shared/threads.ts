@@ -1,6 +1,6 @@
 import type { Folder, TabRecord } from './types'
 
-/** Threads unseen this long move to the Earlier section. */
+/** Threads unseen this long move to the Earlier section, unless settings say otherwise. */
 export const EARLIER_AFTER_MS = 12 * 60 * 60 * 1000
 
 export interface ThreadView<T extends TabRecord> {
@@ -63,7 +63,7 @@ export interface AppView<T extends TabRecord> {
   scope: string
   name: string
   threads: ThreadView<T>[]
-  /** Threads unseen 12 h+, shown dimmed at the end of the app's section. */
+  /** Threads unseen for a while, shown dimmed at the end of the app's section. */
   earlier: ThreadView<T>[]
 }
 
@@ -81,8 +81,8 @@ export interface Sections<T extends TabRecord> {
 /**
  * Threads in sidebar order. The order is stable (by creation time) so that
  * ⌘1–9 don't shift as you switch. The active thread never counts as Earlier.
- * `appNames` names app sections by scope key; main and the UI must pass the same names, as
- * they order the sections and so the ⌘ numbers.
+ * `appNames` names app sections by scope key; main and the UI must pass the same names and
+ * `earlierAfterMs`, as they order the sections and so the ⌘ numbers.
  */
 export function sections<T extends TabRecord>(
   tabs: T[],
@@ -93,6 +93,8 @@ export function sections<T extends TabRecord>(
     now: number
     folders: Folder[]
     appNames?: Record<string, string>
+    /** Threads unseen this long move to Earlier. Main and the UI must pass the same value, as it orders the ⌘ numbers. */
+    earlierAfterMs?: number
   },
 ): Sections<T> {
   const views = tabs
@@ -106,7 +108,7 @@ export function sections<T extends TabRecord>(
     })
     .sort((a, b) => a.root.createdAt - b.root.createdAt)
   const isActive = (v: ThreadView<T>) => v.all.some((t) => t.id === opts.activeId)
-  const old = (v: ThreadView<T>) => opts.now - v.lastSeen > EARLIER_AFTER_MS && !isActive(v)
+  const old = (v: ThreadView<T>) => opts.now - v.lastSeen > (opts.earlierAfterMs ?? EARLIER_AFTER_MS) && !isActive(v)
   const folderIds = new Set(opts.folders.map((f) => f.id))
   const inFolder = (v: ThreadView<T>) => !!v.root.folder && folderIds.has(v.root.folder)
   // Showing one app, its threads are the whole list; otherwise each app gets its own section.

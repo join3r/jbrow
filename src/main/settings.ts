@@ -46,6 +46,8 @@ export interface Settings {
   summarizeAfterDays: number
   /** Threads unseen this many days are archived, unless kept or caught by a folder's rules. 0 never archives. */
   archiveAfterDays: number
+  /** Threads unseen this many hours leave the top of the sidebar for Earlier at the bottom. */
+  earlierAfterHours: number
   /** Extension IDs shown as buttons in the toolbar, in this order, whenever the current profile has them. */
   pinnedExtensions: string[]
   /** Your extension shortcuts, per profile, extension ID and command: Electron accelerators, '' for none. Unlisted commands use the extension's suggestion. */
@@ -75,6 +77,7 @@ const DEFAULTS: Settings = {
   privateUrls: [],
   summarizeAfterDays: 3,
   archiveAfterDays: 7,
+  earlierAfterHours: 12,
   pinnedExtensions: [],
   extensionShortcuts: {},
   restyle: { agent: 'claude', model: 'sonnet', codexModel: '', claudePath: '', codexPath: '' },

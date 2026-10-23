@@ -22,7 +22,8 @@ import { pathToFileURL } from 'node:url'
 
 const AWAY_FOCUS_MS = 60 * 1000
 const AWAY_FRESH_MS = 4 * 60 * 60 * 1000
-const DAY_MS = 24 * 60 * 60 * 1000
+const HOUR_MS = 60 * 60 * 1000
+const DAY_MS = 24 * HOUR_MS
 const SWEEP_EVERY_MS = 10 * 60 * 1000
 
 let settings: Settings
@@ -115,6 +116,7 @@ function state(): UiState {
       hideFromScreenCapture: settings.hideFromScreenCapture,
       summarizeAfterDays: settings.summarizeAfterDays,
       archiveAfterDays: settings.archiveAfterDays,
+      earlierAfterHours: settings.earlierAfterHours,
       pinnedExtensions: settings.pinnedExtensions,
       restyleAgent: settings.restyle.agent,
       restyleModel: settings.restyle.model,
@@ -225,7 +227,7 @@ function appLabels(): Record<string, AppLabel> {
 
 function threadsInView() {
   const appNames = Object.fromEntries(Object.entries(appLabels()).map(([k, l]) => [k, l.name]))
-  return sections(tabs.records, { filter, scope: scope?.key ?? null, activeId: tabs.activeId, now: Date.now(), folders: tabs.folders, appNames })
+  return sections(tabs.records, { filter, scope: scope?.key ?? null, activeId: tabs.activeId, now: Date.now(), folders: tabs.folders, appNames, earlierAfterMs: settings.earlierAfterHours * HOUR_MS })
 }
 
 /** Unloads and archives stale threads, or files them into folders, per settings. */
@@ -489,6 +491,7 @@ function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.restyleAgent === 'claude' || prefs.restyleAgent === 'codex') settings.restyle = { ...settings.restyle, agent: prefs.restyleAgent }
   if (prefs.restyleModel) settings.restyle = { ...settings.restyle, model: prefs.restyleModel }
   if (prefs.restyleCodexModel !== undefined) settings.restyle = { ...settings.restyle, codexModel: prefs.restyleCodexModel.trim() }
+  if (prefs.earlierAfterHours !== undefined) settings.earlierAfterHours = Math.max(1, prefs.earlierAfterHours)
   if (prefs.archiveAfterDays !== undefined || prefs.summarizeAfterDays !== undefined) {
     if (prefs.archiveAfterDays !== undefined) settings.archiveAfterDays = Math.max(0, prefs.archiveAfterDays)
     if (prefs.summarizeAfterDays !== undefined) settings.summarizeAfterDays = Math.max(0, prefs.summarizeAfterDays)

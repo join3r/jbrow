@@ -159,7 +159,7 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .scope { display: flex; justify-content: space-between; align-items: center; gap: 6px; background: var(--accent-soft); color: var(--accent); border-radius: 7px; padding: 6px 9px; margin-bottom: 4px; font-size: 12px; font-weight: 600; }
 .scope button { border: 0; background: none; color: inherit; text-decoration: underline; padding: 0; font-size: 12px; }
 .head { font: 600 10.5px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 12px 8px 5px; }
-.head[data-head='kept'] { display: flex; align-items: center; justify-content: space-between; padding-top: 8px; padding-bottom: 1px; }
+.head[data-head='kept'] { display: flex; align-items: center; justify-content: space-between; padding-top: 2px; padding-bottom: 1px; }
 /* New folder shows on hover, like a row's close button. */
 .head-act { visibility: hidden; width: 22px; height: 22px; padding: 0; border: 0; background: none; color: var(--muted); border-radius: 5px; display: inline-grid; place-items: center; }
 .head-act svg.i { width: 13px; height: 13px; }
@@ -191,6 +191,7 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .frow .fav svg.i, .set-row .fav svg.i { width: 15px; height: 15px; }
 .frow .t { font-weight: 600; }
 .folder-body { display: flex; flex-direction: column; gap: 1px; padding-left: 14px; }
+.earlier-sec { margin-top: auto; display: flex; flex-direction: column; gap: 1px; }
 .earlier .row { opacity: 0.55; }
 .earlier .row:hover, .earlier .row.cur { opacity: 1; }
 /* An asleep thread's pages are unloaded; the line under its name says what it held. */
