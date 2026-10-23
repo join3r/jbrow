@@ -5,6 +5,7 @@ import path from 'node:path'
 import type { Profile } from '../shared/types'
 import { shimContentScripts } from './content-shim'
 import { trackInstalls } from './installed'
+import type { DeviceChooser } from './devices'
 import type { SitePermissions } from './permissions'
 import type { Settings } from './settings'
 
@@ -39,6 +40,7 @@ export interface ProfileDeps {
   hooks: TabHooks
   pickShareSource: (callback: (streams: Electron.Streams | null) => void) => void
   permissions: SitePermissions
+  devices: DeviceChooser
 }
 
 export async function setupProfiles(settings: Settings, deps: ProfileDeps): Promise<Map<string, ProfileRuntime>> {
@@ -48,7 +50,7 @@ export async function setupProfiles(settings: Settings, deps: ProfileDeps): Prom
 }
 
 /** Sets up one profile's session and extensions. Also used for a profile added in settings. */
-export async function setupProfile(profile: Profile, settings: Settings, { hooks, pickShareSource, permissions }: ProfileDeps): Promise<ProfileRuntime> {
+export async function setupProfile(profile: Profile, settings: Settings, { hooks, pickShareSource, permissions, devices }: ProfileDeps): Promise<ProfileRuntime> {
   const partition = partitionFor(profile.id)
   const sess = session.fromPartition(partition)
   const electronUserAgent = sess.getUserAgent()
@@ -68,6 +70,7 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
   sess.setDisplayMediaRequestHandler((_request, callback) => pickShareSource(callback))
   // Electron grants every permission unless told otherwise.
   permissions.attach(sess, profile)
+  devices.attach(sess, profile.id)
 
   // Must be registered before ElectronChromeExtensions, whose preload freezes `chrome`.
   // JBROW_NO_SHIMS=1 turns them off, to compare behavior while debugging.
@@ -77,6 +80,9 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
     sess.registerPreloadScript({ id: 'jbrow-shims-frame', type: 'frame', filePath: shims })
     trackInstalls(sess)
   }
+
+  // Two-finger swipe back and forward in tab pages; see src/preload/swipe.ts.
+  sess.registerPreloadScript({ id: 'jbrow-swipe', type: 'frame', filePath: path.join(__dirname, 'preload-swipe.js') })
 
   const extensions = new ElectronChromeExtensions({
     license: 'GPL-3.0',

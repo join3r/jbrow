@@ -3,10 +3,13 @@ import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { urlMatcher } from '../shared/patterns'
 import { flatFolders, isInFolder, numberedThreads, rootOf, sections, type FolderView } from '../shared/threads'
-import { THEMES, type AppEntry, type AppLabel, type Folder, type Prefs, type Profile, type TabRecord, type UiState } from '../shared/types'
+import { isSearchUrl, looksLikeAddress, suggestUrlFor } from '../shared/engines'
+import { THEMES, type AppEntry, type AppLabel, type Folder, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
 import { BACKGROUND } from './background'
 import { Certificates } from './certs'
+import { DangerousSites } from './dangerous'
+import { DeviceChooser } from './devices'
 import { Logins } from './logins'
 import { ExtensionCommands } from './commands'
 import { Downloads, type DownloadAction } from './downloads'
@@ -21,7 +24,9 @@ import { pickShareSource } from './screenshare'
 import { installTestExtensions, loadUnpacked, partitionFor, setupProfile, setupProfiles, type ProfileDeps, type ProfileRuntime, type TabHooks } from './profiles'
 import { Restyler } from './restyle'
 import { loadSettings, saveSettings, scopeForApp, settingsPath, type Settings } from './settings'
-import { Tabs } from './tabs'
+import { wireSwipes } from './swipe'
+import { Tabs, type UnloadKind } from './tabs'
+import { BrowsingHistory, fetchSearchSuggestions } from './visits'
 import { Zoom, ZOOM_STEPS } from './zoom'
 import { rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -44,9 +49,13 @@ let commands: ExtensionCommands
 let downloads: Downloads
 let restyler: Restyler
 let certs: Certificates
+let dangerous: DangerousSites
 let logins: Logins
+let devices: DeviceChooser
 let permissions: SitePermissions
 let profileDeps: ProfileDeps
+/** Pages you've visited, per profile, for the address bar's suggestions. */
+const visits = new BrowsingHistory()
 /** The settings screen is recording a shortcut: key presses go to it, not to jbrow or extensions. */
 let recordingShortcut = false
 
@@ -122,8 +131,12 @@ function state(): UiState {
     pinned: panel.pinned,
     restyle: active ? restyler.view(active.url) : null,
     cert: active ? certs.view(active.id, active.profile, active.url) : null,
+    insecure: !!active && isInsecure(active.url),
+    danger: active ? dangerous.view(active.id) : null,
+    dangerLists: dangerous.status(),
     login: active ? logins.view(active.id) : null,
     crash: active ? tabs.crash(active.id) : null,
+    devices: active ? devices.view(active.id) : null,
     styledSites: restyler.styledSites(),
     zoomSites: zoom.list(),
     nav: tabs.navState(),
@@ -135,6 +148,7 @@ function state(): UiState {
       animation: settings.animation,
       privateUrls: settings.privateUrls,
       hideFromScreenCapture: settings.hideFromScreenCapture,
+      dangerousSites: settings.dangerousSites,
       quietLinks: settings.quietLinks,
       summarizeAfterDays: settings.summarizeAfterDays,
       archiveAfterDays: settings.archiveAfterDays,
@@ -146,6 +160,8 @@ function state(): UiState {
       defaultProfile: settings.defaultProfile,
       miniPlayer: settings.miniPlayer,
       zoom: { defaultPercent: settings.zoom.defaultPercent, remember: settings.zoom.remember },
+      searchUrl: settings.searchUrl,
+      searchSuggestions: settings.searchSuggestions,
     },
     now: Date.now(),
   }
@@ -218,7 +234,7 @@ function closeDownloadOnlyTab(wc: Electron.WebContents) {
   if (!id || !rec?.parent) return
   const committed = wc.getURL()
   if (wc.navigationHistory.canGoBack() || (committed && committed !== 'about:blank')) return
-  setTimeout(() => closeTab(id, false), 0)
+  setTimeout(() => void closeTab(id, false, false), 0)
 }
 
 const toast = (text: string) => {
@@ -465,8 +481,8 @@ function runAction(id: ActionId) {
       return focusAddressBar()
     }
     case 'closeTab':
-      if (tabs.activeId) tabs.close(tabs.activeId)
-      if (!tabs.active()) tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
+      if (tabs.activeId) void closeTab(tabs.activeId)
+      else tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
       return
     case 'reopenTab':
       return void tabs.reopen()
@@ -480,7 +496,8 @@ function runAction(id: ActionId) {
     case 'find':
       return openFind()
     case 'reload':
-      return tabs.activeId ? tabs.reload(tabs.activeId) : undefined
+    case 'hardReload':
+      return tabs.activeId ? tabs.reload(tabs.activeId, id === 'hardReload') : undefined
     case 'print':
       return wc && tabs.active()?.url ? printPage(wc) : undefined
     case 'back':
@@ -585,6 +602,9 @@ function updatePrefs(prefs: Partial<Prefs>) {
     panel.applyContentProtection()
   }
   if (prefs.quietLinks !== undefined) settings.quietLinks = prefs.quietLinks
+  if (prefs.dangerousSites !== undefined) settings.dangerousSites = prefs.dangerousSites
+  if (prefs.searchUrl !== undefined && isSearchUrl(prefs.searchUrl.trim())) settings.searchUrl = prefs.searchUrl.trim()
+  if (prefs.searchSuggestions !== undefined) settings.searchSuggestions = prefs.searchSuggestions
   if (prefs.restyleAgent === 'claude' || prefs.restyleAgent === 'codex') settings.restyle = { ...settings.restyle, agent: prefs.restyleAgent }
   if (prefs.restyleModel) settings.restyle = { ...settings.restyle, model: prefs.restyleModel }
   if (prefs.restyleCodexModel !== undefined) settings.restyle = { ...settings.restyle, codexModel: prefs.restyleCodexModel.trim() }
@@ -685,9 +705,90 @@ async function savePageAsPdf(wc: Electron.WebContents) {
   }
 }
 
-function closeTab(id: string, remember = true) {
-  tabs.close(id, remember)
+/**
+ * Closes a tab, leaving a new one if it was the last. Its page can ask first if it has unsaved
+ * changes, unless `ask` is false: jbrow closing it on its own, or a page it warned you about.
+ */
+async function closeTab(id: string, remember = true, ask = true) {
+  if (ask) await tabs.closeAsking(id, remember)
+  else tabs.close(id, remember)
   if (!tabs.active()) tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
+}
+
+/**
+ * Chrome's question for a page with unsaved changes. It's asked while the page waits, so it's a
+ * sheet that blocks until answered. A page jbrow isn't showing can't ask: it stays where it is.
+ */
+function confirmUnload(id: string, kind: UnloadKind): boolean {
+  if (!panel.visible || panel.win.isDestroyed()) {
+    console.log(`[tabs] a page with unsaved changes stayed (${kind}) while jbrow was hidden`)
+    return false
+  }
+  if (id !== tabs.activeId) tabs.activate(id)
+  const reload = kind === 'reload'
+  dialogsOpen++
+  try {
+    const response = dialog.showMessageBoxSync(panel.win, {
+      type: 'warning',
+      message: reload ? 'Reload site?' : 'Leave site?',
+      detail: 'Changes you made may not be saved.',
+      buttons: reload ? ['Reload', 'Cancel'] : ['Leave', kind === 'close' ? 'Cancel' : 'Stay'],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    return response === 0
+  } finally {
+    dialogsOpen--
+    if (panel.visible && !panel.win.isDestroyed()) panel.win.focus()
+  }
+}
+
+// ---------- quitting ----------
+
+/** Downloads quitting would cancel: running, paused, or waiting for the network to come back. */
+const unfinishedDownloads = () => downloads.list().filter((d) => d.state === 'progressing' || d.state === 'paused' || d.state === 'interrupted').length
+
+/** The quit question is up, so another ⌘Q doesn't ask twice. */
+let askingToQuit = false
+
+/**
+ * Quitting from jbrow's own ⌘Q, the menu bar item's Quit or Restart jbrow, which asks first if
+ * that would cancel downloads. Quits from outside don't ask: Ctrl+C or `kill` in a terminal, the
+ * install script (AppleScript), macOS logging out or shutting down, a utility quitting idle apps.
+ * Nobody may be at the screen for those, and Electron can't tell them apart before it quits.
+ */
+async function requestQuit(restart = false) {
+  if (askingToQuit || !(await confirmQuit())) return
+  // Only once you've said yes: after relaunch(), any quit would start jbrow again.
+  if (restart) app.relaunch()
+  app.quit()
+}
+
+/**
+ * Asks before quitting cancels downloads. jbrow comes up first if it's hidden, so the question
+ * shows over the downloads it's about, as a sheet: an app-modal dialog would stall jbrow.
+ */
+async function confirmQuit(): Promise<boolean> {
+  const count = unfinishedDownloads()
+  if (!count) return true
+  askingToQuit = true
+  try {
+    if (!panel.visible) await summon()
+    const { response } = await whileDialog(() =>
+      dialog.showMessageBox(panel.win, {
+        type: 'warning',
+        message: 'Quit jbrow?',
+        detail: `${count === 1 ? '1 download is' : `${count} downloads are`} in progress and will be cancelled.`,
+        buttons: ['Quit', 'Cancel'],
+        defaultId: 0,
+        cancelId: 1,
+      }),
+    )
+    console.log(`[jbrow] quit with ${count} unfinished downloads: ${response === 0 ? 'quit' : 'cancelled'}`)
+    return response === 0
+  } finally {
+    askingToQuit = false
+  }
 }
 
 function threadMenu(id: string) {
@@ -716,7 +817,7 @@ function threadMenu(id: string) {
       ],
     })
   }
-  items.push({ type: 'separator' }, { label: 'Close', accelerator: id === tabs.activeId ? 'Cmd+W' : undefined, click: () => closeTab(id) })
+  items.push({ type: 'separator' }, { label: 'Close', accelerator: id === tabs.activeId ? 'Cmd+W' : undefined, click: () => void closeTab(id) })
   Menu.buildFromTemplate(items).popup({ window: panel.win })
 }
 
@@ -784,7 +885,7 @@ function certAction(action: 'proceed' | 'back' | 'distrust') {
     if (url) void wc.loadURL(url).catch(() => {})
   } else if (action === 'back') {
     if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
-    else closeTab(rec.id)
+    else void closeTab(rec.id)
   } else {
     const view = certs.view(rec.id, rec.profile, rec.url)
     if (!view) return
@@ -792,6 +893,211 @@ function certAction(action: 'proceed' | 'back' | 'distrust') {
     // An open connection would carry on without checking the certificate again.
     void wc.session.closeAllConnections().then(() => wc.reload())
   }
+}
+
+/** The warning's buttons when the active tab was stopped from opening a phishing or malware site. */
+function dangerAction(action: 'proceed' | 'back') {
+  const rec = tabs.active()
+  const wc = tabs.activeWebContents()
+  if (!rec || !wc) return
+  if (action === 'proceed') {
+    const url = dangerous.proceed(rec.id, rec.profile)
+    if (url) void wc.loadURL(url).catch(() => {})
+    return
+  }
+  // The page the tab was on usually never went away; it was under the warning. If the listed page
+  // got in before the stop, leave it rather than uncover it.
+  const committed = wc.getURL()
+  // A listed page doesn't get to keep you there with "Leave site?".
+  if (!committed || committed === 'about:blank') return void closeTab(rec.id, true, false)
+  if (dangerous.listed(rec.profile, committed)) {
+    if (!wc.navigationHistory.canGoBack()) return void closeTab(rec.id, true, false)
+    wc.navigationHistory.goBack()
+    return
+  }
+  rec.url = committed
+  dangerous.clear(rec.id)
+  focusActive()
+}
+
+/** Plain http from another machine: anyone on the way can read and change it. This Mac's own servers are fine. */
+function isInsecure(url: string) {
+  try {
+    const u = new URL(url)
+    if (u.protocol !== 'http:') return false
+    const host = u.hostname.replace(/^\[|\]$/g, '')
+    return !(host === 'localhost' || host.endsWith('.localhost') || /^127(\.\d{1,3}){3}$/.test(host) || host === '::1')
+  } catch {
+    return false
+  }
+}
+
+// ---------- clearing browsing data ----------
+
+/** What sites keep in a profile besides the cache: cookies, storage, service workers. */
+const SITE_DATA: NonNullable<Electron.ClearDataOptions['dataTypes']> = ['cookies', 'localStorage', 'indexedDB', 'serviceWorkers', 'fileSystems', 'webSQL', 'backgroundFetch']
+
+/** Extensions keep what they store, as in Chrome: Bitwarden's vault, uBlock's filters. */
+const extensionOrigins = (rt: ProfileRuntime) => rt.session.extensions.getAllExtensions().map((e) => `chrome-extension://${e.id}`)
+
+/** Clears cookies and site data, the cache or both, in one profile or all of them, after asking. */
+async function clearBrowsingData({ profile, cookies, cache, history }: { profile: string; cookies: boolean; cache: boolean; history?: boolean }) {
+  const targets = profile === 'all' ? [...runtimes.values()] : [runtimes.get(profile)].filter((rt) => !!rt)
+  if (!targets.length || (!cookies && !cache && !history)) return
+  const what = listed([history && 'history', cookies && 'cookies and site data', cache && 'cached images and files'])
+  const where = profile === 'all' ? 'every profile' : targets[0].profile.name
+  const { response } = await whileDialog(() =>
+    dialog.showMessageBox(panel.win, {
+      type: 'warning',
+      buttons: ['Clear', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+      message: `Clear ${what} in ${where}?`,
+      detail: [
+        history && "The address bar stops suggesting the pages you've visited.",
+        cookies
+          ? "You'll be signed out of most sites. Your tabs stay open, and extensions keep their data."
+          : cache && 'Sites load a little slower until the cache fills again.',
+      ]
+        .filter(Boolean)
+        .join(' '),
+    }),
+  )
+  if (response !== 0) return
+  try {
+    if (history) visits.clear(profile)
+    for (const rt of targets) {
+      if (cookies) {
+        await rt.session.clearData({ dataTypes: SITE_DATA, excludeOrigins: extensionOrigins(rt) })
+        // Usernames and passwords given to sites' sign-in forms (logins.ts).
+        await rt.session.clearAuthCache()
+      }
+      if (cache) {
+        await rt.session.clearCache()
+        await rt.session.clearCodeCaches({})
+      }
+    }
+    toast(`Cleared ${what} in ${where}.`)
+  } catch (error) {
+    console.error('[clear] browsing data:', error)
+    toast(`Couldn't clear ${what}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+/** "a", "a and b", "a, b and c". */
+function listed(items: (string | false | undefined)[]): string {
+  const xs = items.filter((x): x is string => !!x)
+  return xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`
+}
+
+/**
+ * Clears the active tab's site from its profile, after asking: cookies the site can see or set
+ * (example.com's for www.example.com, and its subdomains'), and storage of the site with and
+ * without www. Then reloads the page, which would otherwise carry on with what it holds.
+ */
+async function clearSiteData() {
+  const rec = tabs.active()
+  const wc = tabs.activeWebContents()
+  const rt = rec && runtimes.get(rec.profile)
+  if (!rec || !wc || !rt) return
+  let host = ''
+  try {
+    const u = new URL(rec.url)
+    if (/^https?:$/.test(u.protocol)) host = u.hostname
+  } catch {}
+  if (!host) return
+  const site = host.replace(/^www\./, '')
+  const { response } = await whileDialog(() =>
+    dialog.showMessageBox(panel.win, {
+      type: 'warning',
+      buttons: ['Clear', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+      message: `Clear cookies and site data for ${site}?`,
+      detail: `You'll be signed out of ${site} in ${rt.profile.name}, and the page reloads. Other sites and profiles keep theirs.`,
+    }),
+  )
+  if (response !== 0) return
+  try {
+    const related = (domain: string) => {
+      const d = domain.replace(/^\./, '')
+      return d === host || host.endsWith(`.${d}`) || d === site || d.endsWith(`.${site}`)
+    }
+    for (const c of await rt.session.cookies.get({})) {
+      if (!c.domain || !related(c.domain)) continue
+      await rt.session.cookies.remove(`http${c.secure ? 's' : ''}://${c.domain.replace(/^\./, '')}${c.path ?? '/'}`, c.name)
+    }
+    const hosts = new Set([host, site, `www.${site}`])
+    const origins = [...hosts].flatMap((h) => [`https://${h}`, `http://${h}`])
+    await rt.session.clearData({ dataTypes: SITE_DATA.filter((t) => t !== 'cookies'), origins })
+    if (!wc.isDestroyed()) wc.reload()
+    toast(`Cleared cookies and site data for ${site}.`)
+  } catch (error) {
+    console.error('[clear] site data:', error)
+    toast(`Couldn't clear ${site}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+// ---------- address bar suggestions ----------
+
+let searchTimer: NodeJS.Timeout | null = null
+let searchAbort: AbortController | null = null
+
+/**
+ * Whether what's typed may go to the search engine, which sees every keystroke: words only, never
+ * anything that looks like an address or matches a private address pattern.
+ */
+function maySendToSearch(input: string, reply: SuggestReply, profile: string): boolean {
+  const q = input.trim()
+  if (!settings.searchSuggestions || !q || q.length > 200 || looksLikeAddress(q)) return false
+  // Typing the start of a site you've been to is typing an address, not a search: "intr" on the
+  // way to a private intranet host mustn't reach the search engine either.
+  if (reply.completion) return false
+  const isPrivate = urlMatcher(settings.privateUrls)
+  if (visits.search(profile, q, 50).some((v) => isPrivate(v.url))) return false
+  return !isPrivate(q) && !isPrivate(`https://${q}`)
+}
+
+/** Stops waiting for search suggestions nobody needs any more. */
+function cancelSearchSuggestions() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = null
+  searchAbort?.abort()
+  searchAbort = null
+}
+
+/**
+ * Answers what's typed in the address bar: history and the site to complete to right away, then
+ * the search engine's suggestions once typing pauses. Each keystroke cancels the last request.
+ */
+function suggest({ input, profile, seq }: { input: string; profile?: string; seq: number }) {
+  if (panel.win.isDestroyed()) return
+  const p = profile && settings.profiles.some((x) => x.id === profile) ? profile : (tabs.active()?.profile ?? settings.defaultProfile)
+  const reply: SuggestReply = {
+    seq,
+    input,
+    visits: visits.search(p, input, 12),
+    completion: visits.completion(p, input, urlMatcher(settings.privateUrls)),
+  }
+  panel.ui.send('suggestions', reply)
+  cancelSearchSuggestions()
+  const suggestUrl = suggestUrlFor(settings.searchUrl)
+  if (!suggestUrl || !maySendToSearch(input, reply, p)) return
+  searchTimer = setTimeout(async () => {
+    searchTimer = null
+    const ctrl = (searchAbort = new AbortController())
+    const timeout = setTimeout(() => ctrl.abort(), 4000)
+    try {
+      const searches = await fetchSearchSuggestions(suggestUrl, input.trim(), ctrl.signal)
+      const answer: SearchReply = { seq, input, searches: searches.slice(0, 6) }
+      if (!ctrl.signal.aborted && !panel.win.isDestroyed()) panel.ui.send('search-suggestions', answer)
+    } catch (error) {
+      if (!ctrl.signal.aborted) console.error('[suggest] search suggestions:', error instanceof Error ? error.message : error)
+    } finally {
+      clearTimeout(timeout)
+      if (searchAbort === ctrl) searchAbort = null
+    }
+  }, 150)
 }
 
 // ---------- links from other apps ----------
@@ -980,6 +1286,7 @@ async function deleteProfile(id: string) {
   const doomed = tabs.records.filter((t) => t.profile === id)
   for (const t of doomed.reverse()) tabs.close(t.id)
   tabs.forgetProfile(id)
+  visits.clear(id)
 
   settings.profiles = settings.profiles.filter((p) => p.id !== id)
   if (settings.defaultProfile === id) settings.defaultProfile = settings.profiles[0].id
@@ -1218,7 +1525,7 @@ function wireIpc() {
     tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
     focusAddressBar()
   })
-  on<{ input: string; profile?: string }>('navigate', ({ input, profile }) => {
+  on<{ input: string; profile?: string; search?: boolean }>('navigate', ({ input, profile, search }) => {
     const cur = tabs.active()
     if (!cur) tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
     else if (profile && profile !== cur.profile && settings.profiles.some((p) => p.id === profile)) {
@@ -1227,9 +1534,12 @@ function wireIpc() {
       else cur.profile = profile
       if (filter !== 'all' && filter !== profile) filter = 'all'
     }
-    tabs.navigate(input)
+    tabs.navigate(input, search)
   })
-  on<{ id: string }>('close', ({ id }) => closeTab(id))
+  on<{ input: string; profile?: string; seq: number }>('suggest', (request) => suggest(request))
+  on('suggest-cancel', () => cancelSearchSuggestions())
+  on<{ profile?: string; url: string }>('forget-visit', ({ profile, url }) => visits.forget(profile ?? tabs.active()?.profile ?? settings.defaultProfile, url))
+  on<{ id: string }>('close', ({ id }) => void closeTab(id))
   on<{ id: string }>('thread-menu', ({ id }) => threadMenu(id))
   on('add-extension', () => void addExtensionFromFolder())
   on('open-store', () => {
@@ -1264,12 +1574,12 @@ function wireIpc() {
     if (id) switchProfile(id, profile)
   })
   on('new-tab-menu', () => newTabMenu())
-  on<{ action: 'back' | 'forward' | 'reload' | 'stop' }>('nav', ({ action }) => {
+  on<{ action: 'back' | 'forward' | 'reload' | 'stop'; hard?: boolean }>('nav', ({ action, hard }) => {
     const wc = tabs.activeWebContents()
     if (!wc) return
     if (action === 'back') wc.navigationHistory.goBack()
     else if (action === 'forward') wc.navigationHistory.goForward()
-    else if (action === 'reload') tabs.reload(tabs.activeId!)
+    else if (action === 'reload') tabs.reload(tabs.activeId!, hard)
     else wc.stop()
   })
   on<{ prompt: string }>('restyle', ({ prompt }) => {
@@ -1277,6 +1587,9 @@ function wireIpc() {
     if (wc) void restyler.restyle(wc, prompt)
   })
   on<{ action: 'proceed' | 'back' | 'distrust' }>('cert', ({ action }) => certAction(action))
+  on<{ action: 'proceed' | 'back' }>('danger', ({ action }) => dangerAction(action))
+  on('clear-site-data', () => void clearSiteData())
+  on<{ profile: string; cookies: boolean; cache: boolean; history?: boolean }>('clear-data', (options) => void clearBrowsingData(options))
   on<{ id: number; username?: string; password?: string }>('login', ({ id, username, password }) => {
     // Only the question the form showed: a newer one may have taken its place.
     const tabId = tabs.activeId
@@ -1294,6 +1607,9 @@ function wireIpc() {
     else restyler.setEnabled(host, action === 'on')
   })
   on<{ on: boolean }>('overlay', ({ on: covered }) => panel.setOverlay(covered))
+  on<{ id: number; device: string | null }>('device', ({ id, device }) => {
+    if (tabs.activeId) devices.answer(tabs.activeId, id, device)
+  })
   on('hide', () => void panel.hide())
   on('focus-ui', () => panel.ui.focus())
   on('focus-page', () => focusActive())
@@ -1388,9 +1704,9 @@ function buildTray() {
       { label: 'Open settings.json', click: () => void shell.openPath(settingsPath()) },
       { label: 'Show log file', click: () => { const f = logPath(); if (f) shell.showItemInFolder(f) } },
       { label: 'Open UI DevTools', click: () => panel.ui.openDevTools({ mode: 'detach' }) },
-      { label: 'Restart jbrow', click: () => (app.relaunch(), app.quit()) },
+      { label: 'Restart jbrow', click: () => void requestQuit(true) },
       { type: 'separator' },
-      { label: 'Quit jbrow', role: 'quit' },
+      { label: 'Quit jbrow', click: () => void requestQuit() },
     ])
   tray.on('click', () => void onHotkey())
   tray.on('right-click', () => tray?.popUpContextMenu(menu()))
@@ -1406,7 +1722,19 @@ app.whenReady().then(async () => {
   // Key equivalents for copy, paste and undo come from the app menu, even when it's never shown.
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
-      { role: 'appMenu' },
+      {
+        role: 'appMenu',
+        // The standard app menu, with a ⌘Q that asks about running downloads first.
+        submenu: [
+          { role: 'about' },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          { label: `Quit ${app.name}`, accelerator: 'Command+Q', click: () => void requestQuit() },
+        ],
+      },
       { role: 'editMenu' },
     ]),
   )
@@ -1455,11 +1783,27 @@ app.whenReady().then(async () => {
     tabs.layout()
     pushState()
   })
+  dangerous = new DangerousSites({
+    enabled: () => settings.dangerousSites,
+    onChange: () => {
+      tabs?.layout()
+      pushState()
+    },
+  })
+  dangerous.start()
   logins = new Logins((tabId) => {
     tabs.layout()
     pushState()
     // The sign-in form needs the keyboard; once it's answered, the page gets it back.
     if (tabId === tabs.activeId) focusActive()
+  })
+  devices = new DeviceChooser(permissions, {
+    tabFor: (wc) => tabs.idForWebContents(wc),
+    onChange: (tabId) => {
+      pushState()
+      // The chooser takes the keyboard while it's open; once it's answered, the page gets it back.
+      if (tabId === tabs.activeId && !devices.view(tabId)) focusActive()
+    },
   })
   tabs = new Tabs({
     window: () => panel.win,
@@ -1476,15 +1820,20 @@ app.whenReady().then(async () => {
     searchUrl: () => settings.searchUrl,
     permissions,
     certs,
+    dangerous,
     logins,
+    devices,
     onNavigate: (wc) => {
       restyler.onNavigate(wc)
       zoom.apply(wc)
     },
+    onVisit: (profile, url) => visits.record(profile, url, ''),
+    onTitle: (profile, url, title) => visits.setTitle(profile, url, title),
     print: (wc) => printPage(wc),
     saveAsPdf: (wc) => void savePageAsPdf(wc),
     download: (wc, url) => downloads.start(wc, url),
     onFullscreen: (on, url) => panel.setPageFullscreen(on, siteName(url)),
+    confirmUnload,
     profiles: () => settings.profiles,
     openInProfile: (fromId, profile, url) => {
       const from = tabs.get(fromId)
@@ -1502,7 +1851,8 @@ app.whenReady().then(async () => {
   })
 
   wireIpc()
-  profileDeps = { hooks: tabHooks, pickShareSource: (callback) => void pickShareSource(panel.win, callback), permissions }
+  wireSwipes(panel.win, (wc) => (tabs.idForWebContents(wc) ? wc : null), () => tabs.activeWebContents())
+  profileDeps = { hooks: tabHooks, pickShareSource: (callback) => void pickShareSource(panel.win, callback), permissions, devices }
   runtimes = await setupProfiles(settings, profileDeps)
   for (const rt of runtimes.values()) attachProfile(rt)
 
@@ -1514,6 +1864,7 @@ app.whenReady().then(async () => {
   commands.watch()
 
   tabs.load()
+  visits.load()
   // Threads opened from one app carry the name it had in front.
   for (const t of tabs.records) if (t.scope && !t.scope.includes('+') && t.scopeName) apps.note(t.scope, t.scopeName)
   // settings.json may have been edited by hand since: put threads where the links now say.
@@ -1557,6 +1908,7 @@ app.whenReady().then(async () => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
   tabs?.flush()
+  visits.flush()
 })
 // jbrow has no windows to close; it quits only from the menu bar item.
 app.on('window-all-closed', () => {})

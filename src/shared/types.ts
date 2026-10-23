@@ -73,10 +73,18 @@ export interface UiState {
   restyle: RestyleView | null
   /** The active tab's certificate. Null for pages not loaded over https. */
   cert: CertView | null
+  /** The active tab's page came over plain http, from somewhere other than this Mac. */
+  insecure: boolean
+  /** A phishing or malware site the active tab was stopped from opening. */
+  danger: DangerView | null
+  /** The phishing and malware lists: how many hosts, and when they were last downloaded. */
+  dangerLists: { hosts: number; updated: number | null }
   /** A site asking the active tab for a username and password. */
   login: LoginView | null
   /** The active tab's page crashed or stopped responding. */
   crash: CrashView | null
+  /** The active tab's page asked for a USB, HID, serial or Bluetooth device. */
+  devices: DeviceChooserView | null
   /** Every site with a restyle, for the settings screen. */
   styledSites: StyledSite[]
   /** Sites with a zoom of their own, in percent. */
@@ -113,6 +121,8 @@ export interface Prefs {
   /** Addresses matching one of these show as "Private" until clicked. `*` matches anything. */
   privateUrls: string[]
   hideFromScreenCapture: boolean
+  /** Warn before opening sites on the phishing and malware lists. */
+  dangerousSites: boolean
   /** Links from other apps you didn't click open in the background. */
   quietLinks: boolean
   /** Threads unseen this many days unload their pages and show as one line. 0 never does. */
@@ -131,6 +141,37 @@ export interface Prefs {
   miniPlayer: MiniPlayerPrefs
   /** Page zoom for sites you haven't zoomed, in percent, and whether each site's zoom is kept across restarts. */
   zoom: { defaultPercent: number; remember: boolean }
+  /** The search engine's address, %s where the query goes. */
+  searchUrl: string
+  /** Ask the search engine for suggestions while you type in the address bar. */
+  searchSuggestions: boolean
+}
+
+/** A page from the browsing history, as the address bar suggests it. */
+export interface VisitView {
+  url: string
+  title: string
+}
+
+/** The site the address bar completes what's typed to: `text` as it shows, `url` where it goes. */
+export interface CompletionView {
+  text: string
+  url: string
+}
+
+/** The address bar's suggestions for what's typed, from main. `seq` matches the request. */
+export interface SuggestReply {
+  seq: number
+  input: string
+  visits: VisitView[]
+  completion: CompletionView | null
+}
+
+/** Search suggestions, which arrive after the rest. */
+export interface SearchReply {
+  seq: number
+  input: string
+  searches: string[]
 }
 
 /** When a playing video moves into the picture-in-picture window. */
@@ -160,12 +201,42 @@ export interface LoginView {
   retry: boolean
 }
 
+export type DeviceKind = 'usb' | 'hid' | 'serial' | 'bluetooth'
+
+/** A site asking to connect to a device, with the devices it can pick from. */
+export interface DeviceChooserView {
+  /** Changes with each request. */
+  id: number
+  kind: DeviceKind
+  /** The site that asked, which may be a frame inside the page. */
+  host: string
+  /** The page's own site, when a frame from another site asked. */
+  embedder?: string
+  devices: DeviceChoice[]
+}
+
+export interface DeviceChoice {
+  id: string
+  name: string
+  /** Vendor and product IDs, or the port: what tells two of a kind apart. May be ''. */
+  detail: string
+}
+
 /** A page whose renderer is gone or stuck. */
 export interface CrashView {
   /** Electron's render-process-gone reason, e.g. `crashed`, `oom`, `killed`. '' when it's only stuck. */
   reason: string
   /** The page stopped responding but is still there; it may recover. */
   hung: boolean
+}
+
+export type DangerKind = 'phishing' | 'malware'
+
+/** A site on the phishing or malware lists that a tab was stopped from opening. */
+export interface DangerView {
+  url: string
+  host: string
+  kind: DangerKind
 }
 
 /** A site's certificate and what's wrong with it, if anything. */

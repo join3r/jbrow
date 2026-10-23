@@ -35,6 +35,16 @@
                 <div class="pop-sep"></div>
                 <button id="certDistrust" class="pop-item"><span data-icon="lock"></span>Stop trusting this certificate</button>
               </div>
+              <div class="pop-sep"></div>
+              <button id="clearSite" class="pop-item"><span data-icon="trash"></span>Clear cookies and site data</button>
+            </div>
+            <div id="devicePop" class="pop device-pop" hidden role="dialog" aria-labelledby="deviceHead">
+              <div class="device-head">
+                <span id="deviceHead"></span>
+                <button id="deviceCancel" class="icon sm" data-icon="close" title="Cancel (Esc)" aria-label="Cancel"></button>
+              </div>
+              <div id="deviceList" class="device-list" role="listbox" aria-labelledby="deviceHead"></div>
+              <p id="deviceHelp" class="pop-help" hidden></p>
             </div>
             <div class="omni-field">
               <input id="omnibox" autocomplete="off" spellcheck="false" aria-label="Address bar" placeholder="Search or type a tab name" />
@@ -147,6 +157,19 @@
             <div id="certWarnChain"></div>
           </details>
         </section>
+        <section id="dangerWarn" class="cert-warn" hidden aria-live="polite">
+          <span class="cert-warn-icon" data-icon="warn"></span>
+          <h1 id="dangerTitle"></h1>
+          <p id="dangerText"></p>
+          <div class="cert-acts">
+            <button id="dangerBack" class="btn primary"></button>
+          </div>
+          <details id="dangerDetails">
+            <summary>Details</summary>
+            <p id="dangerMore"></p>
+            <button id="dangerProceed" class="btn"></button>
+          </details>
+        </section>
         <section id="loginWarn" class="cert-warn login-warn" hidden aria-live="polite">
           <span class="cert-warn-icon" data-icon="lock"></span>
           <h1>Sign in</h1>
@@ -206,6 +229,23 @@
                     click another app. Turn it off and jbrow only shows on <b id="showHotkey">its hotkey</b>, then hides
                     when you click away. The pin in the toolbar switches it too.</span>
                 </label>
+              </div>
+              <div class="set-item" data-keywords="search engine google duckduckgo bing brave kagi ecosia custom address bar omnibox suggestions autocomplete queries">
+                <h3>Search</h3>
+                <div class="field">
+                  <span class="label">Engine</span>
+                  <div id="searchEngine" class="seg seg-wrap" role="group" aria-label="Search engine"></div>
+                </div>
+                <div id="searchCustomField" class="field" hidden>
+                  <label class="label" for="searchCustom">Address</label>
+                  <input id="searchCustom" class="text" spellcheck="false" placeholder="https://example.com/search?q=%s" />
+                </div>
+                <label class="check">
+                  <input id="searchSuggestions" type="checkbox" />
+                  <span>Suggest searches as you type. What you type in the address bar goes to <b id="searchEngineName">the search
+                    engine</b> as you type it, except anything that looks like an address or matches a private address.</span>
+                </label>
+                <p id="searchHelp" class="help"></p>
               </div>
               <div class="set-item" data-keywords="default browser links other apps">
                 <h3>Default browser</h3>
@@ -464,6 +504,36 @@
                   site under corp.example.
                 </p>
                 <textarea id="privateUrls" rows="5" spellcheck="false" placeholder="*.corp.example&#10;grafana.internal"></textarea>
+              </div>
+              <div class="set-item" data-keywords="dangerous sites phishing malware safe browsing deceptive warning blocklist">
+                <h3>Dangerous sites</h3>
+                <label class="check">
+                  <input id="dangerousSites" type="checkbox" />
+                  <span>Warn before opening a site known for phishing or malware. jbrow checks addresses against lists it
+                    downloads every 12 hours, so the sites you visit never leave your Mac.</span>
+                </label>
+                <p id="dangerLists" class="help"></p>
+              </div>
+              <div class="set-item" data-keywords="clear browsing data history visited pages suggestions cookies cache site data delete sign out storage">
+                <h3>Browsing data</h3>
+                <div class="field">
+                  <span class="label">From</span>
+                  <div id="clearProfile" class="seg" role="group" aria-label="Profile to clear"></div>
+                </div>
+                <label class="check">
+                  <input id="clearHistory" type="checkbox" checked />
+                  <span>History. The pages the address bar suggests; to remove one, highlight it there and press ⇧Delete.</span>
+                </label>
+                <label class="check">
+                  <input id="clearCookies" type="checkbox" checked />
+                  <span>Cookies and site data. Signs you out of most sites; extensions keep their data.</span>
+                </label>
+                <label class="check">
+                  <input id="clearCache" type="checkbox" checked />
+                  <span>Cached images and files.</span>
+                </label>
+                <button id="clearData" class="chip">Clear data…</button>
+                <p class="help">To clear one site, click the lock or warning icon next to the address bar.</p>
               </div>
               <div class="set-item" data-keywords="screen sharing screenshots capture recording hide">
                 <h3>Screen sharing</h3>

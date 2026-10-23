@@ -1,8 +1,9 @@
 import { cssEase } from '../shared/ease'
+import { engineOf, isSearchUrl, SEARCH_ENGINES, suggestUrlFor } from '../shared/engines'
 import { urlMatcher } from '../shared/patterns'
 import { childrenOf, displayName, folderThreads, isAsleep, numberedThreads, sections, type AppView, type FolderView, type ThreadView } from '../shared/threads'
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
-import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type DownloadInfo, type ExtensionShortcut, type Prefs, type Profile, type UiState, type UiTab } from '../shared/types'
+import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type VisitView } from '../shared/types'
 
 declare global {
   interface Window {
@@ -46,6 +47,7 @@ const ICONS: Record<string, string> = {
   lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
   warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
   search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
   archive: '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
   grid: '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
@@ -59,6 +61,8 @@ const ICONS: Record<string, string> = {
   keyboard: '<path d="M10 8h.01M12 12h.01M14 8h.01M16 12h.01M18 8h.01M6 8h.01M7 16h10M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/>',
   up: '<path d="m18 15-6-6-6 6"/>',
   down: '<path d="m6 9 6 6 6-6"/>',
+  usb: '<circle cx="10" cy="7" r="1"/><circle cx="4" cy="20" r="1"/><path d="M4.7 19.3 19 5"/><path d="m21 3-3 1 2 2Z"/><path d="M9.26 7.68 5 12l2 5"/><path d="m10 14 5 2 3.5-3.5"/><path d="m18 12 1-1 1 1-1 1Z"/>',
+  bluetooth: '<path d="m7 7 10 10-5 5V2l5 5L7 17"/>',
 }
 const icon = (name: string) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`
 document.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => (el.innerHTML = icon(el.dataset.icon!)))
@@ -78,6 +82,7 @@ const privateMask = $('privateMask')
 const rulesPop = $('rulesPop')
 const folderRules = $<HTMLTextAreaElement>('folderRules')
 const certPop = $('certPop')
+const devicePop = $('devicePop')
 const send = window.jbrow.send
 
 let S: UiState | null = null
@@ -97,14 +102,23 @@ let settingsTab = false
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const profile = (id: string): Profile | undefined => S?.profiles.find((p) => p.id === id)
 const activeTab = () => S?.tabs.find((t) => t.id === S!.activeId)
-/** The active tab's address, or the one a bad certificate stopped it from loading. */
-const activeUrl = () => (S?.cert?.blocked ? S.cert.url : (activeTab()?.url ?? ''))
-/** jbrow shows its own screen where the active tab's page would be: certificate, sign-in or crash. */
-const pageCovered = () => !!(S?.cert?.blocked || S?.login || S?.crash)
+/** The active tab's address, or the one a bad certificate or the dangerous-site lists stopped it from loading. */
+const activeUrl = () => (S?.cert?.blocked ? S.cert.url : S?.danger ? S.danger.url : (activeTab()?.url ?? ''))
+/** jbrow shows its own screen where the active tab's page would be: certificate, dangerous site, sign-in or crash. */
+const pageCovered = () => !!(S?.cert?.blocked || S?.danger || S?.login || S?.crash)
 /** The address as it may be shown on screen. */
 const shownUrl = (url: string) => (isPrivate(url) ? 'Private' : url)
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
+/** "just now", "5 minutes ago", "3 hours ago", "2 days ago". */
+function since(ms: number): string {
+  const ago = Date.now() - ms
+  const unit = (n: number, what: string) => `${n} ${what}${n === 1 ? '' : 's'} ago`
+  if (ago < 60 * 1000) return 'just now'
+  if (ago < HOUR_MS) return unit(Math.floor(ago / 60000), 'minute')
+  if (ago < DAY_MS) return unit(Math.floor(ago / HOUR_MS), 'hour')
+  return unit(Math.floor(ago / DAY_MS), 'day')
+}
 /** A command's key as a menu writes it, '' when it has none. */
 const keyLabel = (id: ActionId) => (S?.keys[id] ? shortcutLabel(S.keys[id]) : '')
 /** " (⌘T)" for a tooltip. */
@@ -156,7 +170,7 @@ function render() {
     reload.innerHTML = icon(reloadIcon)
     reload.setAttribute('aria-label', S.nav.loading ? 'Stop' : 'Reload')
   }
-  reload.title = S.nav.loading ? 'Stop' : `Reload${keyHint('reload')}`
+  reload.title = S.nav.loading ? 'Stop' : `Reload${keyHint('reload')}, ⇧-click without the cache${keyHint('hardReload')}`
   $('back').title = `Back${keyHint('back')}`
   $('forward').title = `Forward${keyHint('forward')}`
   $('settingsButton').title = `Settings${keyHint('settings')}`
@@ -174,8 +188,10 @@ function render() {
   renderPinnedActions()
   renderRestyle()
   renderCert()
+  renderDanger()
   renderLogin()
   renderCrash()
+  renderDevices()
 
   const scope = $('scope')
   scope.hidden = !S.scope
@@ -403,21 +419,53 @@ function row(t: UiTab, depth: number, thread: ThreadView<UiTab> | null, number?:
 // ---------- suggestions ----------
 
 interface Suggestion {
-  kind: 'tab' | 'archived' | 'go'
+  kind: 'tab' | 'archived' | 'go' | 'visit' | 'search'
   id?: string
+  /** Where a history row, or the site the address bar completed to, goes. */
+  url?: string
   title: string
   sub: string
   tag: string
   favicon?: string
+  /** Shown instead of a favicon. */
+  icon?: string
 }
 
-function suggestions(query: string): Suggestion[] {
+/** What was typed in the address bar, without the completion added after it. */
+let typed = ''
+/** The site the address bar completed `typed` to, its rest selected after the caret. */
+let completed: CompletionView | null = null
+/** The last key typed at the end of the text, so a completion may follow. Deleting never completes. */
+let mayComplete = false
+/** Bumped with each request to main, so answers for older text are dropped. */
+let suggestSeq = 0
+/** Main's answers: history pages for `typed`, and the search engine's suggestions for recent text. */
+let visitHits: VisitView[] = []
+let searchHits: SearchReply | null = null
+/** The highlight was moved with the arrows, so ⇧Delete means that row, not the text. */
+let arrowed = false
+
+/** The profile what's typed opens in, whose history the suggestions come from. */
+const typedIn = () => typedProfile ?? activeTab()?.profile
+/** The completion, while it's still there as the address bar added it. Accepting it with → keeps it. */
+const completion = () => (completed && omnibox.value.toLowerCase() === completed.text.toLowerCase() ? completed : null)
+/** For telling the same page apart from another: no #fragment or trailing slash. */
+const samePage = (url: string) => url.replace(/#.*$/, '').replace(/\/$/, '')
+const tabMatches = (t: TabRecord, q: string) =>
+  `${displayName(t)} ${t.title} ${t.url}`.toLowerCase().includes(q)
+
+function requestSuggestions() {
+  send('suggest', { input: typed, profile: typedIn(), seq: ++suggestSeq })
+}
+
+function suggestions(): Suggestion[] {
   if (!S) return []
-  const q = query.trim().toLowerCase()
+  const q = typed.trim().toLowerCase()
+  const comp = completion()
   const tabs = [...S.tabs]
-    .filter((t) => t.url && (!q || `${displayName(t)} ${t.title} ${t.url}`.toLowerCase().includes(q)))
+    .filter((t) => t.url && (!q || tabMatches(t, q)))
     .sort((a, b) => b.lastSeen - a.lastSeen)
-    .slice(0, q ? 6 : 8)
+    .slice(0, q ? 5 : 8)
     .map<Suggestion>((t) => ({
       kind: 'tab',
       id: t.id,
@@ -427,33 +475,75 @@ function suggestions(query: string): Suggestion[] {
       favicon: t.favicon,
     }))
   // Archived threads only turn up when searched for.
-  const archived = !q
+  const archivedTabs = !q ? [] : S.archived.filter((t) => t.url && tabMatches(t, q)).sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0))
+  const archived = archivedTabs
+    .slice(0, 3)
+    .map<Suggestion>((t) => ({ kind: 'archived', id: t.id, title: displayName(t), sub: shownUrl(t.url), tag: 'archived', favicon: t.favicon }))
+  // History leaves out pages already open or archived: their own rows bring them back as they were.
+  const seen = new Set([...S.tabs, ...archivedTabs].map((t) => samePage(t.url)))
+  if (comp) seen.add(samePage(comp.url))
+  const visits = !q
     ? []
-    : S.archived
-        .filter((t) => t.url && `${displayName(t)} ${t.title} ${t.url}`.toLowerCase().includes(q))
-        .sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0))
-        .slice(0, 4)
-        .map<Suggestion>((t) => ({ kind: 'archived', id: t.id, title: displayName(t), sub: shownUrl(t.url), tag: 'archived', favicon: t.favicon }))
-  const go: Suggestion[] = q ? [{ kind: 'go', title: looksLikeUrl(q) ? `Go to ${query.trim()}` : `Search for "${query.trim()}"`, sub: '', tag: 'web' }] : []
-  // A typed address goes first; a typed word goes after matching tabs.
-  return looksLikeUrl(q) ? [...go, ...tabs, ...archived] : [...tabs, ...archived, ...go]
+    : visitHits
+        .filter((v) => !seen.has(samePage(v.url)) && !!seen.add(samePage(v.url)))
+        .slice(0, 5)
+        .map<Suggestion>((v) => ({
+          kind: 'visit',
+          url: v.url,
+          title: v.title || (isPrivate(v.url) ? 'Private' : v.url.replace(/^https?:\/\/(www\.)?/, '')),
+          sub: shownUrl(v.url),
+          tag: 'history',
+          icon: 'clock',
+        }))
+  // Older search suggestions stay while you type on, as long as they still fit what's typed.
+  const sh = searchHits
+  const exact = !!sh && sh.input.trim().toLowerCase() === q
+  const searches =
+    !q || !sh || !S.prefs.searchSuggestions || !q.startsWith(sh.input.trim().toLowerCase())
+      ? []
+      : sh.searches
+          .filter((s) => s.toLowerCase() !== q && (exact || s.toLowerCase().startsWith(q)))
+          .slice(0, 4)
+          .map<Suggestion>((s) => ({ kind: 'search', title: s, sub: '', tag: 'search', icon: 'search' }))
+  const text = typed.trim()
+  const go: Suggestion[] = comp
+    ? [{ kind: 'go', url: comp.url, title: `Go to ${comp.text}`, sub: comp.url, tag: 'web' }]
+    : q
+      ? [{ kind: 'go', title: looksLikeUrl(q) ? `Go to ${text}` : `Search for "${text}"`, sub: '', tag: 'web' }]
+      : []
+  // A typed or completed address goes first; a typed word goes after matching tabs and history.
+  return comp || looksLikeUrl(q) ? [...go, ...tabs, ...visits, ...archived, ...searches] : [...tabs, ...visits, ...archived, ...go, ...searches]
 }
 
 const looksLikeUrl = (q: string) => /^[a-z][a-z0-9+.-]*:\/\//i.test(q) || (/^[\w-]+(\.[\w-]+)+(:\d+)?(\/\S*)?$/i.test(q) && !q.includes(' '))
 
+/** Identifies a row across re-renders, so the highlight stays on it when answers arrive. */
+const rowKey = (s: Suggestion | undefined) => (s ? `${s.kind}:${s.id ?? s.url ?? s.title}` : '')
+
 let current: Suggestion[] = []
-function showSuggestions() {
-  current = suggestions(omnibox.value)
-  highlighted = 0
+/** `keep` holds the highlight on the row the arrows picked, for answers that arrive later. */
+function showSuggestions(keep = false) {
+  const was = keep && arrowed ? rowKey(current[highlighted]) : ''
+  current = suggestions()
+  const at = was ? current.findIndex((s) => rowKey(s) === was) : -1
+  if (at >= 0) highlighted = at
+  else {
+    highlighted = 0
+    arrowed = false
+  }
   if (!current.length) return hideSuggestions()
   suggest.innerHTML =
     current
-      .map(
-        (s, i) => `<button class="sg ${i === highlighted ? 'hi' : ''}" data-sg="${i}">
-        ${s.favicon ? `<img src="${esc(s.favicon)}" alt="">` : '<span class="fav"></span>'}
-        <span class="sg-t">${esc(s.title)}</span><span class="sg-s">${esc(s.sub)}</span><span class="sg-tag">${esc(s.tag)}</span>
-      </button>`,
-      )
+      .map((s, i) => {
+        const fav = s.favicon ? `<img src="${esc(s.favicon)}" alt="">` : `<span class="fav">${s.icon ? icon(s.icon) : ''}</span>`
+        const forget =
+          s.kind === 'visit'
+            ? `<span class="sg-x" role="button" data-forget="${i}" title="Remove from history (⇧Delete)" aria-label="Remove from history">${icon('close')}</span>`
+            : ''
+        return `<button class="sg ${i === highlighted ? 'hi' : ''} sg-${s.kind}" data-sg="${i}">
+        ${fav}<span class="sg-t">${esc(s.title)}</span>${s.sub ? `<span class="sg-s">${esc(s.sub)}</span>` : ''}<span class="sg-tag">${esc(s.tag)}</span>${forget}
+      </button>`
+      })
       .join('')
   suggest.hidden = false
   syncOverlay()
@@ -463,10 +553,40 @@ function hideSuggestions() {
   syncOverlay()
 }
 
+/**
+ * Completes what's typed to the site main found, Chrome's inline autocompletion: "git" becomes
+ * "github.com" with "hub.com" selected, so typing on replaces it and Backspace removes it. Not
+ * while an open tab matches, so Return still goes to the tab you're typing the name of.
+ */
+function applyCompletion(c: CompletionView | null) {
+  const q = typed.trim().toLowerCase()
+  const tabHit = !!S?.tabs.some((t) => t.url && tabMatches(t, q))
+  const fits = !!c && !tabHit && c.text.toLowerCase().startsWith(typed.toLowerCase()) && c.text.length > typed.length
+  completed = fits ? c : null
+  const value = fits ? typed + c!.text.slice(typed.length) : typed
+  if (omnibox.value !== value) omnibox.value = value
+  if (fits) omnibox.setSelectionRange(typed.length, value.length)
+}
+
+/** ⇧Delete on a history row, or its ×: the page leaves the history and the suggestions. */
+function forgetVisit(s: Suggestion | undefined) {
+  if (s?.kind !== 'visit' || !s.url) return
+  send('forget-visit', { profile: typedIn(), url: s.url })
+  visitHits = visitHits.filter((v) => v.url !== s.url)
+  const at = highlighted
+  showSuggestions()
+  // The highlight stays where it was, on the row that moved up.
+  if (current.length && at > 0) {
+    highlighted = Math.min(at, current.length - 1)
+    arrowed = true
+    suggest.querySelectorAll('.sg').forEach((el, i) => el.classList.toggle('hi', i === highlighted))
+  }
+}
+
 /** The page hides while anything of jbrow's own covers it; see Panel.setOverlay. */
 let overlaySent = false
 function syncOverlay() {
-  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !certPop.hidden || !settingsEl.hidden
+  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !certPop.hidden || !devicePop.hidden || !settingsEl.hidden
   if (on !== overlaySent) {
     overlaySent = on
     send('overlay', { on })
@@ -480,17 +600,21 @@ function syncCovering() {
 }
 function moveHighlight(delta: number) {
   if (!current.length) return
+  arrowed = true
   highlighted = (highlighted + delta + current.length) % current.length
   suggest.querySelectorAll('.sg').forEach((el, i) => el.classList.toggle('hi', i === highlighted))
 }
 function pick(s: Suggestion | undefined) {
   const text = omnibox.value
+  const opensIn = typedProfile ?? undefined
   hideSuggestions()
   omnibox.blur()
   if (s || text.trim()) showSettings(false)
   if (s?.kind === 'tab' && s.id) send('activate', { id: s.id })
   else if (s?.kind === 'archived' && s.id) send('restore', { id: s.id })
-  else if (text.trim()) send('navigate', { input: text, profile: typedProfile ?? undefined })
+  else if (s?.url) send('navigate', { input: s.url, profile: opensIn })
+  else if (s?.kind === 'search') send('navigate', { input: s.title, profile: opensIn, search: true })
+  else if (text.trim()) send('navigate', { input: text, profile: opensIn })
 }
 
 omnibox.addEventListener('focus', () => {
@@ -501,10 +625,27 @@ omnibox.addEventListener('focus', () => {
   typedProfile = null
   renderProfileBand()
   omnibox.select()
+  typed = omnibox.value
+  completed = null
+  mayComplete = false
+  visitHits = []
+  searchHits = null
+  requestSuggestions()
   showSuggestions()
 })
-omnibox.addEventListener('input', showSuggestions)
+omnibox.addEventListener('input', (e) => {
+  const ie = e as InputEvent
+  typed = omnibox.value
+  completed = null
+  // Only typing at the end completes. Pasting doesn't, and deleting doesn't, or Backspace could
+  // never take a completion away.
+  mayComplete = ie.inputType === 'insertText' && !ie.isComposing && omnibox.selectionEnd === typed.length
+  requestSuggestions()
+  showSuggestions()
+})
 omnibox.addEventListener('blur', () => {
+  send('suggest-cancel')
+  completed = null
   hideSuggestions()
   showAddress()
   if (typedProfile) {
@@ -517,16 +658,27 @@ omnibox.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowUp') (e.preventDefault(), moveHighlight(-1))
   else if (e.key === 'Enter') {
     e.preventDefault()
-    // With no suggestion chosen by the arrows, Enter on a typed address or query navigates.
+    // With no suggestion chosen by the arrows, Enter takes the first: a completed or typed
+    // address, a matching tab, or the search.
     pick(current[highlighted])
   } else if (e.key === 'Escape') omnibox.blur()
-  else if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey && (S?.profiles.length ?? 0) > 1) {
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && e.shiftKey && arrowed && current[highlighted]?.kind === 'visit') {
+    e.preventDefault()
+    forgetVisit(current[highlighted])
+  } else if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey && (S?.profiles.length ?? 0) > 1) {
     e.preventDefault()
     cycleTypedProfile(e.shiftKey ? -1 : 1)
+    // The other profile has its own history, so the suggestions and any completion change too.
+    if (typed) {
+      mayComplete ||= !!completion()
+      requestSuggestions()
+    }
   }
 })
 suggest.addEventListener('mousedown', (e) => e.preventDefault())
 suggest.addEventListener('click', (e) => {
+  const x = (e.target as HTMLElement).closest<HTMLElement>('[data-forget]')
+  if (x) return forgetVisit(current[Number(x.dataset.forget)])
   const el = (e.target as HTMLElement).closest<HTMLElement>('[data-sg]')
   if (el) pick(current[Number(el.dataset.sg)])
 })
@@ -706,7 +858,8 @@ $('newTab').addEventListener('contextmenu', (e) => {
 })
 $('back').addEventListener('click', () => send('nav', { action: 'back' }))
 $('forward').addEventListener('click', () => send('nav', { action: 'forward' }))
-$('reload').addEventListener('click', () => send('nav', { action: S?.nav.loading ? 'stop' : 'reload' }))
+// ⇧-click reloads past the cache, as in Chrome.
+$('reload').addEventListener('click', (e) => send('nav', S?.nav.loading ? { action: 'stop' } : { action: 'reload', hard: e.shiftKey }))
 $('pin').addEventListener('click', () => send('pin'))
 $('newTab').addEventListener('click', () => send('new'))
 
@@ -975,6 +1128,9 @@ const pinWindow = $<HTMLInputElement>('pinWindow')
 const pipOnlySites = $<HTMLTextAreaElement>('pipOnlySites')
 const pipExceptSites = $<HTMLTextAreaElement>('pipExceptSites')
 const quietLinks = $<HTMLInputElement>('quietLinks')
+const dangerousSites = $<HTMLInputElement>('dangerousSites')
+/** The profile Clear data… clears, or 'all'. */
+let clearFrom = 'all'
 const settingsSearch = $<HTMLInputElement>('settingsSearch')
 const shortcutSearch = $<HTMLInputElement>('shortcutSearch')
 const SECTION_NAMES: Record<string, string> = {
@@ -1137,6 +1293,19 @@ function renderSettings(all = false) {
   for (const id of ['animSpeed', 'animEase', 'animPreview']) $(id).closest('.field')!.classList.toggle('off', animation.style === 'off')
   if (all || document.activeElement !== privateUrls) privateUrls.value = S.prefs.privateUrls.join('\n')
   hideCapture.checked = hideFromScreenCapture
+  dangerousSites.checked = S.prefs.dangerousSites
+  const lists = S.dangerLists
+  $('dangerLists').textContent = lists.updated
+    ? `${lists.hosts.toLocaleString()} sites on the lists, updated ${since(lists.updated)}. From malware-filter, built from OpenPhish, PhishTank and URLhaus.`
+    : "The lists haven't downloaded yet. jbrow tries again every hour."
+  if (clearFrom !== 'all' && !profile(clearFrom)) clearFrom = 'all'
+  const clearSeg = [{ id: 'all', name: 'All profiles', color: '' }, ...S.profiles]
+    .map((x) => {
+      const dot = x.color ? `<span class="dot" style="background:${esc(x.color)}"></span>` : ''
+      return `<button data-value="${esc(x.id)}" aria-pressed="${x.id === clearFrom}">${dot}${esc(x.name)}</button>`
+    })
+    .join('')
+  if ($('clearProfile').innerHTML !== clearSeg) $('clearProfile').innerHTML = clearSeg
   const mp = S.prefs.miniPlayer
   $<HTMLInputElement>('pipOnHide').checked = mp.onHide
   $<HTMLInputElement>('pipOnTabSwitch').checked = mp.onTabSwitch
@@ -1149,6 +1318,7 @@ function renderSettings(all = false) {
   if (all || document.activeElement !== pipExceptSites) pipExceptSites.value = mp.exceptSites.join('\n')
   pinWindow.checked = S.pinned
   quietLinks.checked = S.prefs.quietLinks
+  renderSearchEngine(all)
   $('showHotkey').textContent = keyLabel('show') || 'its hotkey'
   $('appHotkey').textContent = keyLabel('showApp') || 'The app hotkey'
   renderActionKeys()
@@ -1293,6 +1463,68 @@ zoomSitesEl.addEventListener('click', (e) => {
 hideCapture.addEventListener('change', () => sendPrefs({ hideFromScreenCapture: hideCapture.checked }))
 pinWindow.addEventListener('change', () => send('pin', { on: pinWindow.checked }))
 quietLinks.addEventListener('change', () => sendPrefs({ quietLinks: quietLinks.checked }))
+dangerousSites.addEventListener('change', () => sendPrefs({ dangerousSites: dangerousSites.checked }))
+$('clearProfile').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (!b) return
+  clearFrom = b.dataset.value!
+  renderSettings()
+})
+const clearHistory = $<HTMLInputElement>('clearHistory')
+const clearCookies = $<HTMLInputElement>('clearCookies')
+const clearCache = $<HTMLInputElement>('clearCache')
+const syncClearButton = () => ($<HTMLButtonElement>('clearData').disabled = !clearHistory.checked && !clearCookies.checked && !clearCache.checked)
+clearHistory.addEventListener('change', syncClearButton)
+clearCookies.addEventListener('change', syncClearButton)
+clearCache.addEventListener('change', syncClearButton)
+$('clearData').addEventListener('click', () =>
+  send('clear-data', { profile: clearFrom, history: clearHistory.checked, cookies: clearCookies.checked, cache: clearCache.checked }),
+)
+
+// ---------- search engine ----------
+
+const searchCustom = $<HTMLInputElement>('searchCustom')
+const searchSuggestionsBox = $<HTMLInputElement>('searchSuggestions')
+/** Custom was picked but no address saved yet, so the field shows even though the engine is still a listed one. */
+let searchCustomOpen = false
+
+function renderSearchEngine(all: boolean) {
+  if (!S) return
+  const url = S.prefs.searchUrl
+  const engine = engineOf(url)
+  const custom = !engine || searchCustomOpen
+  const seg = [...SEARCH_ENGINES.map((e) => ({ id: e.id, name: e.name })), { id: 'custom', name: 'Custom' }]
+    .map((e) => `<button data-value="${e.id}" aria-pressed="${custom ? e.id === 'custom' : e.id === engine?.id}">${esc(e.name)}</button>`)
+    .join('')
+  if ($('searchEngine').innerHTML !== seg) $('searchEngine').innerHTML = seg
+  $('searchCustomField').hidden = !custom
+  if (all || document.activeElement !== searchCustom) searchCustom.value = engine ? '' : url
+  searchSuggestionsBox.checked = S.prefs.searchSuggestions
+  const suggests = !!suggestUrlFor(url)
+  $('searchEngineName').textContent = engine?.name ?? (suggests ? 'that site' : 'the search engine')
+  searchSuggestionsBox.disabled = !suggests
+  $('searchHelp').textContent = suggests ? '' : "This search address has no suggestions jbrow knows of, so nothing you type is sent until you press Return."
+  $('searchHelp').hidden = suggests
+}
+$('searchEngine').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (!b) return
+  const engine = SEARCH_ENGINES.find((x) => x.id === b.dataset.value)
+  searchCustomOpen = !engine
+  if (engine) sendPrefs({ searchUrl: engine.url })
+  else {
+    renderSettings()
+    searchCustom.focus()
+  }
+})
+searchCustom.addEventListener('change', () => {
+  const url = searchCustom.value.trim()
+  if (!url) return
+  if (!isSearchUrl(url)) return void showToast('A search address starts with https:// and has %s where the search goes.')
+  searchCustomOpen = false
+  sendPrefs({ searchUrl: url })
+})
+searchSuggestionsBox.addEventListener('change', () => sendPrefs({ searchSuggestions: searchSuggestionsBox.checked }))
 $('openSettingsFile').addEventListener('click', () => send('open-settings-file'))
 $('settingsButton').addEventListener('click', () => setSettings(!!settingsEl.hidden))
 $('closeSettings').addEventListener('click', () => setSettings(false))
@@ -1556,6 +1788,7 @@ document.addEventListener('keydown', (e) => {
     search.value = ''
     applySearch()
   } else if (!rulesPop.hidden) closeRules()
+  else if (!devicePop.hidden) answerDevice(null)
   else if (!certPop.hidden) setCert(false)
   else if (!restylePane.hidden) setRestyle(false)
   else if (!extPop.hidden) setExtensions(false)
@@ -1735,10 +1968,15 @@ let certPopShown = ''
 function renderCert() {
   if (!S) return
   const c = S.cert
+  // Plain http has no certificate, but the button says so and still clears the site.
+  const insecure = !c && S.insecure
   const button = $<HTMLButtonElement>('certButton')
-  button.hidden = !c
+  button.hidden = !c && !insecure
   $('certWarn').hidden = !c?.blocked
-  if (!c) return setCert(false)
+  if (!c) {
+    if (!insecure) return setCert(false)
+    return renderInsecure(button)
+  }
   const bad = !!c.error
   const iconName = bad ? 'warn' : 'lock'
   if (button.dataset.icon !== iconName) {
@@ -1771,6 +2009,7 @@ function renderCert() {
     : c.trusted ? `Not secure: ${certProblem(c.error)} You chose to go ahead anyway, until jbrow quits.`
     : `Not trusted: ${certProblem(c.error)}`
   $('certDistrustRow').hidden = !c.trusted
+  $('clearSite').hidden = c.blocked
   const key = c.chain.map((x) => x.sha256).join()
   if (key !== certPopShown) {
     certPopShown = key
@@ -1778,9 +2017,35 @@ function renderCert() {
   }
 }
 
+/** The address bar's button for a page that came over plain http. */
+function renderInsecure(button: HTMLButtonElement) {
+  if (button.dataset.icon !== 'warn') {
+    button.dataset.icon = 'warn'
+    button.innerHTML = icon('warn')
+  }
+  button.classList.add('bad')
+  const label = "Not secure: this connection isn't encrypted"
+  button.title = label
+  button.setAttribute('aria-label', label)
+  if (certPop.hidden) return
+  let host = ''
+  try {
+    host = new URL(activeUrl()).host
+  } catch {}
+  $('certHead').textContent = `Not secure · ${host}`
+  $('certStatus').textContent =
+    "This page came over plain http, so anyone on the network can read or change it, including what you type into it. Don't enter passwords or card numbers here."
+  $('certDistrustRow').hidden = true
+  $('clearSite').hidden = false
+  if (certPopShown) {
+    certPopShown = ''
+    $('certChain').innerHTML = ''
+  }
+}
+
 function setCert(open: boolean) {
   if (open === !certPop.hidden) return
-  if (open && !S?.cert) return
+  if (open && !S?.cert && !S?.insecure) return
   certPop.hidden = !open
   $('certButton').setAttribute('aria-expanded', String(open))
   if (open) {
@@ -1796,11 +2061,126 @@ $('certDistrust').addEventListener('click', () => {
   setCert(false)
   send('cert', { action: 'distrust' })
 })
+$('clearSite').addEventListener('click', () => {
+  setCert(false)
+  send('clear-site-data')
+})
 $('certBack').addEventListener('click', () => send('cert', { action: 'back' }))
 $('certProceed').addEventListener('click', () => send('cert', { action: 'proceed' }))
 document.addEventListener('mousedown', (e) => {
   if (!certPop.hidden && !(e.target as HTMLElement).closest('#certPop, #certButton')) setCert(false)
 })
+
+// ---------- device chooser ----------
+
+const DEVICE_WANTS: Record<DeviceKind, string> = {
+  usb: 'a USB device',
+  hid: 'a HID device',
+  serial: 'a serial port',
+  bluetooth: 'a Bluetooth device',
+}
+const DEVICE_ICON: Record<DeviceKind, string> = { usb: 'usb', hid: 'keyboard', serial: 'usb', bluetooth: 'bluetooth' }
+
+/** The list is redrawn only when it changes, so keyboard focus on a row survives. */
+let devicesShown = ''
+function renderDevices() {
+  const d = S?.devices ?? null
+  const wasOpen = !devicePop.hidden
+  devicePop.hidden = !d
+  if (!d) {
+    devicesShown = ''
+    if (wasOpen) syncOverlay()
+    return
+  }
+  if (!wasOpen) {
+    // It's anchored where the certificate details open, so they make way.
+    setCert(false)
+    setExtensions(false)
+    syncOverlay()
+  }
+  $('deviceHead').innerHTML =
+    `<b>${esc(d.host || 'This page')}</b>${d.embedder ? `, inside ${esc(d.embedder)},` : ''} wants to connect to ${DEVICE_WANTS[d.kind]}`
+  const key = JSON.stringify([d.id, d.devices])
+  if (key !== devicesShown) {
+    devicesShown = key
+    $('deviceList').innerHTML = d.devices
+      .map(
+        (c) => `<button class="pop-item" role="option" data-device="${esc(c.id)}" title="Connect">
+          <span>${icon(DEVICE_ICON[d.kind])}</span>
+          <span><span class="device-name">${esc(c.name)}</span>${c.detail ? `<span class="device-detail">${esc(c.detail)}</span>` : ''}</span>
+        </button>`,
+      )
+      .join('')
+  }
+  const help = $('deviceHelp')
+  help.hidden = d.devices.length > 0 && d.kind !== 'bluetooth'
+  help.textContent =
+    d.kind === 'bluetooth'
+      ? d.devices.length ? 'Still looking for devices…' : 'Looking for devices…'
+      : 'No compatible devices found. Connect one and it shows up here.'
+  if (d.id !== deviceShownId) {
+    // Focus goes to Cancel, not a device, and nothing connects for a moment: a page could time
+    // the chooser, or swap a new request into one already open, to catch a click or a Return
+    // you meant for something else.
+    deviceShownId = d.id
+    deviceOpenedAt = Date.now()
+    focusUi()
+    $('deviceCancel').focus()
+  }
+}
+let deviceShownId = 0
+let deviceOpenedAt = 0
+
+/** Connects the device, or with null closes the chooser and the page's request fails. */
+function answerDevice(device: string | null) {
+  if (device && Date.now() - deviceOpenedAt < 600) return
+  if (S?.devices) send('device', { id: S.devices.id, device })
+}
+$('deviceList').addEventListener('click', (e) => {
+  const row = (e.target as HTMLElement).closest<HTMLElement>('[data-device]')
+  if (row) answerDevice(row.dataset.device!)
+})
+devicePop.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+  e.preventDefault()
+  const rows = [...devicePop.querySelectorAll<HTMLElement>('[data-device]')]
+  const at = rows.indexOf(document.activeElement as HTMLElement)
+  rows[(at + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length]?.focus()
+})
+$('deviceCancel').addEventListener('click', () => answerDevice(null))
+// Clicking anywhere else closes it, as in Chrome.
+document.addEventListener('mousedown', (e) => {
+  if (!devicePop.hidden && !(e.target as HTMLElement).closest('#devicePop')) answerDevice(null)
+})
+
+// ---------- dangerous sites ----------
+
+let dangerShown = ''
+function renderDanger() {
+  if (!S) return
+  const d = S.danger
+  $('dangerWarn').hidden = !d
+  if (!d) return
+  const phishing = d.kind === 'phishing'
+  $('dangerTitle').textContent = phishing ? 'Deceptive site ahead' : 'Dangerous site ahead'
+  $('dangerText').innerHTML =
+    `<b>${esc(d.host)}</b> ` +
+    (phishing
+      ? 'is on a list of phishing sites. Sites like it pose as banks, shops or sign-in pages to get your passwords or card numbers.'
+      : 'is on a list of sites that spread malware. It could try to put software on your Mac that steals your information.')
+  $('dangerBack').textContent = 'Back to safety'
+  $('dangerMore').textContent =
+    `jbrow found ${d.host} on malware-filter's ${phishing ? 'phishing list, built from OpenPhish and PhishTank' : 'malware list, built from URLhaus'}. ` +
+    "If you're sure the site is safe, you can go ahead. jbrow won't warn you about it again until it quits."
+  $('dangerProceed').textContent = `Go to ${d.host} anyway`
+  // A new warning starts with the way past it folded away.
+  if (dangerShown !== d.url) {
+    dangerShown = d.url
+    $<HTMLDetailsElement>('dangerDetails').open = false
+  }
+}
+$('dangerBack').addEventListener('click', () => send('danger', { action: 'back' }))
+$('dangerProceed').addEventListener('click', () => send('danger', { action: 'proceed' }))
 
 // ---------- messages from main ----------
 
@@ -1820,17 +2200,30 @@ window.jbrow.on('snapshot', ({ dataUrl, tabId }: { dataUrl: string; tabId: strin
   snapshotTab = tabId
   render()
 })
+window.jbrow.on('suggestions', (r: SuggestReply) => {
+  if (r.seq !== suggestSeq || document.activeElement !== omnibox) return
+  visitHits = r.visits
+  // Only while the text is still what was typed (or what was typed plus the last completion).
+  if (mayComplete && (omnibox.value === typed || completion())) applyCompletion(r.completion)
+  showSuggestions(true)
+})
+window.jbrow.on('search-suggestions', (r: SearchReply) => {
+  if (r.seq !== suggestSeq || document.activeElement !== omnibox) return
+  searchHits = r
+  showSuggestions(true)
+})
 window.jbrow.on('focus-omnibox', () => {
   omnibox.focus()
   omnibox.select()
 })
-window.jbrow.on('toast', (text: string) => {
+function showToast(text: string) {
   const el = $('toast')
   el.textContent = text
   el.hidden = false
   clearTimeout(toastTimer)
   toastTimer = window.setTimeout(() => (el.hidden = true), 5000)
-})
+}
+window.jbrow.on('toast', showToast)
 window.jbrow.on('settings', ({ open, section }: { open?: boolean; section?: string }) => setSettings(open ?? !!settingsEl.hidden, section))
 window.jbrow.on('rename-tab', (id: string) => startRename(id))
 window.jbrow.on('shortcuts', (data: typeof shortcuts) => {

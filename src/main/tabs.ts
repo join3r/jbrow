@@ -1,17 +1,22 @@
-import { app, BrowserWindow, Menu, WebContentsView, clipboard, type Rectangle, type WebContents } from 'electron'
+import { app, BrowserWindow, Menu, WebContentsView, clipboard, shell, type Rectangle, type WebContents } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { urlMatcher } from '../shared/patterns'
 import { childrenOf, isAsleep, isInFolder, isRoot, rootOf, subtree } from '../shared/threads'
 import type { CrashView, Folder, Profile, TabRecord, UiTab } from '../shared/types'
 import type { Certificates } from './certs'
+import type { DangerousSites } from './dangerous'
+import type { DeviceChooser } from './devices'
 import type { Logins } from './logins'
 import type { SitePermissions } from './permissions'
 import type { ProfileRuntime } from './profiles'
 
 interface LiveTab {
   view: WebContentsView
+  /** The view's page, kept here because the view lets go of it once it's destroyed. */
+  wc: WebContents
   loading: boolean
 }
 
@@ -31,9 +36,14 @@ export interface TabsDeps {
   searchUrl: () => string
   permissions: SitePermissions
   certs: Certificates
+  dangerous: DangerousSites
   logins: Logins
+  devices: DeviceChooser
   /** A page committed a navigation to a new document. */
   onNavigate: (wc: WebContents) => void
+  /** A tab's page went to an address, for the browsing history; and its title arrived. */
+  onVisit: (profile: string, url: string) => void
+  onTitle: (profile: string, url: string, title: string) => void
   /** The page menu's Print… and Save as PDF…. */
   print: (wc: WebContents) => void
   saveAsPdf: (wc: WebContents) => void
@@ -44,7 +54,15 @@ export interface TabsDeps {
   openInProfile: (fromId: string, profile: string, url: string) => void
   /** The active page went fullscreen or left it. */
   onFullscreen: (on: boolean, url: string) => void
+  /**
+   * A page with unsaved changes (beforeunload) wants to stay. Return true to leave anyway. It has
+   * to answer before returning: Electron only lets the page go from inside the event.
+   */
+  confirmUnload: (id: string, kind: UnloadKind) => boolean
 }
+
+/** What a page asking to stay would be left for: another page, the same one again, or nothing. */
+export type UnloadKind = 'leave' | 'reload' | 'close'
 
 export interface CreateOptions {
   profile: string
@@ -57,6 +75,18 @@ export interface CreateOptions {
   /** A guest WebContents Chromium already created for window.open. */
   webContents?: WebContents
   unread?: boolean
+}
+
+/**
+ * The page is a PDF in Chromium's viewer. Asked in a world of jbrow's own, so the page's scripts
+ * can't change the answer.
+ */
+async function isPdf(wc: WebContents): Promise<boolean> {
+  try {
+    return (await wc.executeJavaScriptInIsolatedWorld(1998, [{ code: 'document.contentType' }])) === 'application/pdf'
+  } catch {
+    return false
+  }
 }
 
 /** Links a page hands jbrow to open. Other schemes (file:, javascript:, chrome:) stay where they are. */
@@ -90,6 +120,14 @@ interface ClosedTab {
   history?: NavHistory
 }
 
+/** A tab waiting for its page to agree to close. */
+interface Closing {
+  remember: boolean
+  /** Taken before the page goes, since a closed page has no back and forward list left to read. */
+  history?: NavHistory
+  done: (closed: boolean) => void
+}
+
 export class Tabs {
   records: TabRecord[] = []
   folders: Folder[] = []
@@ -106,8 +144,12 @@ export class Tabs {
   private droppingView = false
   /** Tabs whose page crashed or stopped responding, until it loads again. */
   private crashed = new Map<string, CrashView>()
-  /** Stuck pages jbrow crashed on purpose, to reload once their process is gone. */
-  private killing = new Set<string>()
+  /** Stuck pages jbrow crashed on purpose, to reload once their process is gone, and whether to skip the cache. */
+  private killing = new Map<string, boolean>()
+  /** Tabs jbrow is reloading, so a page asking to stay is asked about reloading rather than leaving. */
+  private reloading = new Set<string>()
+  /** Tabs you closed whose page gets to ask first (beforeunload). */
+  private closing = new Map<string, Closing>()
   /** Recently closed tabs, most recent last, for ⇧⌘T. Not kept across restarts. */
   private closed: ClosedTab[] = []
   /** The tab whose page is fullscreen. */
@@ -212,18 +254,18 @@ export class Tabs {
   }
   activeWebContents(): WebContents | null {
     const live = this.activeId ? this.live.get(this.activeId) : undefined
-    return live && !live.view.webContents.isDestroyed() ? live.view.webContents : null
+    return live && !live.wc.isDestroyed() ? live.wc : null
   }
   webContentsFor(id: string): WebContents | null {
     const live = this.live.get(id)
-    return live && !live.view.webContents.isDestroyed() ? live.view.webContents : null
+    return live && !live.wc.isDestroyed() ? live.wc : null
   }
   /** Every page that's loaded. */
   pages(): WebContents[] {
-    return [...this.live.values()].map((l) => l.view.webContents).filter((wc) => !wc.isDestroyed())
+    return [...this.live.values()].map((l) => l.wc).filter((wc) => !wc.isDestroyed())
   }
   idForWebContents(wc: WebContents): string | undefined {
-    for (const [id, live] of this.live) if (live.view.webContents === wc) return id
+    for (const [id, live] of this.live) if (live.wc === wc) return id
     return undefined
   }
   uiTabs(): UiTab[] {
@@ -292,7 +334,7 @@ export class Tabs {
     const win = this.deps.window()
     win.contentView.addChildView(view)
     this.deps.onViewAdded()
-    const live: LiveTab = { view, loading: false }
+    const live: LiveTab = { view, wc: view.webContents, loading: false }
     this.live.set(rec.id, live)
     this.wire(rec.id, view.webContents, rt)
     this.addingView = true
@@ -300,7 +342,7 @@ export class Tabs {
       rt.extensions.addTab(view.webContents, win)
       // Tell the library which tab is really in front, or a background tab would count as active.
       const active = this.activeId !== rec.id ? this.live.get(this.activeId ?? '') : undefined
-      if (active && this.active()?.profile === rec.profile) rt.extensions.selectTab(active.view.webContents)
+      if (active && this.active()?.profile === rec.profile) rt.extensions.selectTab(active.wc)
     } finally {
       this.addingView = false
     }
@@ -328,6 +370,7 @@ export class Tabs {
         r.title = title
         this.changed()
       }
+      this.deps.onTitle(r?.profile ?? rt.profile.id, wc.getURL(), title)
     })
     wc.on('page-favicon-updated', (_e, favicons) => {
       const r = rec()
@@ -346,16 +389,33 @@ export class Tabs {
     }
     wc.on('did-navigate', (e, url) => {
       onNav(e, url)
+      this.deps.onVisit(rec()?.profile ?? rt.profile.id, url)
       this.deps.logins.loaded(id)
       this.deps.onNavigate(wc)
     })
-    wc.on('did-navigate-in-page', onNav)
+    wc.on('did-navigate-in-page', (e, url, isMainFrame) => {
+      // A single-page site moving to another page counts as a visit; a jump to #section doesn't.
+      const before = rec()?.url ?? ''
+      onNav(e, url)
+      if (isMainFrame && url.split('#')[0] !== before.split('#')[0]) this.deps.onVisit(rec()?.profile ?? rt.profile.id, url)
+    })
+    // Stopping from inside a navigation event crashes Electron. A tick later the site hasn't
+    // answered yet, and a page that somehow got through still stays under the warning.
+    const stopSoon = () => setImmediate(() => !wc.isDestroyed() && wc.stop())
     wc.on('did-start-navigation', (details) => {
       if (details.isMainFrame && !details.isSameDocument) {
+        this.reloading.delete(id)
         this.deps.certs.clear(id)
+        this.deps.dangerous.clear(id)
         this.deps.logins.clear(id)
+        this.deps.devices.cancel(id)
         this.setCrashed(id, null)
+        // A phishing or malware site: the page it's on stays, under jbrow's warning.
+        if (this.deps.dangerous.check(id, rec()?.profile ?? rt.profile.id, details.url)) stopSoon()
       }
+    })
+    wc.on('did-redirect-navigation', (details) => {
+      if (details.isMainFrame && this.deps.dangerous.check(id, rec()?.profile ?? rt.profile.id, details.url)) stopSoon()
     })
     // HTTP auth for the page or a proxy. Logins answers once you sign in or cancel.
     wc.on('login', (event, _details, authInfo, callback) => {
@@ -364,9 +424,14 @@ export class Tabs {
     })
     wc.on('render-process-gone', (_e, details) => {
       // Unloading an asleep thread's page or closing the tab drops its view first; that's no crash.
-      if (details.reason === 'clean-exit' || this.live.get(id)?.view.webContents !== wc) return
-      if (this.killing.delete(id)) return void wc.reload()
+      if (details.reason === 'clean-exit' || this.live.get(id)?.wc !== wc) return
+      const hard = this.killing.get(id)
+      if (hard !== undefined) {
+        this.killing.delete(id)
+        return void (hard ? wc.reloadIgnoringCache() : wc.reload())
+      }
       this.deps.logins.clear(id)
+      this.deps.devices.cancel(id)
       this.setLoading(id, false)
       if (this.fullscreenId === id) this.setFullscreen(null)
       this.setCrashed(id, { reason: details.reason, hung: false })
@@ -376,6 +441,18 @@ export class Tabs {
     })
     wc.on('responsive', () => {
       if (this.crashed.get(id)?.hung) this.setCrashed(id, null)
+    })
+    // A page with unsaved changes asks before it goes, whether you close the tab, reload or go
+    // elsewhere. Without an answer here Electron keeps the page and silently drops what you asked for.
+    wc.on('will-prevent-unload', (event) => {
+      const closing = this.closing.get(id)
+      const kind: UnloadKind = closing ? 'close' : this.reloading.has(id) ? 'reload' : 'leave'
+      this.reloading.delete(id)
+      if (this.deps.confirmUnload(id, kind)) return event.preventDefault()
+      if (closing) {
+        this.closing.delete(id)
+        closing.done(false)
+      }
     })
     wc.on('certificate-error', (event, url, error, certificate, callback, isMainFrame) => {
       event.preventDefault()
@@ -391,7 +468,8 @@ export class Tabs {
       }
       if (this.deps.onKey(input)) event.preventDefault()
     })
-    wc.on('context-menu', (_e, params) => this.contextMenu(id, wc, params, rt))
+    wc.on('context-menu', (_e, params) => void this.contextMenu(id, wc, params, rt))
+    this.deps.devices.watch(wc, rt.profile.id)
     wc.on('enter-html-full-screen', () => {
       // Only the page in front can have the screen; one in the background stays in its place.
       if (id !== this.activeId) return void this.exitFullscreen(wc)
@@ -424,18 +502,27 @@ export class Tabs {
             unread: background,
           })
           // Chromium navigates the guest itself, under the opener's rules.
-          return this.live.get(child.id)!.view.webContents
+          return this.live.get(child.id)!.wc
         },
       }
     })
 
     wc.on('destroyed', () => {
+      // A page that agreed to close: now the tab goes.
+      const closing = this.closing.get(id)
+      if (closing) {
+        this.closing.delete(id)
+        if (this.live.get(id)?.wc === wc) this.close(id, closing.remember, closing.history)
+        closing.done(true)
+      }
       if (this.fullscreenId === id) this.setFullscreen(null)
       // A crashed page's view may have been replaced by now; only forget this one.
-      if (this.live.get(id)?.view.webContents === wc) this.live.delete(id)
+      if (this.live.get(id)?.wc === wc) this.live.delete(id)
       this.killing.delete(id)
       this.deps.certs.clear(id)
+      this.deps.dangerous.clear(id)
       this.deps.logins.clear(id)
+      this.deps.devices.cancel(id)
       this.setCrashed(id, null)
     })
   }
@@ -478,14 +565,17 @@ export class Tabs {
   }
 
   /**
-   * Reloads the tab's page. A stuck page can't unload by itself, so its process is ended first
-   * and the page reloads once it's gone.
+   * Reloads the tab's page, from the network if `hard` (⇧⌘R). A stuck page can't unload by
+   * itself, so its process is ended first and the page reloads once it's gone.
    */
-  reload(id: string) {
+  reload(id: string, hard = false) {
     const wc = this.webContentsFor(id)
     if (!wc) return
-    if (!this.crashed.get(id)?.hung || wc.isCrashed()) return wc.reload()
-    this.killing.add(id)
+    if (!this.crashed.get(id)?.hung || wc.isCrashed()) {
+      this.reloading.add(id)
+      return hard ? wc.reloadIgnoringCache() : wc.reload()
+    }
+    this.killing.set(id, hard)
     wc.forcefullyCrashRenderer()
   }
 
@@ -502,7 +592,9 @@ export class Tabs {
     }
   }
 
-  private contextMenu(id: string, wc: WebContents, params: Electron.ContextMenuParams, rt: ProfileRuntime) {
+  private async contextMenu(id: string, wc: WebContents, params: Electron.ContextMenuParams, rt: ProfileRuntime) {
+    const pdf = await isPdf(wc)
+    if (wc.isDestroyed()) return
     const items: Electron.MenuItemConstructorOptions[] = []
     const section = (...more: Electron.MenuItemConstructorOptions[]) => items.push(...more, { type: 'separator' })
     const openHere = (url: string, background = false) =>
@@ -561,12 +653,15 @@ export class Tabs {
     items.push(
       { label: 'Back', enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() },
       { label: 'Forward', enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
-      { label: 'Reload', click: () => wc.reload() },
+      { label: 'Reload', click: () => this.reload(id) },
       { type: 'separator' },
       { label: 'Print…', click: () => this.deps.print(wc) },
-      { label: 'Save as PDF…', click: () => this.deps.saveAsPdf(wc) },
     )
     const url = wc.getURL()
+    // A PDF already is one: saving it keeps the file itself, as the viewer's own download button does.
+    if (!pdf) items.push({ label: 'Save as PDF…', click: () => this.deps.saveAsPdf(wc) })
+    else if (isWebUrl(url)) items.push({ label: 'Save PDF', click: () => this.deps.download(wc, url) })
+    else if (url.startsWith('file:')) items.push({ label: 'Show in Finder', click: () => shell.showItemInFolder(fileURLToPath(url)) })
     if (this.deps.permissions.has(rt.profile.id, url)) {
       items.push({ label: 'Reset site permissions', click: () => this.deps.permissions.reset(rt.profile.id, url) })
     }
@@ -605,7 +700,7 @@ export class Tabs {
     this.mru = [id, ...this.mru.filter((m) => m !== id)]
     const live = rec.url ? this.ensureView(rec) : this.live.get(id)
     if (live) {
-      this.deps.runtime(rec.profile)?.extensions.selectTab(live.view.webContents)
+      this.deps.runtime(rec.profile)?.extensions.selectTab(live.wc)
     }
     this.layout()
     this.changed()
@@ -613,8 +708,9 @@ export class Tabs {
   }
 
   /**
-   * Positions the active view and shows it if the panel allows. A page a certificate stopped,
-   * a site asking for a password, or a crashed page stays hidden, so jbrow's screen beneath it shows.
+   * Positions the active view and shows it if the panel allows. A page a certificate or the
+   * phishing and malware lists stopped, a site asking for a password, or a crashed page stays
+   * hidden, so jbrow's screen beneath it shows.
    */
   layout() {
     const live = this.activeId ? this.live.get(this.activeId) : undefined
@@ -625,26 +721,50 @@ export class Tabs {
 
   /** jbrow shows its own screen in place of the tab's page. */
   covered(id: string) {
-    return this.deps.certs.isBlocked(id) || this.deps.logins.isAsking(id) || this.crashed.has(id)
+    return this.deps.certs.isBlocked(id) || this.deps.dangerous.isBlocked(id) || this.deps.logins.isAsking(id) || this.crashed.has(id)
   }
 
-  navigate(input: string) {
-    const url = toUrl(input, this.deps.searchUrl())
+  /** `search` sends the text to the search engine even if it looks like an address. */
+  navigate(input: string, search = false) {
+    const url = toUrl(input, this.deps.searchUrl(), search)
     const rec = this.active()
     if (!rec) return
     rec.url = url
     // A tab without a page goes to the address once its view is made.
     const live = this.live.get(rec.id)
     if (!live) this.ensureView(rec)
-    else if (live.view.webContents.getURL() !== url) void live.view.webContents.loadURL(url).catch(() => {})
+    else if (live.wc.getURL() !== url) void live.wc.loadURL(url).catch(() => {})
     this.activate(rec.id)
   }
 
-  /** `remember` false leaves it out of what ⇧⌘T reopens. */
-  close(id: string, remember = true) {
+  /**
+   * Closes a tab you asked to close. Its page may ask first if it has unsaved changes
+   * (beforeunload), as in Chrome; resolves with whether the tab closed. A page that doesn't ask
+   * closes a moment later, once its process lets it go. A crashed or stuck page can't ask.
+   */
+  closeAsking(id: string, remember = true): Promise<boolean> {
+    const wc = this.webContentsFor(id)
+    if (!wc || this.crashed.has(id)) {
+      this.close(id, remember)
+      return Promise.resolve(true)
+    }
+    // Already asking: a second ⌘W waits on the same answer.
+    const pending = this.closing.get(id)
+    if (pending) return new Promise((resolve) => (pending.done = chain(pending.done, resolve)))
+    return new Promise((resolve) => {
+      this.closing.set(id, { remember, history: this.historyOf(id), done: resolve })
+      wc.close({ waitForBeforeUnload: true })
+    })
+  }
+
+  /**
+   * Closes a tab now; its page doesn't get to ask, as when Chrome discards a tab. For closes
+   * jbrow does on its own or many at once. `remember` false leaves it out of what ⇧⌘T reopens.
+   */
+  close(id: string, remember = true, history?: NavHistory) {
     const rec = this.get(id)
     if (!rec) return
-    if (remember && rec.url) this.remember(rec)
+    if (remember && rec.url) this.remember(rec, history)
     const thread = new Set(subtree(this.records, rootOf(this.records, rec)).map((t) => t.id))
     // Children move up to the closed tab's parent so a thread doesn't fall apart.
     for (const child of childrenOf(this.records, id)) {
@@ -672,14 +792,14 @@ export class Tabs {
     this.changed()
   }
 
-  private remember(rec: TabRecord) {
+  private remember(rec: TabRecord, history = this.historyOf(rec.id)) {
     const root = rootOf(this.records, rec)
     this.closed.push({
       rec: { ...rec },
       index: this.records.indexOf(rec),
       root: { scope: root.scope, scopeName: root.scopeName, app: root.app },
       children: childrenOf(this.records, rec.id).map((c) => c.id),
-      history: this.historyOf(rec.id),
+      history,
     })
     if (this.closed.length > CLOSED_KEEP) this.closed.shift()
   }
@@ -720,14 +840,17 @@ export class Tabs {
     if (!live) return
     this.captureHistory(rec.id)
     this.deps.window().contentView.removeChildView(live.view)
+    this.live.delete(rec.id)
+    // A page that agreed to close is gone already.
+    const wc = live.wc
+    if (wc.isDestroyed()) return
     this.droppingView = true
     try {
-      this.deps.runtime(rec.profile)?.extensions.removeTab(live.view.webContents)
+      this.deps.runtime(rec.profile)?.extensions.removeTab(wc)
     } finally {
       this.droppingView = false
     }
-    live.view.webContents.close()
-    this.live.delete(rec.id)
+    wc.close()
   }
 
   closeWebContents(wc: WebContents) {
@@ -918,6 +1041,14 @@ export class Tabs {
   /** ⌃Tab: the tab used before the current one. */
   previous(): string | undefined {
     return this.mru.find((m) => m !== this.activeId && this.get(m))
+  }
+}
+
+/** Calls both, for a second caller waiting on the same answer. */
+function chain<T>(a: (v: T) => void, b: (v: T) => void) {
+  return (v: T) => {
+    a(v)
+    b(v)
   }
 }
 

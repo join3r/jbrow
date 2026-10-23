@@ -29,8 +29,40 @@ const ASK: Record<string, string> = {
   openExternal: 'open another app',
 }
 
-/** Decisions per profile, then origin, then permission. */
+/** Decisions per profile, then origin, then permission. USB, HID and serial devices you picked are kept here too, as `device:…` keys. */
 type Store = Record<string, Record<string, Record<string, boolean>>>
+
+/** The web APIs that ask for a device through jbrow's chooser (see devices.ts). */
+export type DeviceApi = 'usb' | 'hid' | 'serial'
+
+type AnyDevice = { vendorId?: number | string; productId?: number | string; serialNumber?: string; portName?: string; deviceId?: string; portId?: string }
+
+/**
+ * How a device you picked is remembered: by vendor, product and serial number, so it's the same
+ * device after it's unplugged or the Mac restarts, as in Chrome. A serial port without USB IDs
+ * (built in, or Bluetooth) goes by its name.
+ */
+export function deviceKey(api: DeviceApi, d: AnyDevice): string {
+  const id = (n: number | string | undefined) => (typeof n === 'number' ? n.toString(16).padStart(4, '0') : (n ?? ''))
+  const which = d.serialNumber || (api === 'serial' && !d.vendorId ? d.portName : '') || ''
+  return `device:${api}:${id(d.vendorId)}:${id(d.productId)}:${which}`
+}
+
+/**
+ * Whether a device can be told apart from others like it after it's unplugged. One without a
+ * serial number is allowed only until jbrow quits, so a second one of its kind isn't allowed too.
+ */
+export const isLasting = (api: DeviceApi, d: AnyDevice) => !!d.serialNumber || (api === 'serial' && !d.vendorId)
+
+/**
+ * A device allowed only until jbrow quits goes by the ID Chromium gave it while it's plugged in.
+ * Vendor and product alone would let in every device of that model, and built-in ones, which often
+ * have neither, would all look like the same device.
+ */
+const sessionKey = (api: DeviceApi, d: AnyDevice) => {
+  const runtime = d.deviceId || d.portId
+  return runtime ? `${deviceKey(api, d)}:${runtime}` : null
+}
 
 const storePath = () => path.join(app.getPath('userData'), 'permissions.json')
 
@@ -79,6 +111,8 @@ export class SitePermissions {
   private pending = new Map<string, Promise<boolean>>()
   /** What you blocked on pages whose decisions aren't remembered, for as long as the page lives. */
   private blockedOnPage = new WeakMap<WebContents, Set<string>>()
+  /** Devices allowed until jbrow quits (see isLasting), by profile and origin, then device key. */
+  private sessionDevices = new Map<string, Set<string>>()
 
   constructor(private window: () => BrowserWindow | null) {
     if (!existsSync(storePath())) return
@@ -103,6 +137,8 @@ export class SitePermissions {
     sess.setPermissionCheckHandler((_wc, permission, requestingOrigin, details) => {
       const origin = originOf(requestingOrigin)
       if (ALWAYS.has(permission) || isExtension(origin)) return true
+      // A site may ask for a USB, HID or serial device. It sees only the ones you pick in the chooser.
+      if (permission === 'usb' || permission === 'hid' || permission === 'serial') return true
       if (!isRememberable(origin)) return false
       const granted = this.store[profileId]?.[origin] ?? {}
       if (permission === 'media') {
@@ -113,24 +149,71 @@ export class SitePermissions {
       }
       return granted[permission] === true
     })
-    // WebHID, Web Serial and WebUSB: jbrow has no device chooser, so pages get no devices.
-    sess.setDevicePermissionHandler((details) => isExtension(details.origin))
+    // WebUSB, WebHID and Web Serial: with this handler set, Electron leaves every device grant to
+    // jbrow, so a page sees only the devices picked for its site in the chooser.
+    sess.setDevicePermissionHandler(
+      (details) => isExtension(details.origin) || this.hasDevice(profileId, details.origin, details.deviceType, details.device),
+    )
   }
 
-  /** Whether the site has remembered decisions in the profile, to offer resetting them. */
+  /**
+   * Lets the site use a device you picked for it. Only web sites get devices: pages without an
+   * origin of their own (files, data: and sandboxed pages) would all share one grant.
+   */
+  grantDevice(profileId: string, url: string, api: DeviceApi, device: AnyDevice) {
+    const origin = originOf(url)
+    if (!isRememberable(origin)) return
+    if (isLasting(api, device)) {
+      ;((this.store[profileId] ??= {})[origin] ??= {})[deviceKey(api, device)] = true
+      return this.save()
+    }
+    const key = sessionKey(api, device)
+    if (!key) return
+    const id = `${profileId} ${origin}`
+    let set = this.sessionDevices.get(id)
+    if (!set) this.sessionDevices.set(id, (set = new Set()))
+    set.add(key)
+  }
+
+  /** The page gave a device up (device.forget()). */
+  revokeDevice(profileId: string, url: string, api: DeviceApi, device: AnyDevice) {
+    const origin = originOf(url)
+    const key = deviceKey(api, device)
+    const runtime = sessionKey(api, device)
+    if (runtime) this.sessionDevices.get(`${profileId} ${origin}`)?.delete(runtime)
+    const site = this.store[profileId]?.[origin]
+    if (site && key in site) {
+      delete site[key]
+      if (!Object.keys(site).length) delete this.store[profileId][origin]
+      this.save()
+    }
+  }
+
+  private hasDevice(profileId: string, origin: string, api: DeviceApi, device: AnyDevice): boolean {
+    origin = originOf(origin)
+    if (!isRememberable(origin)) return false
+    const runtime = sessionKey(api, device)
+    return (!!runtime && !!this.sessionDevices.get(`${profileId} ${origin}`)?.has(runtime)) || this.store[profileId]?.[origin]?.[deviceKey(api, device)] === true
+  }
+
+  /** Whether the site has remembered decisions or devices in the profile, to offer resetting them. */
   has(profileId: string, url: string): boolean {
-    return Object.keys(this.store[profileId]?.[originOf(url)] ?? {}).length > 0
+    const origin = originOf(url)
+    return Object.keys(this.store[profileId]?.[origin] ?? {}).length > 0 || !!this.sessionDevices.get(`${profileId} ${origin}`)?.size
   }
 
   /** Forgets every decision made in a deleted profile. */
   forgetProfile(profileId: string) {
     delete this.store[profileId]
+    for (const id of this.sessionDevices.keys()) if (id.startsWith(`${profileId} `)) this.sessionDevices.delete(id)
     this.save()
   }
 
-  /** Forgets every decision for the site, so it asks again. */
+  /** Forgets every decision for the site, and the devices it may use, so it asks again. */
   reset(profileId: string, url: string) {
-    delete this.store[profileId]?.[originOf(url)]
+    const origin = originOf(url)
+    delete this.store[profileId]?.[origin]
+    this.sessionDevices.delete(`${profileId} ${origin}`)
     this.save()
   }
 

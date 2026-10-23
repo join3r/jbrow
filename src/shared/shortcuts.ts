@@ -73,6 +73,7 @@ export const ACTIONS = [
   { id: 'address', label: 'Address bar', key: 'Command+L' },
   { id: 'find', label: 'Find in page', key: 'Command+F' },
   { id: 'reload', label: 'Reload', key: 'Command+R' },
+  { id: 'hardReload', label: 'Reload without the cache', key: 'Command+Shift+R' },
   { id: 'print', label: 'Print the page', key: 'Command+P' },
   { id: 'back', label: 'Back', key: 'Command+[' },
   { id: 'forward', label: 'Forward', key: 'Command+]' },

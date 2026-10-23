@@ -36,14 +36,18 @@ export interface Settings {
   /** Groups of bundle IDs that share one set of tabs for the app hotkey. An app belongs to at most one group. */
   linkedApps: string[][]
   animation: { style: AnimationStyle; durationMs: number; ease: AnimationEase }
-  /** %s is replaced by the encoded query. */
+  /** %s is replaced by the encoded query. Pick one under General in settings, or any address with %s. */
   searchUrl: string
+  /** Ask the search engine for suggestions as you type in the address bar. Never for addresses or private ones. */
+  searchSuggestions: boolean
   /** Unpacked extension folders to load, per profile ID. */
   unpackedExtensions: Record<string, string[]>
   /** Panel size as a fraction of the display's work area. */
   panel: { widthFraction: number; heightFraction: number }
   /** Keep jbrow out of screen shares and screenshots. */
   hideFromScreenCapture: boolean
+  /** Warn before opening sites on the phishing and malware lists (see dangerous.ts). */
+  dangerousSites: boolean
   /** A regular window with a Dock icon that stays when you click away, shown at launch. Off, jbrow only appears on its hotkey. */
   pinned: boolean
   /** Links from other apps with no click or key press just before open in the background, counted in the menu bar. */
@@ -85,9 +89,11 @@ const DEFAULTS: Settings = {
   linkedApps: [['com.microsoft.VSCode', 'com.apple.Terminal']],
   animation: { style: 'materialize', durationMs: 180, ease: 'spring' },
   searchUrl: 'https://www.google.com/search?q=%s',
+  searchSuggestions: true,
   unpackedExtensions: {},
   panel: { widthFraction: 0.72, heightFraction: 0.78 },
   hideFromScreenCapture: true,
+  dangerousSites: true,
   pinned: true,
   quietLinks: true,
   privateUrls: [],

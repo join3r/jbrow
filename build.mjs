@@ -35,6 +35,15 @@ await Promise.all([
     format: 'cjs',
     external: ['electron'],
   }),
+  // Two-finger swipe back and forward, in every tab page's isolated preload world.
+  build({
+    ...common,
+    entryPoints: ['src/preload/swipe.ts'],
+    outfile: 'dist/preload-swipe.js',
+    platform: 'node',
+    format: 'cjs',
+    external: ['electron'],
+  }),
   build({
     ...common,
     entryPoints: ['src/ui/ui.ts'],

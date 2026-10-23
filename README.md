@@ -59,7 +59,11 @@ open windows, which is jbrow's normal state. Vorssaint does this; add jbrow to i
 `[jbrow] quitting` when it happens.
 
 jbrow runs from the menu bar (**jb**) with no Dock icon. Quit it from the menu bar item's
-right-click menu, ⌘Q, or Ctrl+C in the terminal.
+right-click menu, ⌘Q, or Ctrl+C in the terminal. While downloads are running or paused, ⌘Q and the
+menu bar item's **Quit jbrow** and **Restart jbrow** ask first (**Quit jbrow? 2 downloads are in
+progress and will be cancelled.**), bringing jbrow up if it's hidden. Quits from outside jbrow don't
+ask, since nobody may be there to answer: Ctrl+C or `kill`, the install script, macOS logging out
+or shutting down, the Dock icon's Quit, or a utility that quits idle apps.
 
 These are the defaults; change any of them under **Shortcuts** in settings. ⌘1–9 and zoom stay fixed.
 
@@ -72,6 +76,7 @@ These are the defaults; change any of them under **Shortcuts** in settings. ⌘1
 | ⌘1–9 | Jump to a thread |
 | ⌃Tab | Previous tab |
 | ⌘W | Close tab |
+| ⌘R / ⇧⌘R | Reload / reload without the cache (or ⇧-click the reload button) |
 | ⇧⌘T | Reopen the last closed tab (again for the one before) |
 | ⌘F | Find in page (Return / ⌘G next, ⇧Return / ⇧⌘G previous, Esc closes) |
 | ⌘P | Print, or Save as PDF from the print dialog |
@@ -79,6 +84,13 @@ These are the defaults; change any of them under **Shortcuts** in settings. ⌘1
 | ⇧⌘P | Pin: a regular window with a Dock icon, which stays put when you click elsewhere |
 | ⌘, | Settings |
 | ⌥⌘I | DevTools for the page |
+
+Swipe two fingers left or right on the trackpad to go back or forward, as in Chrome: an arrow
+slides in from the edge and fills in once letting go will navigate. A swipe only navigates when
+nothing under the pointer can scroll further that way, so carousels, maps and wide tables scroll as
+usual (swipe again at their edge to navigate), and not over an iframe. jbrow follows macOS's
+**Swipe between pages** setting (Trackpad → More Gestures): two fingers, three fingers, both or
+off.
 
 If another app already uses ⌥Space (Raycast does by default), jbrow shows a notification. Pick
 another key under **Shortcuts** in settings; it takes effect right away.
@@ -91,6 +103,24 @@ While you type in the address bar, Tab (⇧Tab goes back) switches the profile t
 profile in the address bar changes to match. On a new tab the tab itself moves over. On a tab with a page,
 the page stays where it is and what you typed opens in a new tab in the chosen profile.
 
+The address bar suggests, as you type, matching open tabs, pages from your history, archived threads
+and the search engine's suggestions. History is per profile, so it follows the profile what you type
+opens in (Tab switches it, and the suggestions change with it). Pages whose site starts with what you
+typed come first, then by frecency: how often you visit and how recently. Pages already open in a tab
+show only as that tab. Typing the start of a site you visit completes it in place, as in Chrome: `git`
+becomes `github.com` with `hub.com` selected, so Return goes there, typing on replaces it and
+Backspace removes it. It doesn't complete while an open tab matches what you typed, so Return still
+switches to the tab you're naming. Arrow to a history row and press ⇧Delete (or click its × on hover)
+to remove it from the history. Private addresses show as **Private** in the suggestions and are never
+completed. History is kept in `visits.json` next to `settings.json`: the address, title, number of
+visits and last visit of each page, up to 5000 pages per profile, forgotten after 90 days.
+
+Search suggestions come from the search engine you pick under **General** in settings (Google,
+DuckDuckGo, Bing, Brave, Kagi, Ecosia, or a custom address with `%s`; a custom one gets no
+suggestions). They're fetched without cookies, a moment after you stop typing. Because what you type
+goes to the search engine, nothing that looks like an address (a dot before a domain, a port, a path,
+a scheme) or matches a private address pattern is sent. Turn them off under **General**.
+
 Threads opened from an app with ⌥⇧Space get their own section in the sidebar, under the app's name
 and icon (linked apps share one). Kept threads stay in Kept.
 
@@ -100,10 +130,36 @@ button shows on hover. ⇧⌘T, or right-click **+** → **Reopen closed tab**, 
 closed tabs one by one, in their old place with their back/forward history and any threads that were
 under them. The list is kept only until jbrow quits.
 
+A page with unsaved changes asks before it goes, as in Chrome: closing its tab (⌘W, the close
+button, the tab's menu) or going elsewhere asks **Leave site?**, and reloading asks **Reload site?**.
+Pages only get to ask once you've clicked or typed in them. Tabs jbrow closes on its own, many at
+once, don't ask: threads falling asleep or being archived, deleting a profile, quitting. A page that
+asks while jbrow is hidden stays where it is.
+
 Right-click a page for **Print…** and **Save as PDF…** (saved to ~/Downloads by default). The same menu
 opens a link in this thread, in the background or in another profile, saves or copies a link, image or
 video, copies an image, searches for or looks up selected text, and offers spelling suggestions in text
 fields (or **Add to dictionary**).
+
+PDFs open in Chromium's PDF viewer, from the web or from your Mac; a PDF sent as an attachment or
+linked with `download` downloads instead, as in Chrome. The address bar shows the PDF's own address.
+The viewer's download button saves the file into ~/Downloads, its print button and ⌘P print it, and ⌘F
+finds text in it (the file name in the viewer's toolbar counts as a match too). On a PDF the page menu
+has **Save PDF** in place of **Save as PDF…**, which saves the file itself, or **Show in Finder** for a
+PDF on your Mac.
+
+A site that asks for a USB, HID or serial device (WebUSB, WebHID, Web Serial) or a Bluetooth device (Web
+Bluetooth) gets a chooser under the address bar: "*site* wants to connect to a USB device", with the
+devices the Mac has. Devices plugged in or out while it's open come and go, and Bluetooth devices
+appear as they're found. Click one to connect it; the site sees that device and no other. Esc, the
+close button or a click anywhere else cancels, and the page's request fails. The chooser belongs to its
+tab: switching tabs hides it until you're back, and leaving the page closes it. A USB, HID or serial
+device with a serial number stays allowed for that site in that profile, in `permissions.json`, until
+**Reset site permissions** in the page menu or the site calls `forget()`; one without a serial number
+is allowed until jbrow quits, so a second one of its kind isn't allowed too. Bluetooth devices are
+allowed for the page only. Pages in popup windows and extension pages get no chooser. Bluetooth, and
+Web Serial (which also lists Bluetooth serial ports), need macOS's Bluetooth permission: the first time,
+macOS asks whether jbrow may use Bluetooth, and jbrow waits for the answer.
 
 Tabs keep their back and forward history (the last 50 pages) across restarts, sleep and archiving, in
 `history.json` next to `tabs.json`, along with each page's scroll position and form contents.
@@ -122,6 +178,19 @@ A site that asks for a username and password (HTTP basic or digest auth) gets a 
 page area. jbrow doesn't store the password; Chromium remembers it until jbrow quits. If a page
 crashes, or macOS kills it to free memory, the page area says so and offers **Reload** (or ⌘R), and
 the tab is greyed out in the sidebar. A page that hangs gets **Wait** and **Reload**.
+
+A page that came over plain http has a red warning icon left of the address; click it for why that
+matters. The same icon, or the lock on https pages, has **Clear cookies and site data**, which signs
+you out of that site in that profile (cookies of its parent domain and subdomains included) and
+reloads the page.
+
+jbrow warns before a tab opens a site known for phishing or malware: the page doesn't load, and
+**Deceptive site ahead** or **Dangerous site ahead** takes its place, with **Back to safety** and,
+under Details, a way past it until jbrow quits. Redirects are checked too. The lists are
+malware-filter's phishing and malware hosts (built from OpenPhish, PhishTank and URLhaus, with popular
+sites left out), downloaded every 12 hours into `blocklists/` next to `settings.json`; the addresses
+you visit never leave your Mac. Downloads and pages inside frames aren't checked. Turn it off under
+**Privacy** in settings, which also shows how big the lists are and when they last updated.
 
 Kept can hold folders: hover the Kept heading and click the folder icon. Drag threads onto a folder,
 click it to fold it away, and right-click it to rename, delete (its threads stay kept) or set its
@@ -170,14 +239,18 @@ Sonnet takes about 10 seconds. Styles are kept in `styles.json` next to `setting
 
 ## Settings
 
-The settings screen (⌘, or the sliders icon) has a sidebar of sections: **General** (pinning, quiet links, the
-default browser), **Profiles**, **Threads** (archiving), **Apps**, **Animation**, **Restyling**,
-**Privacy** (private addresses, screen sharing) and **Shortcuts** (jbrow's own and extensions').
+The settings screen (⌘, or the sliders icon) has a sidebar of sections: **General** (pinning, search engine and
+search suggestions, quiet links, the default browser), **Profiles**, **Threads** (archiving), **Apps**, **Animation**, **Restyling**,
+**Privacy** (private addresses, dangerous sites, clearing browsing data, screen sharing) and **Shortcuts** (jbrow's own and extensions').
 The search above the sections finds any setting or shortcut, and **Shortcuts** has its own search.
 Changes apply right away. Private addresses: any address that contains
 one of your patterns (`*` matches anything, e.g. `*.corp.example`) shows as **Private** in the
 address bar, the tab list tooltips and the address suggestions until you click the address bar.
 Page titles still show.
+
+**Browsing data** under **Privacy** clears history, cookies and site data, cached images and files, or
+any mix of them, in one profile or all of them, after asking. Extensions keep their own data (Bitwarden stays signed in),
+and tabs stay open. There's no time range: Electron can only clear everything.
 
 Everything is stored in `~/Library/Application Support/jbrow/settings.json`, written with defaults
 on first run. Restart jbrow after editing the file by hand (menu bar item, **Restart jbrow**).
@@ -196,9 +269,12 @@ on first run. Restart jbrow after editing the file by hand (menu bar item, **Res
 - `pinned`: a regular window with a Dock icon that opens at launch and stays when you click away
   (on by default). The pin in the toolbar and ⇧⌘P switch it, and jbrow remembers.
 - `quietLinks`: open links you didn't click in the background (on by default).
+- `searchUrl`: the search engine's address, `%s` where the query goes. Pick one under **General**.
+- `searchSuggestions`: ask the search engine for suggestions as you type (on by default).
 - `hideFromScreenCapture`: keeps jbrow out of screen shares (on by default). While it's on, private
   addresses don't matter for streaming: nobody sees jbrow at all.
 - `privateUrls`: the private address patterns.
+- `dangerousSites`: warn before opening sites on the phishing and malware lists (on by default).
 - `pinnedExtensions`: IDs of extensions pinned to the toolbar.
 - `shortcuts`: your keys for jbrow's own commands, e.g. `"newTab": "Command+Y"` (`""` removes one).
   Commands not listed use their defaults. Older settings files kept the summon keys under
@@ -209,7 +285,7 @@ on first run. Restart jbrow after editing the file by hand (menu bar item, **Res
 - `restyle`: `model` for restyling (a Claude model alias such as sonnet, opus or haiku) and
   `claudePath`, the claude command if jbrow doesn't find it on its own.
 
-Tabs, folders and archived threads are in `tabs.json` next to it.
+Tabs, folders and archived threads are in `tabs.json` next to it, and the browsing history in `visits.json`.
 
 ## Extensions
 
