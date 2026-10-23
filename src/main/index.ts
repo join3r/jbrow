@@ -426,8 +426,7 @@ function runAction(id: ActionId) {
     case 'forward':
       return wc?.navigationHistory.goForward()
     case 'pin':
-      panel.setPinned(!panel.pinned)
-      return pushState()
+      return setPinned(!panel.pinned)
     case 'settings':
       return panel.ui.send('settings', {})
     case 'devTools':
@@ -469,6 +468,16 @@ function onKey(input: Electron.Input): boolean {
 }
 
 // ---------- settings screen, extensions, thread menu ----------
+
+/** Pins or unpins the window and remembers it for next launch. */
+function setPinned(on: boolean) {
+  panel.setPinned(on)
+  if (settings.pinned !== on) {
+    settings.pinned = on
+    saveSettings(settings)
+  }
+  pushState()
+}
 
 function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.animation) settings.animation = { ...settings.animation, ...prefs.animation }
@@ -1011,10 +1020,7 @@ function wireIpc() {
     scope = null
     pushState()
   })
-  on('pin', () => {
-    panel.setPinned(!panel.pinned)
-    pushState()
-  })
+  on<{ on?: boolean } | undefined>('pin', (data) => setPinned(data?.on ?? !panel.pinned))
   on<{ profile: string }>('set-profile', ({ profile }) => {
     const id = tabs.activeId
     if (id) switchProfile(id, profile)
@@ -1167,6 +1173,7 @@ app.whenReady().then(async () => {
       pushState()
     },
   })
+  panel.setPinned(settings.pinned)
   panel.ui.on('render-process-gone', (_e, details) => console.error('[jbrow] UI renderer gone:', details))
   panel.ui.on('before-input-event', (event, input) => {
     if (onKey(input)) event.preventDefault()
@@ -1251,8 +1258,8 @@ app.whenReady().then(async () => {
   }
   started = true
   for (const url of waitingLinks.splice(0)) await openFromApp(url)
-  // `npm start -- --show` summons the panel right away, handy while developing.
-  if (process.argv.includes('--show')) setTimeout(() => void onHotkey(), 600)
+  // Pinned, jbrow opens its window at launch like any browser. `npm start -- --show` does too.
+  if (settings.pinned || process.argv.includes('--show')) setTimeout(() => void onHotkey(), 600)
 })
 
 app.on('will-quit', () => {

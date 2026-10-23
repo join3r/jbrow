@@ -38,6 +38,8 @@ export interface Settings {
   panel: { widthFraction: number; heightFraction: number }
   /** Keep jbrow out of screen shares and screenshots. */
   hideFromScreenCapture: boolean
+  /** A regular window with a Dock icon that stays when you click away, shown at launch. Off, jbrow only appears on its hotkey. */
+  pinned: boolean
   /** Addresses matching these show as "Private" in the address bar until clicked. `*` matches anything. */
   privateUrls: string[]
   /** Threads unseen this many days unload their pages and show as a one-line summary, unless kept. 0 never does. */
@@ -69,6 +71,7 @@ const DEFAULTS: Settings = {
   unpackedExtensions: {},
   panel: { widthFraction: 0.72, heightFraction: 0.78 },
   hideFromScreenCapture: true,
+  pinned: true,
   privateUrls: [],
   summarizeAfterDays: 3,
   archiveAfterDays: 7,

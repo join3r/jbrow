@@ -17,11 +17,12 @@
           <button id="newTab" class="icon" data-icon="plus" title="New tab" aria-label="New tab"></button>
         </div>
         <div class="tools">
-          <div class="nav">
-            <button id="back" class="icon sm" data-icon="back" title="Back" aria-label="Back"></button>
-            <button id="forward" class="icon sm" data-icon="forward" title="Forward" aria-label="Forward" hidden></button>
-          </div>
           <div class="omni">
+            <div class="nav">
+              <button id="back" class="icon sm" data-icon="back" title="Back" aria-label="Back"></button>
+              <button id="forward" class="icon sm" data-icon="forward" title="Forward" aria-label="Forward" hidden></button>
+              <button id="reload" class="icon sm" title="Reload" aria-label="Reload"></button>
+            </div>
             <span id="profilePill" class="profile-pill" hidden></span>
             <button id="certButton" class="icon sm cert-button" hidden aria-expanded="false"></button>
             <div id="certPop" class="pop cert-pop" hidden role="dialog" aria-label="Certificate">
@@ -37,7 +38,6 @@
               <input id="omnibox" autocomplete="off" spellcheck="false" aria-label="Address bar" placeholder="Search or type a tab name" />
               <div id="privateMask" class="private-mask" hidden><span data-icon="eyeOff"></span>Private</div>
             </div>
-            <button id="reload" class="icon sm" title="Reload" aria-label="Reload"></button>
             <div id="suggest" class="suggest" hidden></div>
           </div>
           <div id="downloads" class="downloads" hidden>
@@ -138,147 +138,218 @@
           </details>
         </section>
         <section id="settings" class="settings" hidden tabindex="-1" aria-label="Settings">
-          <header class="set-head">
-            <h1>Settings</h1>
-            <button id="closeSettings" class="icon" data-icon="close" title="Close (Esc)" aria-label="Close settings"></button>
-          </header>
-
-          <h2>Profiles</h2>
-          <p class="help">
-            Each profile has its own logins, cookies and extensions. Click a name to rename it and the dot to change its
-            color. Right-click a profile to make it the default, for links from other apps and for new tabs when nothing
-            else decides, or to delete it.
-          </p>
-          <div id="profileList" class="profile-list"></div>
-          <button id="addProfile" class="chip">Add profile</button>
-
-          <h2>Default browser</h2>
-          <p id="defaultBrowser" class="help"></p>
-          <button id="makeDefault" class="chip" hidden>Make jbrow the default browser</button>
-
-          <h2>Summon animation</h2>
-          <div class="field">
-            <span class="label">Style</span>
-            <div id="animStyle" class="seg" role="group" aria-label="Animation style">
-              <button data-value="materialize">Materialize</button>
-              <button data-value="slide">Slide</button>
-              <button data-value="scale">Scale</button>
-              <button data-value="fade">Fade</button>
-              <button data-value="off">Off</button>
+          <nav class="set-nav" aria-label="Settings sections">
+            <label class="set-search">
+              <span data-icon="search"></span>
+              <input id="settingsSearch" type="search" spellcheck="false" placeholder="Search settings" aria-label="Search settings" />
+            </label>
+            <div id="setNav" class="set-nav-list">
+              <button class="set-nav-item" data-section="general"><span data-icon="settings"></span>General</button>
+              <button class="set-nav-item" data-section="profiles"><span data-icon="user"></span>Profiles</button>
+              <button class="set-nav-item" data-section="threads"><span data-icon="archive"></span>Threads</button>
+              <button class="set-nav-item" data-section="apps"><span data-icon="grid"></span>Apps</button>
+              <button class="set-nav-item" data-section="animation"><span data-icon="sparkles"></span>Animation</button>
+              <button class="set-nav-item" data-section="restyling"><span data-icon="wand"></span>Restyling</button>
+              <button class="set-nav-item" data-section="privacy"><span data-icon="shield"></span>Privacy</button>
+              <button class="set-nav-item" data-section="shortcuts"><span data-icon="keyboard"></span>Shortcuts</button>
             </div>
-          </div>
-          <div class="field">
-            <label class="label" for="animSpeed">Duration</label>
-            <input id="animSpeed" type="range" min="80" max="400" step="10" />
-            <output id="animSpeedOut" for="animSpeed"></output>
-          </div>
-          <div class="field">
-            <span class="label">Feel</span>
-            <div id="animEase" class="seg" role="group" aria-label="Animation feel">
-              <button data-value="spring">Spring</button>
-              <button data-value="snappy">Snappy</button>
-              <button data-value="smooth">Smooth</button>
-            </div>
-          </div>
-          <div class="field">
-            <span class="label"></span>
-            <button id="animPreview" class="chip">Preview</button>
-          </div>
+            <p class="set-file">Saved in <button id="openSettingsFile" class="link">settings.json</button></p>
+          </nav>
+          <div id="setBody" class="set-body">
+            <header class="set-head">
+              <h1 id="setTitle">Settings</h1>
+              <button id="closeSettings" class="icon" data-icon="close" title="Close (Esc)" aria-label="Close settings"></button>
+            </header>
 
-          <h2>Archiving</h2>
-          <div class="field">
-            <span class="label">Summarize</span>
-            <div id="summarizeAfter" class="seg" role="group" aria-label="Summarize threads unseen for">
-              <button data-value="1">1 day</button>
-              <button data-value="3">3 days</button>
-              <button data-value="7">1 week</button>
-              <button data-value="0">Never</button>
-            </div>
+            <section class="set-section" data-section="general">
+              <h2 class="set-section-title">General</h2>
+              <div class="set-item" data-keywords="pin pinned dock window regular ghost hide click away launch startup">
+                <h3>Window</h3>
+                <label class="check">
+                  <input id="pinWindow" type="checkbox" />
+                  <span>Keep jbrow as a regular window. It opens when jbrow starts, has a Dock icon and stays when you
+                    click another app. Turn it off and jbrow only shows on <b id="showHotkey">its hotkey</b>, then hides
+                    when you click away. The pin in the toolbar switches it too.</span>
+                </label>
+              </div>
+              <div class="set-item" data-keywords="default browser links other apps">
+                <h3>Default browser</h3>
+                <p id="defaultBrowser" class="help"></p>
+                <button id="makeDefault" class="chip" hidden>Make jbrow the default browser</button>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="profiles">
+              <h2 class="set-section-title">Profiles</h2>
+              <div class="set-item" data-keywords="profile profiles color rename delete default work personal logins cookies">
+                <p class="help">
+                  Each profile has its own logins, cookies and extensions. Click a name to rename it and the dot to change its
+                  color. Right-click a profile to make it the default, for links from other apps and for new tabs when nothing
+                  else decides, or to delete it.
+                </p>
+                <div id="profileList" class="profile-list"></div>
+                <button id="addProfile" class="chip">Add profile</button>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="threads">
+              <h2 class="set-section-title">Threads</h2>
+              <div class="set-item" data-keywords="archive archiving summarize sleep unload threads tabs kept folders">
+                <h3>Archiving</h3>
+                <div class="field">
+                  <span class="label">Summarize</span>
+                  <div id="summarizeAfter" class="seg" role="group" aria-label="Summarize threads unseen for">
+                    <button data-value="1">1 day</button>
+                    <button data-value="3">3 days</button>
+                    <button data-value="7">1 week</button>
+                    <button data-value="0">Never</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <span class="label">Archive</span>
+                  <div id="archiveAfter" class="seg" role="group" aria-label="Archive threads unseen for">
+                    <button data-value="1">1 day</button>
+                    <button data-value="3">3 days</button>
+                    <button data-value="7">1 week</button>
+                    <button data-value="30">1 month</button>
+                    <button data-value="0">Never</button>
+                  </div>
+                </div>
+                <p class="help">
+                  Threads you haven't opened for a while first unload their pages and shrink to one line: how many tabs, which
+                  sites, how long ago. Opening one loads it again. Later they close and leave the sidebar. Type in the address
+                  bar to find and reopen them. Kept threads never archive, and a folder in Kept can catch threads by address before they do:
+                  right-click the folder and choose <b>Auto-file rules</b>.
+                </p>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="apps">
+              <h2 class="set-section-title">Apps</h2>
+              <div class="set-item" data-keywords="apps app hotkey link linked profile bundle">
+                <p class="help">
+                  <b id="appHotkey">⌥⇧Space</b> shows only the threads of the app you were in, and the sidebar groups each app's threads
+                  under its name. Pick the profile an app's new tabs open in; <b>Auto</b> uses the tab you were on.
+                  Right-click an app to link it with another, so they share one set of threads.
+                </p>
+                <div id="appList" class="app-list"></div>
+                <button id="addApp" class="chip">Add app…</button>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="animation">
+              <h2 class="set-section-title">Animation</h2>
+              <div class="set-item" data-keywords="summon animation style duration speed feel ease preview">
+                <p class="help">How jbrow appears when you summon it.</p>
+                <div class="field">
+                  <span class="label">Style</span>
+                  <div id="animStyle" class="seg" role="group" aria-label="Animation style">
+                    <button data-value="materialize">Materialize</button>
+                    <button data-value="slide">Slide</button>
+                    <button data-value="scale">Scale</button>
+                    <button data-value="fade">Fade</button>
+                    <button data-value="off">Off</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="label" for="animSpeed">Duration</label>
+                  <input id="animSpeed" type="range" min="80" max="400" step="10" />
+                  <output id="animSpeedOut" for="animSpeed"></output>
+                </div>
+                <div class="field">
+                  <span class="label">Feel</span>
+                  <div id="animEase" class="seg" role="group" aria-label="Animation feel">
+                    <button data-value="spring">Spring</button>
+                    <button data-value="snappy">Snappy</button>
+                    <button data-value="smooth">Smooth</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <span class="label"></span>
+                  <button id="animPreview" class="chip">Preview</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="restyling">
+              <h2 class="set-section-title">Restyling</h2>
+              <div class="set-item" data-keywords="restyle restyling css wand claude codex agent model sonnet opus haiku sites">
+                <p class="help">
+                  The wand in the toolbar opens restyling in the sidebar: describe how the site you're on should look, and
+                  the agent writes a stylesheet that applies to every page of that site. It runs through Claude Code or Codex
+                  with your subscription, so the <code>claude</code> or <code>codex</code> command must be installed and
+                  signed in. Each request sends a screenshot of the page and an outline of its layout and text.
+                </p>
+                <div class="field">
+                  <span class="label">Agent</span>
+                  <div id="restyleAgent" class="seg" role="group" aria-label="Agent for restyling">
+                    <button data-value="claude">Claude Code</button>
+                    <button data-value="codex">Codex</button>
+                  </div>
+                </div>
+                <div id="restyleClaudeModel" class="field">
+                  <span class="label">Model</span>
+                  <div id="restyleModel" class="seg" role="group" aria-label="Claude model for restyling">
+                    <button data-value="sonnet">Sonnet</button>
+                    <button data-value="opus">Opus</button>
+                    <button data-value="haiku">Haiku</button>
+                  </div>
+                </div>
+                <div id="restyleCodexModelField" class="field" hidden>
+                  <label class="label" for="restyleCodexModel">Model</label>
+                  <input id="restyleCodexModel" class="text" spellcheck="false" placeholder="Codex's default" />
+                </div>
+                <div id="styledSites" class="styled-sites"></div>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="privacy">
+              <h2 class="set-section-title">Privacy</h2>
+              <div class="set-item" data-keywords="private addresses urls mask hide">
+                <h3>Private addresses</h3>
+                <p class="help">
+                  Addresses that contain one of these show as <b>Private</b> in the address bar and the tab list until you click
+                  the address bar. One per line; <code>*</code> matches anything, so <code>*.corp.example</code> covers every
+                  site under corp.example.
+                </p>
+                <textarea id="privateUrls" rows="5" spellcheck="false" placeholder="*.corp.example&#10;grafana.internal"></textarea>
+              </div>
+              <div class="set-item" data-keywords="screen sharing screenshots capture recording hide">
+                <h3>Screen sharing</h3>
+                <label class="check">
+                  <input id="hideCapture" type="checkbox" />
+                  <span>Hide jbrow from screen sharing and screenshots. While this is on, nobody watching your screen sees
+                    jbrow at all, private addresses included.</span>
+                </label>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="shortcuts">
+              <h2 class="set-section-title">Shortcuts</h2>
+              <label class="set-search sc-search">
+                <span data-icon="search"></span>
+                <input id="shortcutSearch" type="search" spellcheck="false" placeholder="Search shortcuts" aria-label="Search shortcuts" />
+              </label>
+              <div class="set-item" data-keywords="shortcuts keys hotkeys keyboard">
+                <h3>jbrow</h3>
+                <p class="help">
+                  Click a shortcut and press the new keys; <b>Delete</b> removes it, <b>Esc</b> keeps the old one. The first two
+                  work in any app.
+                </p>
+                <div id="actionKeys" class="shortcuts"></div>
+              </div>
+              <div class="set-item" data-keywords="extension shortcuts commands keys">
+                <h3>Extensions</h3>
+                <p class="help">
+                  Keys that run an extension's commands while jbrow is open, for the profile of the tab you're on. They change
+                  the same way.
+                </p>
+                <div id="shortcuts" class="shortcuts"></div>
+              </div>
+            </section>
+
+            <p id="setNoMatch" class="help set-no-match" hidden></p>
           </div>
-          <div class="field">
-            <span class="label">Archive</span>
-            <div id="archiveAfter" class="seg" role="group" aria-label="Archive threads unseen for">
-              <button data-value="1">1 day</button>
-              <button data-value="3">3 days</button>
-              <button data-value="7">1 week</button>
-              <button data-value="30">1 month</button>
-              <button data-value="0">Never</button>
-            </div>
-          </div>
-          <p class="help">
-            Threads you haven't opened for a while first unload their pages and shrink to one line: how many tabs, which
-            sites, how long ago. Opening one loads it again. Later they close and leave the sidebar. Type in the address
-            bar to find and reopen them. Kept threads never archive, and a folder in Kept can catch threads by address before they do:
-            right-click the folder and choose <b>Auto-file rules</b>.
-          </p>
-
-          <h2>Apps</h2>
-          <p class="help">
-            <b id="appHotkey">⌥⇧Space</b> shows only the threads of the app you were in, and the sidebar groups each app's threads
-            under its name. Pick the profile an app's new tabs open in; <b>Auto</b> uses the tab you were on.
-            Right-click an app to link it with another, so they share one set of threads.
-          </p>
-          <div id="appList" class="app-list"></div>
-          <button id="addApp" class="chip">Add app…</button>
-
-          <h2>Restyling</h2>
-          <p class="help">
-            The wand in the toolbar opens restyling in the sidebar: describe how the site you're on should look, and
-            the agent writes a stylesheet that applies to every page of that site. It runs through Claude Code or Codex
-            with your subscription, so the <code>claude</code> or <code>codex</code> command must be installed and
-            signed in. Each request sends a screenshot of the page and an outline of its layout and text.
-          </p>
-          <div class="field">
-            <span class="label">Agent</span>
-            <div id="restyleAgent" class="seg" role="group" aria-label="Agent for restyling">
-              <button data-value="claude">Claude Code</button>
-              <button data-value="codex">Codex</button>
-            </div>
-          </div>
-          <div id="restyleClaudeModel" class="field">
-            <span class="label">Model</span>
-            <div id="restyleModel" class="seg" role="group" aria-label="Claude model for restyling">
-              <button data-value="sonnet">Sonnet</button>
-              <button data-value="opus">Opus</button>
-              <button data-value="haiku">Haiku</button>
-            </div>
-          </div>
-          <div id="restyleCodexModelField" class="field" hidden>
-            <label class="label" for="restyleCodexModel">Model</label>
-            <input id="restyleCodexModel" class="text" spellcheck="false" placeholder="Codex's default" />
-          </div>
-          <div id="styledSites" class="styled-sites"></div>
-
-          <h2>Private addresses</h2>
-          <p class="help">
-            Addresses that contain one of these show as <b>Private</b> in the address bar and the tab list until you click
-            the address bar. One per line; <code>*</code> matches anything, so <code>*.corp.example</code> covers every
-            site under corp.example.
-          </p>
-          <textarea id="privateUrls" rows="5" spellcheck="false" placeholder="*.corp.example&#10;grafana.internal"></textarea>
-
-          <h2>Screen sharing</h2>
-          <label class="check">
-            <input id="hideCapture" type="checkbox" />
-            <span>Hide jbrow from screen sharing and screenshots. While this is on, nobody watching your screen sees
-              jbrow at all, private addresses included.</span>
-          </label>
-
-          <h2>Shortcuts</h2>
-          <p class="help">
-            Click a shortcut and press the new keys; <b>Delete</b> removes it, <b>Esc</b> keeps the old one. The first two
-            work in any app.
-          </p>
-          <div id="actionKeys" class="shortcuts"></div>
-
-          <h2>Extension shortcuts</h2>
-          <p class="help">
-            Keys that run an extension's commands while jbrow is open, for the profile of the tab you're on. They change
-            the same way.
-          </p>
-          <div id="shortcuts" class="shortcuts"></div>
-
-          <p class="help foot">Everything here is saved in <button id="openSettingsFile" class="link">settings.json</button>.</p>
         </section>
       </main>
     </div>

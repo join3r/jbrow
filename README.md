@@ -1,7 +1,8 @@
 # jbrow
 
-A browser that isn't there until you call it. No window by default: a hotkey brings it up over
-whatever you're doing, and clicking into another app sends it away.
+A browser that isn't there until you call it. Unpin it and it has no window: a hotkey brings it up
+over whatever you're doing, and clicking into another app sends it away. It starts pinned, as a
+regular window with a Dock icon, so the first launch looks like any other browser.
 
 This is the first working version. The design behind it is in the jbrow Summon Lab artifact.
 
@@ -96,7 +97,7 @@ Threads unseen for 3 days fall asleep: their pages unload and the sidebar shows 
 saying how many tabs, which sites and how long ago. Clicking one loads it again. A page that's playing
 sound stays loaded, and kept threads never sleep.
 
-Threads unseen for a week are archived (change both under Archiving in settings, or turn them off):
+Threads unseen for a week are archived (change both under **Threads** in settings, or turn them off):
 their pages close and they leave the sidebar. Type in the address bar to find one and bring the
 whole thread back. Archived threads are forgotten after 90 days.
 
@@ -134,8 +135,11 @@ Sonnet takes about 10 seconds. Styles are kept in `styles.json` next to `setting
 
 ## Settings
 
-The settings screen (⌘, or the sliders icon) covers profiles, the default browser, the summon animation, archiving, apps, restyling, private
-addresses, screen sharing, jbrow's own shortcuts and extension shortcuts, and changes there apply right away. Private addresses: any address that contains
+The settings screen (⌘, or the sliders icon) has a sidebar of sections: **General** (pinning, the
+default browser), **Profiles**, **Threads** (archiving), **Apps**, **Animation**, **Restyling**,
+**Privacy** (private addresses, screen sharing) and **Shortcuts** (jbrow's own and extensions').
+The search above the sections finds any setting or shortcut, and **Shortcuts** has its own search.
+Changes apply right away. Private addresses: any address that contains
 one of your patterns (`*` matches anything, e.g. `*.corp.example`) shows as **Private** in the
 address bar, the tab list tooltips and the address suggestions until you click the address bar.
 Page titles still show.
@@ -154,6 +158,8 @@ on first run. Restart jbrow after editing the file by hand (menu bar item, **Res
   right-click an app to link or unlink it; its threads move along right away.
 - `animation`: `style` (materialize, slide, scale, fade, off), `durationMs`, `ease` (spring, snappy, smooth).
 - `unpackedExtensions`: extension folders to load per profile, e.g. Stem.
+- `pinned`: a regular window with a Dock icon that opens at launch and stays when you click away
+  (on by default). The pin in the toolbar and ⇧⌘P switch it, and jbrow remembers.
 - `hideFromScreenCapture`: keeps jbrow out of screen shares (on by default). While it's on, private
   addresses don't matter for streaming: nobody sees jbrow at all.
 - `privateUrls`: the private address patterns.
@@ -177,7 +183,7 @@ store in that profile. Right-click an extension there and choose **Pin to toolba
 button next to the puzzle icon (it shows whenever the current tab's profile has that extension);
 right-click the pinned button to unpin it. Installed extensions update every 5 hours.
 
-Extension keyboard shortcuts are under **Extension shortcuts** in settings. They work while jbrow is
+Extension keyboard shortcuts are under **Shortcuts** in settings. They work while jbrow is
 open, for the profile of the tab you're on. Shortcuts an extension suggests apply on their own,
 except ones jbrow already uses. Click a shortcut to record a new one.
 

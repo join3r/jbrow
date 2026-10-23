@@ -13,7 +13,7 @@ declare global {
   }
 }
 
-/** 24×24 stroke icons. The puzzle, pin, eye, eye-off, folder, store, open, copy, wand, undo, trash, lock and warn paths are from Lucide (ISC). */
+/** 24×24 stroke icons. The puzzle, pin, eye, eye-off, folder, store, open, copy, wand, undo, trash, lock, warn, search, user, archive, grid, sparkles, shield and keyboard paths are from Lucide (ISC). */
 const ICONS: Record<string, string> = {
   back: '<path d="m15 18-6-6 6-6"/>',
   forward: '<path d="m9 18 6-6-6-6"/>',
@@ -45,6 +45,15 @@ const ICONS: Record<string, string> = {
   trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
   lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
   warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  archive: '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+  grid: '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
+  sparkles:
+    '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>',
+  shield:
+    '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
+  keyboard: '<path d="M10 8h.01M12 12h.01M14 8h.01M16 12h.01M18 8h.01M6 8h.01M7 16h10M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/>',
 }
 const icon = (name: string) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`
 document.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => (el.innerHTML = icon(el.dataset.icon!)))
@@ -926,9 +935,24 @@ $('restyleReset').addEventListener('click', () => restyleSite('reset'))
 const animSpeed = $<HTMLInputElement>('animSpeed')
 const privateUrls = $<HTMLTextAreaElement>('privateUrls')
 const hideCapture = $<HTMLInputElement>('hideCapture')
+const pinWindow = $<HTMLInputElement>('pinWindow')
+const settingsSearch = $<HTMLInputElement>('settingsSearch')
+const shortcutSearch = $<HTMLInputElement>('shortcutSearch')
+const SECTION_NAMES: Record<string, string> = {
+  general: 'General',
+  profiles: 'Profiles',
+  threads: 'Threads',
+  apps: 'Apps',
+  animation: 'Animation',
+  restyling: 'Restyling',
+  privacy: 'Privacy',
+  shortcuts: 'Shortcuts',
+}
+let section = 'general'
 
-/** Opens settings as a tab and shows it, or closes the tab. */
-function setSettings(open: boolean) {
+/** Opens settings as a tab and shows it, or closes the tab. With a section, opens that one. */
+function setSettings(open: boolean, to?: string) {
+  if (to) showSection(to)
   settingsTab = open
   if (open === !settingsEl.hidden) renderThreads()
   else showSettings(open)
@@ -956,6 +980,91 @@ function showSettings(show: boolean) {
   syncOverlay()
 }
 
+/** Shows one section of settings, ending a search. */
+function showSection(id: string) {
+  if (!SECTION_NAMES[id]) return
+  section = id
+  settingsSearch.value = ''
+  applySearch()
+  $('setBody').scrollTop = 0
+}
+
+const matches = (el: Element, q: string) => `${el.textContent} ${(el as HTMLElement).dataset.keywords ?? ''}`.toLowerCase().includes(q)
+
+/**
+ * Hides what doesn't match a query. Shortcut lists match row by row, keeping the extension and
+ * profile names above any row that's left; the rest match a whole block at a time.
+ */
+function filterItem(item: HTMLElement, q: string): boolean {
+  const rows = [...item.querySelectorAll<HTMLElement>('.sc-row')]
+  if (!rows.length || !q) {
+    item.querySelectorAll<HTMLElement>('.sc-row, .sc-ext, .sc-profile').forEach((el) => (el.hidden = false))
+    item.hidden = !!q && !matches(item, q)
+    return !item.hidden
+  }
+  const head = [...item.querySelectorAll('h3, .help')].map((el) => el.textContent).join(' ')
+  const all = `${head} ${item.dataset.keywords ?? ''}`.toLowerCase().includes(q)
+  for (const r of rows) r.hidden = !all && !matches(r, q)
+  // A heading stays while any row up to the next heading of its rank or higher does.
+  const heads = [...item.querySelectorAll<HTMLElement>('.sc-ext, .sc-profile')]
+  for (const h of heads) {
+    let shown = false
+    for (let el = h.nextElementSibling as HTMLElement | null; el; el = el.nextElementSibling as HTMLElement | null) {
+      if (el.classList.contains('sc-profile') || (h.classList.contains('sc-ext') && el.classList.contains('sc-ext'))) break
+      if (el.classList.contains('sc-row') && !el.hidden) {
+        shown = true
+        break
+      }
+    }
+    h.hidden = !shown
+  }
+  item.hidden = !rows.some((r) => !r.hidden)
+  return !item.hidden
+}
+
+/** Shows the current section, or every match for what's typed in the search. */
+function applySearch() {
+  const q = settingsSearch.value.trim().toLowerCase()
+  const local = shortcutSearch.value.trim().toLowerCase()
+  settingsEl.classList.toggle('searching', !!q)
+  let first = true
+  let any = false
+  for (const sec of settingsEl.querySelectorAll<HTMLElement>('.set-section')) {
+    const id = sec.dataset.section!
+    // Without a search, the shortcuts section's own box narrows its lists.
+    const query = q || (id === 'shortcuts' ? local : '')
+    let hit = false
+    for (const item of sec.querySelectorAll<HTMLElement>('.set-item')) if (filterItem(item, query)) hit = true
+    sec.classList.toggle('cur', !q && id === section)
+    sec.classList.toggle('match', hit)
+    sec.classList.toggle('first', !!q && hit && first)
+    if (q && hit) first = false
+    any ||= hit
+    const nav = $('setNav').querySelector<HTMLElement>(`[data-section="${id}"]`)!
+    nav.classList.toggle('dim', !!q && !hit)
+    if (!q && id === section) nav.setAttribute('aria-current', 'page')
+    else nav.removeAttribute('aria-current')
+  }
+  $('setTitle').textContent = q ? 'Search' : SECTION_NAMES[section]
+  const none = $('setNoMatch')
+  none.hidden = !(q ? !any : section === 'shortcuts' && local && !settingsEl.querySelector('.set-section.cur .set-item:not([hidden])'))
+  if (!none.hidden) none.textContent = `Nothing matches “${(q ? settingsSearch : shortcutSearch).value.trim()}”.`
+}
+
+$('setNav').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-section]')
+  if (b) showSection(b.dataset.section!)
+})
+settingsSearch.addEventListener('input', applySearch)
+shortcutSearch.addEventListener('input', applySearch)
+// ↩ in the search goes to the first section with a match.
+settingsSearch.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return
+  const hit = settingsEl.querySelector<HTMLElement>('.set-section.first')
+  if (hit) showSection(hit.dataset.section!)
+})
+applySearch()
+
 /** Updates the controls from state, leaving alone whichever one is being edited. */
 function renderSettings(all = false) {
   if (!S || settingsEl.hidden) return
@@ -979,6 +1088,8 @@ function renderSettings(all = false) {
   for (const id of ['animSpeed', 'animEase', 'animPreview']) $(id).closest('.field')!.classList.toggle('off', animation.style === 'off')
   if (all || document.activeElement !== privateUrls) privateUrls.value = S.prefs.privateUrls.join('\n')
   hideCapture.checked = hideFromScreenCapture
+  pinWindow.checked = S.pinned
+  $('showHotkey').textContent = keyLabel('show') || 'its hotkey'
   $('appHotkey').textContent = keyLabel('showApp') || 'The app hotkey'
   renderActionKeys()
 }
@@ -1055,6 +1166,7 @@ styledSitesEl.addEventListener('click', (e) => {
   send('restyle-site', { host: b.dataset.removeSite, action: 'reset' })
 })
 hideCapture.addEventListener('change', () => sendPrefs({ hideFromScreenCapture: hideCapture.checked }))
+pinWindow.addEventListener('change', () => send('pin', { on: pinWindow.checked }))
 $('openSettingsFile').addEventListener('click', () => send('open-settings-file'))
 $('settingsButton').addEventListener('click', () => setSettings(!!settingsEl.hidden))
 $('closeSettings').addEventListener('click', () => setSettings(false))
@@ -1137,7 +1249,7 @@ profileListEl.addEventListener('contextmenu', (e) => {
 $('addProfile').addEventListener('click', () => send('add-profile'))
 window.jbrow.on('rename-profile', (id: string) => {
   renameProfile = id
-  setSettings(true)
+  setSettings(true, 'profiles')
   renderProfiles()
 })
 
@@ -1230,7 +1342,10 @@ function renderActionKeys() {
     fixed('Jump to a thread', '⌘1–9') +
     fixed('Zoom in, out, reset', '⌘+ ⌘− ⌘0')
   // State arrives often; rebuilding the same rows would only cost a repaint.
-  if (html !== actionKeysHtml) actionKeysEl.innerHTML = actionKeysHtml = html
+  if (html !== actionKeysHtml) {
+    actionKeysEl.innerHTML = actionKeysHtml = html
+    applySearch()
+  }
 }
 
 function renderShortcuts() {
@@ -1238,7 +1353,7 @@ function renderShortcuts() {
   const used = profiles.filter((p) => commands.some((c) => c.profile === p.id))
   if (!used.length) {
     shortcutsEl.innerHTML = `<p class="help">None of your extensions have commands.</p>`
-    return
+    return applySearch()
   }
   let html = ''
   for (const p of used) {
@@ -1249,11 +1364,12 @@ function renderShortcuts() {
         ext = c.extensionId
         html += `<div class="sc-ext">${esc(c.extensionName)}</div>`
       }
-      html += `<div class="sc-row"><span title="${esc(c.description)}">${esc(c.description)}${c.global ? '<em>works while jbrow is hidden</em>' : ''}</span>
+      html += `<div class="sc-row" data-keywords="${esc(`${c.extensionName} ${p.name}`)}"><span title="${esc(c.description)}">${esc(c.description)}${c.global ? '<em>works while jbrow is hidden</em>' : ''}</span>
         ${keyButton(commandKey(c), c.shortcut)}</div>`
     }
   }
   shortcutsEl.innerHTML = html
+  applySearch()
 }
 
 function renderRecording() {
@@ -1309,7 +1425,11 @@ document.addEventListener('mousedown', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || renaming || e.target === omnibox) return
-  if (!rulesPop.hidden) closeRules()
+  const search = e.target === settingsSearch || e.target === shortcutSearch ? (e.target as HTMLInputElement) : null
+  if (search?.value) {
+    search.value = ''
+    applySearch()
+  } else if (!rulesPop.hidden) closeRules()
   else if (!certPop.hidden) setCert(false)
   else if (!restylePane.hidden) setRestyle(false)
   else if (!extPop.hidden) setExtensions(false)
@@ -1459,7 +1579,7 @@ window.jbrow.on('toast', (text: string) => {
   clearTimeout(toastTimer)
   toastTimer = window.setTimeout(() => (el.hidden = true), 5000)
 })
-window.jbrow.on('settings', ({ open }: { open?: boolean }) => setSettings(open ?? !!settingsEl.hidden))
+window.jbrow.on('settings', ({ open, section }: { open?: boolean; section?: string }) => setSettings(open ?? !!settingsEl.hidden, section))
 window.jbrow.on('rename-tab', (id: string) => startRename(id))
 window.jbrow.on('shortcuts', (data: typeof shortcuts) => {
   shortcuts = data
