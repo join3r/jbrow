@@ -176,6 +176,7 @@
             </label>
             <div id="setNav" class="set-nav-list">
               <button class="set-nav-item" data-section="general"><span data-icon="settings"></span>General</button>
+              <button class="set-nav-item" data-section="appearance"><span data-icon="palette"></span>Appearance</button>
               <button class="set-nav-item" data-section="profiles"><span data-icon="user"></span>Profiles</button>
               <button class="set-nav-item" data-section="threads"><span data-icon="archive"></span>Threads</button>
               <button class="set-nav-item" data-section="apps"><span data-icon="grid"></span>Apps</button>
@@ -216,6 +217,26 @@
                   <span>Open links you didn't click in the background. When a script or another app opens a link on its
                     own, jbrow stays hidden, marks the thread with a dot and counts it next to jb in the menu bar.</span>
                 </label>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="appearance">
+              <h2 class="set-section-title">Appearance</h2>
+              <div class="set-item" data-keywords="appearance mode light dark system follow macos night">
+                <h3>Mode</h3>
+                <div class="field">
+                  <span class="label">Look</span>
+                  <div id="appearance" class="seg" role="group" aria-label="Light or dark">
+                    <button data-value="system">System</button>
+                    <button data-value="light">Light</button>
+                    <button data-value="dark">Dark</button>
+                  </div>
+                </div>
+                <p class="help">System follows macOS as it switches between light and dark. Websites that have a dark look get the same choice.</p>
+              </div>
+              <div class="set-item" data-keywords="theme themes color colour accent palette">
+                <h3>Theme</h3>
+                <div id="themes" class="themes" role="group" aria-label="Theme"></div>
               </div>
             </section>
 

@@ -2,7 +2,7 @@ import { cssEase } from '../shared/ease'
 import { urlMatcher } from '../shared/patterns'
 import { childrenOf, displayName, folderThreads, isAsleep, numberedThreads, sections, type AppView, type FolderView, type ThreadView } from '../shared/threads'
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
-import type { AnimMessage, AppEntry, CertInfo, DownloadInfo, ExtensionShortcut, Prefs, Profile, UiState, UiTab } from '../shared/types'
+import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type DownloadInfo, type ExtensionShortcut, type Prefs, type Profile, type UiState, type UiTab } from '../shared/types'
 
 declare global {
   interface Window {
@@ -13,7 +13,7 @@ declare global {
   }
 }
 
-/** 24×24 stroke icons. The puzzle, pin, eye, eye-off, folder, store, open, copy, wand, undo, trash, lock, warn, search, user, archive, grid, sparkles, shield and keyboard paths are from Lucide (ISC). */
+/** 24×24 stroke icons. The puzzle, pin, eye, eye-off, folder, store, open, copy, wand, undo, trash, lock, warn, search, user, archive, grid, sparkles, shield, keyboard and palette paths are from Lucide (ISC). */
 const ICONS: Record<string, string> = {
   back: '<path d="m15 18-6-6 6-6"/>',
   forward: '<path d="m9 18 6-6-6-6"/>',
@@ -54,6 +54,8 @@ const ICONS: Record<string, string> = {
   shield:
     '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
   pip: '<path d="M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h4"/><rect width="10" height="7" x="12" y="13" rx="2"/>',
+  palette:
+    '<path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>',
   keyboard: '<path d="M10 8h.01M12 12h.01M14 8h.01M16 12h.01M18 8h.01M6 8h.01M7 16h10M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/>',
   up: '<path d="m18 15-6-6-6 6"/>',
   down: '<path d="m6 9 6 6 6-6"/>',
@@ -966,6 +968,7 @@ const settingsSearch = $<HTMLInputElement>('settingsSearch')
 const shortcutSearch = $<HTMLInputElement>('shortcutSearch')
 const SECTION_NAMES: Record<string, string> = {
   general: 'General',
+  appearance: 'Appearance',
   profiles: 'Profiles',
   threads: 'Threads',
   apps: 'Apps',
@@ -1099,6 +1102,8 @@ function renderSettings(all = false) {
   const { animation, hideFromScreenCapture } = S.prefs
   const seg = (id: string, value: string) =>
     $(id).querySelectorAll<HTMLElement>('[data-value]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === value)))
+  seg('appearance', S.prefs.appearance)
+  seg('themes', S.prefs.theme)
   seg('animStyle', animation.style)
   seg('animEase', animation.ease)
   seg('summarizeAfter', String(S.prefs.summarizeAfterDays))
@@ -1197,6 +1202,17 @@ $('summarizeAfter').addEventListener('click', (e) => {
 $('archiveAfter').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ archiveAfterDays: Number(b.dataset.value) })
+})
+$('themes').innerHTML = THEMES.map(
+  (t) => `<button class="theme" data-value="${t.id}" data-theme="${t.id}"><span class="theme-preview"></span>${t.name}</button>`,
+).join('')
+$('themes').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b) sendPrefs({ theme: b.dataset.value as Prefs['theme'] })
+})
+$('appearance').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b) sendPrefs({ appearance: b.dataset.value as Prefs['appearance'] })
 })
 $('earlierAfter').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
@@ -1757,6 +1773,7 @@ window.jbrow.on('state', (state: UiState) => {
   // The find bar searches the page it opened on, so it goes when another tab comes up.
   if (S && S.activeId !== state.activeId) closeFind(false)
   S = state
+  document.documentElement.dataset.theme = state.prefs.theme
   render()
 })
 window.jbrow.on('snapshot', ({ dataUrl, tabId }: { dataUrl: string; tabId: string }) => {

@@ -1,9 +1,9 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, MenuItem, nativeImage, Notification, session, shell, Tray } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, MenuItem, nativeImage, nativeTheme, Notification, session, shell, Tray } from 'electron'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { urlMatcher } from '../shared/patterns'
 import { flatFolders, isInFolder, numberedThreads, rootOf, sections, type FolderView } from '../shared/threads'
-import type { AppEntry, AppLabel, Folder, Prefs, Profile, TabRecord, UiState } from '../shared/types'
+import { THEMES, type AppEntry, type AppLabel, type Folder, type Prefs, type Profile, type TabRecord, type UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
 import { BACKGROUND } from './background'
 import { Certificates } from './certs'
@@ -127,6 +127,8 @@ function state(): UiState {
     nav: tabs.navState(),
     keys: actionKeys(settings.shortcuts),
     prefs: {
+      appearance: settings.appearance,
+      theme: settings.theme,
       animation: settings.animation,
       privateUrls: settings.privateUrls,
       hideFromScreenCapture: settings.hideFromScreenCapture,
@@ -551,6 +553,11 @@ function tabSwitched() {
 }
 
 function updatePrefs(prefs: Partial<Prefs>) {
+  if (prefs.appearance === 'system' || prefs.appearance === 'light' || prefs.appearance === 'dark') {
+    settings.appearance = prefs.appearance
+    nativeTheme.themeSource = prefs.appearance
+  }
+  if (THEMES.some((t) => t.id === prefs.theme)) settings.theme = prefs.theme!
   if (prefs.animation) settings.animation = { ...settings.animation, ...prefs.animation }
   if (prefs.privateUrls) settings.privateUrls = prefs.privateUrls.map((p) => p.trim()).filter(Boolean)
   if (prefs.hideFromScreenCapture !== undefined) {
@@ -1365,6 +1372,7 @@ app.whenReady().then(async () => {
   app.dock?.hide()
   // Without this, macOS quits jbrow a few seconds after it hides: no windows, not frontmost.
   settings = loadSettings()
+  nativeTheme.themeSource = settings.appearance
   // Key equivalents for copy, paste and undo come from the app menu, even when it's never shown.
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([

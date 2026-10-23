@@ -86,8 +86,24 @@ export interface UiState {
   now: number
 }
 
+/** Color themes for jbrow's own screens. Each has a light and a dark look, see ui.css. */
+export const THEMES = [
+  { id: 'teal', name: 'Teal' },
+  { id: 'graphite', name: 'Graphite' },
+  { id: 'ocean', name: 'Ocean' },
+  { id: 'moss', name: 'Moss' },
+  { id: 'rose', name: 'Rose' },
+  { id: 'ember', name: 'Ember' },
+  { id: 'violet', name: 'Violet' },
+] as const
+export type ThemeId = (typeof THEMES)[number]['id']
+/** Light or dark, or whichever macOS is using. Pages see it as prefers-color-scheme too. */
+export type Appearance = 'system' | 'light' | 'dark'
+
 /** The settings the settings screen edits. Everything else stays in settings.json. */
 export interface Prefs {
+  appearance: Appearance
+  theme: ThemeId
   animation: { style: AnimMessage['style']; durationMs: number; ease: AnimMessage['ease'] }
   /** Addresses matching one of these show as "Private" until clicked. `*` matches anything. */
   privateUrls: string[]

@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ActionId } from '../shared/shortcuts'
-import type { MiniPlayerPrefs, Profile, RestyleAgent } from '../shared/types'
+import { THEMES, type Appearance, type MiniPlayerPrefs, type Profile, type RestyleAgent, type ThemeId } from '../shared/types'
 
 export type AnimationStyle = 'materialize' | 'slide' | 'scale' | 'fade' | 'off'
 export type AnimationEase = 'spring' | 'snappy' | 'smooth'
@@ -20,6 +20,10 @@ export interface RestyleSettings {
 }
 
 export interface Settings {
+  /** Light, dark or following macOS. Websites get it as prefers-color-scheme too. */
+  appearance: Appearance
+  /** Color theme for jbrow's own screens. */
+  theme: ThemeId
   /** Your keys for jbrow's own commands, as Electron accelerators, '' for none. Unlisted commands use their defaults (see ACTIONS). */
   shortcuts: Partial<Record<ActionId, string>>
   profiles: Profile[]
@@ -61,6 +65,8 @@ export interface Settings {
 }
 
 const DEFAULTS: Settings = {
+  appearance: 'system',
+  theme: 'teal',
   shortcuts: {},
   profiles: [
     { id: 'work', name: 'Work', color: '#2f9aab' },
@@ -106,6 +112,8 @@ export function loadSettings(): Settings {
     // Older settings have fewer restyle keys.
     settings.restyle = { ...DEFAULTS.restyle, ...rest.restyle }
     settings.miniPlayer = { ...DEFAULTS.miniPlayer, ...rest.miniPlayer }
+    if (!['system', 'light', 'dark'].includes(settings.appearance)) settings.appearance = DEFAULTS.appearance
+    if (!THEMES.some((t) => t.id === settings.theme)) settings.theme = DEFAULTS.theme
     if (hotkeys?.all && settings.shortcuts.show === undefined) settings.shortcuts.show = hotkeys.all
     if (hotkeys?.app && settings.shortcuts.showApp === undefined) settings.shortcuts.showApp = hotkeys.app
     return settings
