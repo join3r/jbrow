@@ -30,6 +30,28 @@
             <button id="reload" class="icon sm" title="Reload (⌘R)" aria-label="Reload"></button>
             <div id="suggest" class="suggest" hidden></div>
           </div>
+          <div id="downloads" class="downloads" hidden>
+            <div id="dlList" class="dl-list" role="group" aria-label="Downloads"></div>
+            <div id="dlPop" class="pop dl-pop" hidden role="dialog" aria-label="Download">
+              <div id="dlName" class="dl-name"></div>
+              <div class="dl-bar"><span id="dlBar"></span></div>
+              <div class="dl-stats"><span id="dlProgress"></span><span id="dlEta"></span></div>
+              <dl class="dl-meta">
+                <dt>Saved to</dt><dd><button id="dlPath" class="link" title="Show in Finder"></button></dd>
+                <dt>From</dt><dd id="dlFrom"></dd>
+                <dt>Profile</dt><dd id="dlProfile"></dd>
+              </dl>
+              <div class="dl-acts">
+                <button id="dlPause" class="icon sm" data-icon="pause" title="Pause" aria-label="Pause"></button>
+                <button id="dlRetry" class="icon sm" data-icon="reload" title="Try again" aria-label="Try again"></button>
+                <button id="dlOpen" class="icon sm" data-icon="open" title="Open" aria-label="Open"></button>
+                <button id="dlShow" class="icon sm" data-icon="folder" title="Show in Finder" aria-label="Show in Finder"></button>
+                <button id="dlCopy" class="icon sm" data-icon="copy" title="Copy download link" aria-label="Copy download link"></button>
+                <span class="dl-gap"></span>
+                <button id="dlCancel" class="icon sm" data-icon="close" title="Cancel download" aria-label="Cancel download"></button>
+              </div>
+            </div>
+          </div>
           <div id="pinnedActions" class="pinned-actions"></div>
           <div class="ext">
             <button id="extButton" class="icon" data-icon="puzzle" title="Extensions" aria-label="Extensions" aria-expanded="false"></button>

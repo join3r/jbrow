@@ -1,7 +1,7 @@
 import { urlMatcher } from '../shared/patterns'
 import { childrenOf, displayName, isAsleep, numberedThreads, sections, type AppView, type FolderView, type ThreadView } from '../shared/threads'
 import { shortcutFromKey, shortcutLabel } from '../shared/shortcuts'
-import type { AnimMessage, AppEntry, ExtensionShortcut, Prefs, Profile, UiState, UiTab } from '../shared/types'
+import type { AnimMessage, AppEntry, DownloadInfo, ExtensionShortcut, Prefs, Profile, UiState, UiTab } from '../shared/types'
 
 declare global {
   interface Window {
@@ -18,7 +18,7 @@ const EASE: Record<AnimMessage['ease'], string> = {
   smooth: 'cubic-bezier(.45,0,.2,1)',
 }
 
-/** 24×24 stroke icons. The puzzle, pin, eye-off, folder and store paths are from Lucide (ISC). */
+/** 24×24 stroke icons. The puzzle, pin, eye-off, folder, store, open and copy paths are from Lucide (ISC). */
 const ICONS: Record<string, string> = {
   back: '<path d="m15 18-6-6 6-6"/>',
   forward: '<path d="m9 18 6-6-6-6"/>',
@@ -37,6 +37,12 @@ const ICONS: Record<string, string> = {
   folderOpen:
     '<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>',
   store: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>',
+  pause: '<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
+  play: '<path d="M6 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L7.5 3.64A1 1 0 0 0 6 4.5z"/>',
+  open: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>',
 }
 const icon = (name: string) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`
 document.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => (el.innerHTML = icon(el.dataset.icon!)))
@@ -127,6 +133,7 @@ function render() {
   $('extHead').textContent = `Extensions · ${p?.name ?? ''}`
   $('newTab').title = `New tab${S.filter !== 'all' ? ` in ${profile(S.filter)?.name ?? S.filter}` : ''} (⌘T)`
   renderSettings()
+  renderDownloadPop()
 
   if (S.activePartition) actions.setAttribute('partition', S.activePartition)
   if (S.activeWebContentsId != null) actions.setAttribute('tab', String(S.activeWebContentsId))
@@ -378,7 +385,7 @@ function hideSuggestions() {
 /** The page hides while anything of jbrow's own covers it; see Panel.setOverlay. */
 let overlaySent = false
 function syncOverlay() {
-  const on = !suggest.hidden || !extPop.hidden || !settingsEl.hidden
+  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !settingsEl.hidden
   if (on !== overlaySent) {
     overlaySent = on
     send('overlay', { on })
@@ -634,6 +641,147 @@ document.addEventListener('mousedown', (e) => {
   if (!extPop.hidden && !(e.target as HTMLElement).closest('.ext')) setExtensions(false)
 })
 
+// ---------- downloads ----------
+
+const dlList = $('dlList')
+const dlPop = $('dlPop')
+let downloads: DownloadInfo[] = []
+let dlOpen: string | null = null
+
+/** Sizes as Finder shows them: 1 KB is 1000 bytes. */
+function bytes(n: number): string {
+  if (n < 1000) return `${n} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let v = n / 1000
+  let i = 0
+  while (v >= 1000 && i < units.length - 1) {
+    v /= 1000
+    i++
+  }
+  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`
+}
+
+function duration(seconds: number): string {
+  if (seconds < 60) return `${Math.max(1, Math.round(seconds))} s`
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min`
+  const h = Math.floor(seconds / 3600)
+  const m = Math.round((seconds % 3600) / 60)
+  return m ? `${h} h ${m} min` : `${h} h`
+}
+
+const finished = (d: DownloadInfo) => d.state === 'completed' || d.state === 'failed'
+const fraction = (d: DownloadInfo) => (d.state === 'completed' ? 1 : d.total ? Math.min(1, d.received / d.total) : 0)
+
+/** "12 MB of 40 MB", or just what's arrived when the size is unknown. */
+function amount(d: DownloadInfo): string {
+  if (d.state === 'completed') return bytes(d.received)
+  return d.total ? `${bytes(d.received)} of ${bytes(d.total)}` : bytes(d.received)
+}
+
+/** Speed and time left, or how it ended. */
+function pace(d: DownloadInfo): string {
+  if (d.state === 'completed') return 'Done'
+  if (d.state === 'failed') return 'Failed'
+  if (d.state === 'paused') return 'Paused'
+  if (d.state === 'interrupted') return 'Connection lost'
+  if (!d.bytesPerSecond) return 'Starting…'
+  const speed = `${bytes(Math.round(d.bytesPerSecond))}/s`
+  return d.total ? `${speed} · ${duration((d.total - d.received) / d.bytesPerSecond)} left` : speed
+}
+
+function renderDownloads() {
+  $('downloads').hidden = !downloads.length
+  const ids = new Set(downloads.map((d) => d.id))
+  for (const b of [...dlList.children] as HTMLElement[]) if (!ids.has(b.dataset.dl!)) b.remove()
+  // Updated in place, so the pies fill smoothly and a click isn't lost to a redraw.
+  for (const d of downloads) {
+    let b = dlList.querySelector<HTMLButtonElement>(`[data-dl="${d.id}"]`)
+    if (!b) {
+      b = document.createElement('button')
+      b.className = 'icon dl'
+      b.dataset.dl = d.id
+      dlList.append(b)
+    }
+    const kind = d.state === 'completed' ? 'check' : d.state === 'failed' ? 'alert' : 'pie'
+    if (b.dataset.kind !== kind) {
+      b.dataset.kind = kind
+      b.innerHTML = kind === 'pie' ? '<span class="pie"></span>' : icon(kind)
+    }
+    b.dataset.state = d.state
+    b.classList.toggle('unknown', kind === 'pie' && !d.total)
+    b.style.setProperty('--p', String(fraction(d)))
+    const percent = d.total && !finished(d) ? `${Math.floor(fraction(d) * 100)}% · ` : ''
+    b.title = `${d.filename} — ${percent}${pace(d)}`
+    b.setAttribute('aria-label', b.title)
+    b.setAttribute('aria-expanded', String(dlOpen === d.id))
+  }
+  if (dlOpen && !ids.has(dlOpen)) setDownload(null)
+  else renderDownloadPop()
+}
+
+function renderDownloadPop() {
+  const d = downloads.find((x) => x.id === dlOpen)
+  if (!d) return
+  dlPop.dataset.state = d.state
+  $('dlName').textContent = d.filename
+  $('dlBar').style.width = `${(d.total || finished(d) ? fraction(d) : 0) * 100}%`
+  $('dlProgress').textContent = amount(d)
+  $('dlEta').textContent = pace(d)
+  const where = $('dlPath')
+  where.textContent = d.path.replace(/^\/Users\/[^/]+/, '~').replace(/\/[^/]*$/, '') || '/'
+  where.title = `Show ${d.path} in Finder`
+  const from = $('dlFrom')
+  from.textContent = shownUrl(d.url)
+  from.title = isPrivate(d.url) ? '' : d.url
+  $('dlProfile').textContent = profile(d.profile)?.name ?? d.profile
+  const running = !finished(d)
+  const pause = $('dlPause')
+  pause.hidden = !running
+  const stopped = d.state === 'paused' || d.state === 'interrupted'
+  const pauseIcon = stopped ? 'play' : 'pause'
+  if (pause.dataset.icon !== pauseIcon) {
+    pause.dataset.icon = pauseIcon
+    pause.innerHTML = icon(pauseIcon)
+    pause.title = stopped ? 'Resume' : 'Pause'
+    pause.setAttribute('aria-label', pause.title)
+  }
+  $('dlCancel').hidden = !running
+  $('dlRetry').hidden = d.state !== 'failed'
+  // Apps and scripts only get Show in Finder, so running one is a deliberate step.
+  $('dlOpen').hidden = d.state !== 'completed' || !d.openable
+}
+
+function setDownload(id: string | null) {
+  if (id === dlOpen) return
+  // Looking at a finished download is what takes it off the toolbar.
+  const prev = downloads.find((d) => d.id === dlOpen)
+  if (prev && finished(prev)) send('download', { id: prev.id, action: 'dismiss' })
+  dlOpen = id
+  dlPop.hidden = !id
+  if (id) focusUi()
+  renderDownloads()
+  syncOverlay()
+}
+
+const downloadAction = (action: string) => dlOpen && send('download', { id: dlOpen, action })
+dlList.addEventListener('click', (e) => {
+  const id = (e.target as HTMLElement).closest<HTMLElement>('[data-dl]')?.dataset.dl
+  if (id) setDownload(dlOpen === id ? null : id)
+})
+$('dlPause').addEventListener('click', () => downloadAction($('dlPause').dataset.icon === 'play' ? 'resume' : 'pause'))
+$('dlCancel').addEventListener('click', () => downloadAction('cancel'))
+$('dlRetry').addEventListener('click', () => downloadAction('retry'))
+$('dlShow').addEventListener('click', () => downloadAction('show'))
+$('dlPath').addEventListener('click', () => downloadAction('show'))
+$('dlCopy').addEventListener('click', () => downloadAction('copy-link'))
+$('dlOpen').addEventListener('click', () => {
+  downloadAction('open')
+  setDownload(null)
+})
+document.addEventListener('mousedown', (e) => {
+  if (dlOpen && !(e.target as HTMLElement).closest('.downloads')) setDownload(null)
+})
+
 // ---------- settings ----------
 
 const animSpeed = $<HTMLInputElement>('animSpeed')
@@ -845,6 +993,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || renaming || e.target === omnibox) return
   if (!rulesPop.hidden) closeRules()
   else if (!extPop.hidden) setExtensions(false)
+  else if (dlOpen) setDownload(null)
   else if (!settingsEl.hidden) setSettings(false)
 })
 
@@ -889,6 +1038,10 @@ window.jbrow.on('apps', (data: typeof appList) => {
   renderApps()
 })
 window.jbrow.on('folder-rules', (id: string) => openRules(id))
+window.jbrow.on('downloads', (list: DownloadInfo[]) => {
+  downloads = list
+  renderDownloads()
+})
 
 let playRun = 0
 
@@ -931,6 +1084,7 @@ window.jbrow.on('anim', (m: AnimMessage) => {
   root.classList.remove('shown')
   hideSuggestions()
   setExtensions(false)
+  setDownload(null)
   setSettings(false)
   closeRules()
   if (renaming) commitRename()

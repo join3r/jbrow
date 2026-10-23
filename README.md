@@ -67,6 +67,15 @@ Threads unseen for a week are archived (change both under Archiving in settings,
 their pages close and they leave the sidebar. Type in the address bar to find one and bring the
 whole thread back. Archived threads are forgotten after 90 days.
 
+Downloads go straight into ~/Downloads, renamed `name (1).ext` if the name is taken. Each one shows
+as a small pie in the toolbar while it runs. Click it for the name, size, speed, time left, folder and
+source, and to pause, resume or cancel it. A finished download turns into a check; open its details
+to open the file or show it in Finder. Apps, installers and scripts only get Show in Finder, and every
+download is quarantined, so Gatekeeper checks it as it would one from Safari or Chrome. A page that starts a
+second download asks first, as in Chrome, and while jbrow is hidden it's simply blocked. Finished downloads leave the toolbar when jbrow hides or when you
+close their details, and if one finishes while jbrow is hidden, you get a notification. A link that opens
+a new tab only to start a download closes that tab again.
+
 ## Settings
 
 The settings screen (⌘, or the sliders icon) covers the summon animation, archiving, apps, private

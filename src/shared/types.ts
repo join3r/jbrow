@@ -117,3 +117,23 @@ export interface AppEntry {
   profile: string | null
   threads: number
 }
+
+/** A download, as the toolbar shows it. */
+export interface DownloadInfo {
+  id: string
+  profile: string
+  filename: string
+  /** Where it's saved. */
+  path: string
+  url: string
+  /** `interrupted`: the connection dropped; resuming tries again. */
+  state: 'progressing' | 'paused' | 'interrupted' | 'completed' | 'failed'
+  received: number
+  /** 0 when the server didn't say. */
+  total: number
+  bytesPerSecond: number
+  startedAt: number
+  endedAt?: number
+  /** False for apps, installers and scripts: Open shows them in Finder instead of running them. */
+  openable: boolean
+}

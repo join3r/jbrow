@@ -4,6 +4,7 @@ import { numberedThreads, rootOf, sections } from '../shared/threads'
 import type { AppEntry, AppLabel, Prefs, UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
 import { ExtensionCommands } from './commands'
+import { Downloads, type DownloadAction } from './downloads'
 import { frontmostApp, type FrontApp } from './frontmost'
 import { logPath, setupLogging } from './log'
 import { Panel } from './panel'
@@ -25,6 +26,7 @@ let tabs: Tabs
 let runtimes = new Map<string, ProfileRuntime>()
 let tray: Tray | null = null
 let commands: ExtensionCommands
+let downloads: Downloads
 /** The settings screen is recording a shortcut: key presses go to it, not to jbrow or extensions. */
 let recordingShortcut = false
 
@@ -48,10 +50,12 @@ const apps = new AppDirectory(() => {
 const addedApps = new Set<string>()
 
 // JBROW_USER_DATA=/some/dir runs a separate jbrow with its own tabs, profiles and log, next to
-// the one you use. Handy for debugging extensions without touching your real data.
+// the one you use, downloading into its own Downloads folder. Handy for debugging extensions
+// without touching your real data.
 if (process.env.JBROW_USER_DATA) {
   app.setPath('userData', process.env.JBROW_USER_DATA)
   app.setPath('logs', `${process.env.JBROW_USER_DATA}/logs`)
+  app.setPath('downloads', `${process.env.JBROW_USER_DATA}/Downloads`)
 }
 setupLogging()
 // Utilities that quit apps with no open windows (Vorssaint, for one) will quit jbrow while it's
@@ -137,6 +141,20 @@ function focusActive() {
   const wc = tabs.activeWebContents()
   if (wc && tabs.active()?.url) wc.focus()
   else focusAddressBar()
+}
+
+function sendDownloads() {
+  if (!panel.win.isDestroyed()) panel.win.webContents.send('downloads', downloads.list())
+}
+
+/** A link that opened a new tab only to download something leaves that tab empty; close it, as Chrome does. */
+function closeDownloadOnlyTab(wc: Electron.WebContents) {
+  const id = tabs.idForWebContents(wc)
+  const rec = tabs.get(id)
+  if (!id || !rec?.parent) return
+  const committed = wc.getURL()
+  if (wc.navigationHistory.canGoBack() || (committed && committed !== 'about:blank')) return
+  setTimeout(() => closeTab(id), 0)
 }
 
 const toast = (text: string) => {
@@ -649,7 +667,11 @@ const tabHooks: TabHooks = (profileId) => ({
 
 function wireIpc() {
   const on = <T>(name: string, fn: (data: T) => void) => ipcMain.on(`ui:${name}`, (_e, data: T) => fn(data))
-  on('ready', () => pushState())
+  on('ready', () => {
+    pushState()
+    sendDownloads()
+  })
+  on<{ id: string; action: DownloadAction }>('download', ({ id, action }) => downloads.act(id, action))
   on<{ id: string }>('activate', ({ id }) => tabs.activate(id))
   on('new', () => {
     tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
@@ -826,6 +848,7 @@ app.whenReady().then(async () => {
     onShown: () => pushState(),
     onHidden: () => {
       hiddenAt = Date.now()
+      downloads.clearFinished()
       pushState()
     },
   })
@@ -847,8 +870,16 @@ app.whenReady().then(async () => {
     permissions,
   })
 
+  downloads = new Downloads({
+    onChange: () => sendDownloads(),
+    onStarted: (wc) => closeDownloadOnlyTab(wc),
+    visible: () => panel.visible,
+    window: () => panel.win,
+  })
+
   wireIpc()
   runtimes = await setupProfiles(settings, tabHooks, (callback) => void pickShareSource(panel.win, callback), permissions)
+  for (const rt of runtimes.values()) downloads.attach(rt.session, rt.profile.id)
   // Pin and unpin from the menu an extension's button shows on right-click (see scripts/patch-deps.mjs).
   for (const rt of runtimes.values()) {
     rt.extensions.on('jbrow-action-context-menu', ({ menu, extensionId }: { menu: Menu; extensionId: string }) => {
