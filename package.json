@@ -14,6 +14,7 @@
     "dev": "npm run setup && JBROW_DEBUG=1 electron .",
     "typecheck": "tsc --noEmit",
     "dist": "npm run setup && electron-builder --mac",
+    "top-sites": "node scripts/top-sites.mjs",
     "icon": "sips -s format png build/icon.svg --out build/icon.png",
     "install-app": "scripts/install.sh"
   },
@@ -51,7 +52,8 @@
         }
       ],
       "category": "public.app-category.productivity",
-      "icon": "build/icon.png",
+      "top-sites": "node scripts/top-sites.mjs",
+    "icon": "build/icon.png",
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",

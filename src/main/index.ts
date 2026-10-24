@@ -32,6 +32,7 @@ import { wireSwipes } from './swipe'
 import { Tabs, type UnloadKind } from './tabs'
 import { blockThirdPartyCookies, thirdPartyCookiesBlocked } from './third-party-cookies'
 import { UserScripts } from './user-scripts'
+import { topSiteCompletion } from './top-sites'
 import { BrowsingHistory, fetchSearchSuggestions } from './visits'
 import { Zoom, ZOOM_STEPS, zoomSite } from './zoom'
 import { rm, writeFile } from 'node:fs/promises'
@@ -1292,12 +1293,13 @@ let searchAbort: AbortController | null = null
  * Whether what's typed may go to the search engine, which sees every keystroke: words only, never
  * anything that looks like an address or matches a private address pattern.
  */
-function maySendToSearch(input: string, reply: SuggestReply, profile: string): boolean {
+function maySendToSearch(input: string, visited: boolean, profile: string): boolean {
   const q = input.trim()
   if (!settings.searchSuggestions || !q || q.length > 200 || looksLikeAddress(q)) return false
   // Typing the start of a site you've been to is typing an address, not a search: "intr" on the
-  // way to a private intranet host mustn't reach the search engine either.
-  if (reply.completion) return false
+  // way to a private intranet host mustn't reach the search engine either. A popular site's name
+  // tells it nothing about you.
+  if (visited) return false
   const isPrivate = urlMatcher(settings.privateUrls)
   if (visits.search(profile, q, 50).some((v) => isPrivate(v.url))) return false
   return !isPrivate(q) && !isPrivate(`https://${q}`)
@@ -1318,16 +1320,19 @@ function cancelSearchSuggestions() {
 function suggest({ input, profile, seq }: { input: string; profile?: string; seq: number }) {
   if (panel.win.isDestroyed()) return
   const p = profile && settings.profiles.some((x) => x.id === profile) ? profile : (tabs.active()?.profile ?? settings.defaultProfile)
+  const isPrivate = urlMatcher(settings.privateUrls)
+  const visited = visits.completion(p, input, isPrivate)
   const reply: SuggestReply = {
     seq,
     input,
     visits: visits.search(p, input, 12),
-    completion: visits.completion(p, input, urlMatcher(settings.privateUrls)),
+    // Your own sites first, then popular ones you haven't been to.
+    completion: visited ?? topSiteCompletion(input, isPrivate),
   }
   panel.ui.send('suggestions', reply)
   cancelSearchSuggestions()
   const suggestUrl = suggestUrlFor(settings.searchUrl)
-  if (!suggestUrl || !maySendToSearch(input, reply, p)) return
+  if (!suggestUrl || !maySendToSearch(input, !!visited, p)) return
   searchTimer = setTimeout(async () => {
     searchTimer = null
     const ctrl = (searchAbort = new AbortController())

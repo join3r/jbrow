@@ -128,7 +128,11 @@ typed come first, then by frecency: how often you visit and how recently. Pages 
 show only as that tab. Typing the start of a site you visit completes it in place, as in Chrome: `git`
 becomes `github.com` with `hub.com` selected, so Return goes there, typing on replaces it and
 Backspace removes it. It doesn't complete while an open tab matches what you typed, so Return still
-switches to the tab you're naming. Arrow to a history row and press ⇧Delete (or click its × on hover)
+switches to the tab you're naming. Sites you haven't been to complete too, from a list of popular
+sites worldwide and in Slovakia that ships with jbrow (`youtu` becomes `youtube.com`), but your
+history always comes first. Three letters only complete to one of the top thousand sites; four or
+more to any on the list. `npm run top-sites` refreshes the list from the Chrome UX Report and Tranco,
+leaving adult sites out. Arrow to a history row and press ⇧Delete (or click its × on hover)
 to remove it from the history. Private addresses show as **Private** in the suggestions and are never
 completed. History is kept in `visits.json` next to `settings.json`: the address, title, number of
 visits and last visit of each page, up to 5000 pages per profile, forgotten after 90 days.
