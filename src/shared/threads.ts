@@ -20,13 +20,6 @@ export function subtree<T extends TabRecord>(tabs: T[], tab: T): T[] {
   return [tab, ...childrenOf(tabs, tab.id).flatMap((c) => subtree(tabs, c))]
 }
 
-export function rootOf<T extends TabRecord>(tabs: T[], tab: T): T {
-  const byId = new Map(tabs.map((t) => [t.id, t]))
-  let r = tab
-  while (r.parent && byId.has(r.parent)) r = byId.get(r.parent)!
-  return r
-}
-
 export function isRoot(tabs: TabRecord[], tab: TabRecord): boolean {
   return !tab.parent || !tabs.some((t) => t.id === tab.parent)
 }
@@ -46,6 +39,35 @@ export function threadsOf<T extends TabRecord>(tabs: T[]): { root: T; all: T[] }
   }
   const walk = (t: T): T[] => [t, ...(kids.get(t.id) ?? []).sort((a, b) => a.createdAt - b.createdAt).flatMap(walk)]
   return tabs.filter((t) => !t.parent || !ids.has(t.parent)).map((root) => ({ root, all: walk(root) }))
+}
+
+/**
+ * Lifts every tab out of the thread it was in, for tabs saved while tabs nested under the tab that
+ * opened them. Each takes its thread's app section and, in Kept, a place right after its thread's
+ * first tab, in the same folder. A pinned thread's other tabs go to the bottom of Kept, as a pinned
+ * tab is an icon of its own. Returns whether anything changed.
+ */
+export function flatten<T extends TabRecord>(tabs: T[]): boolean {
+  let changed = false
+  for (const { root, all } of threadsOf(tabs)) {
+    const rest = all.slice(1)
+    rest.forEach((t, i) => {
+      t.parent = undefined
+      t.scope = root.scope
+      t.scopeName = root.scopeName
+      t.app = root.app
+      t.kept = root.kept
+      t.folder = root.pinned ? undefined : root.folder
+      t.order = root.kept && !root.pinned && root.order !== undefined ? root.order + (i + 1) / (rest.length + 1) : undefined
+      t.pinned = undefined
+      changed = true
+    })
+    if (root.parent) {
+      root.parent = undefined
+      changed = true
+    }
+  }
+  return changed
 }
 
 export interface FolderView<T extends TabRecord> {
@@ -124,8 +146,9 @@ export interface Sections<T extends TabRecord> {
 }
 
 /**
- * Threads in sidebar order. The order is stable (by creation time) so that
- * ⌘1–9 don't shift as you switch. The active thread never counts as Earlier.
+ * Threads in sidebar order. Each is a single tab now; the name stays from when tabs nested. Outside
+ * Kept the newest tab comes first, as in Arc, and the order is by creation time so that ⌘1–9
+ * don't shift as you switch. The active thread never counts as Earlier.
  * `appNames` names app sections by scope key; main and the UI must pass the same names and
  * `earlierAfterMs`, as they order the sections and so the ⌘ numbers.
  */
@@ -158,10 +181,11 @@ export function sections<T extends TabRecord>(
   const inFolder = (v: ThreadView<T>) => !!v.root.folder && folderIds.has(v.root.folder)
   // Showing one app, its threads are the whole list; otherwise each app gets its own section.
   const inApp = (v: ThreadView<T>) => !opts.scope && !!v.root.scope
-  const loose = views.filter((v) => !v.root.kept && !inApp(v))
+  const newest = [...views].reverse()
+  const loose = newest.filter((v) => !v.root.kept && !inApp(v))
   const kept = views.filter((v) => v.root.kept && !v.root.pinned)
   const apps = new Map<string, AppView<T>>()
-  for (const v of views.filter((v) => !v.root.kept && inApp(v))) {
+  for (const v of newest.filter((v) => !v.root.kept && inApp(v))) {
     const key = v.root.scope!
     let app = apps.get(key)
     if (!app) apps.set(key, (app = { scope: key, name: opts.appNames?.[key] || v.root.scopeName || key, threads: [], earlier: [] }))
@@ -212,3 +236,9 @@ export function isAsleep(all: TabRecord[], opts: { now: number; afterMs: number;
 export const isPinned = (t: TabRecord) => !!t.pinned && !!t.kept
 
 export const displayName = (t: TabRecord) => t.name || t.title || (t.url ? t.url : 'New tab')
+
+/** For telling the same page apart from another: no #fragment or trailing slash. */
+export const samePage = (url: string) => url.replace(/#.*$/, '').replace(/\/$/, '')
+
+/** A kept or pinned tab is on another page than the one it was kept on, as Arc marks with a slash. */
+export const awayFromHome = (t: TabRecord) => !!t.kept && !!t.home && !!t.url && samePage(t.url) !== samePage(t.home.url)

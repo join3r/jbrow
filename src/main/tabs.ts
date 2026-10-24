@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { urlMatcher } from '../shared/patterns'
 import { MAX_PANES, PANE_HEAD, paneSpans, splitOf } from '../shared/split'
-import { byOrder, childrenOf, isAsleep, isInFolder, isRoot, parentFolder, rootOf, subtree, threadsOf } from '../shared/threads'
+import { byOrder, flatten, isAsleep, isInFolder, isRoot, parentFolder, samePage, subtree, threadsOf } from '../shared/threads'
 import type { CrashView, Folder, KeepLoaded, Profile, Split, TabRecord, UiTab } from '../shared/types'
 import type { Certificates } from './certs'
 import type { DangerousSites } from './dangerous'
@@ -69,7 +69,11 @@ export type UnloadKind = 'leave' | 'reload' | 'close'
 export interface CreateOptions {
   profile: string
   url?: string
-  parent?: string
+  /**
+   * The tab it was opened from. Like a link in Arc, it goes to the top of Today, or of the opener's
+   * app section, never into Kept: a kept or pinned tab stays what it was.
+   */
+  opener?: string
   scope?: string
   scopeName?: string
   app?: string
@@ -113,18 +117,16 @@ const CLOSED_KEEP = 25
 /** A closed tab, with what it takes to put it back where it was. */
 interface ClosedTab {
   rec: TabRecord
-  /** Its place in `records`, which orders a thread's tabs. */
+  /** Its place in `records`. */
   index: number
-  /** The app section of its thread, for when it comes back as a thread of its own. */
-  root: Pick<TabRecord, 'scope' | 'scopeName' | 'app'>
-  /** Its children, which close() moved up a level, so they can move back under it. */
-  children: string[]
   history?: NavHistory
 }
 
 /** A tab waiting for its page to agree to close. */
 interface Closing {
   remember: boolean
+  /** Removes a kept tab too, rather than closing only its page. */
+  remove: boolean
   /** Taken before the page goes, since a closed page has no back and forward list left to read. */
   history?: NavHistory
   done: (closed: boolean) => void
@@ -135,7 +137,7 @@ export class Tabs {
   folders: Folder[] = []
   /** Tabs shown side by side. A tab is in one split at most; closing it down to one tab ends the split. */
   splits: Split[] = []
-  /** Tabs of archived threads, with their parent links intact. They have no views. */
+  /** Archived tabs. They have no views. */
   archived: TabRecord[] = []
   /** Bumped whenever `archived` changes, so the UI gets the list (which can be long) only then. */
   archivedRev = 0
@@ -188,6 +190,11 @@ export class Tabs {
       }
       // Empty new tabs aren't worth restoring.
       this.records = data.tabs.filter((t) => t.url)
+      // Tabs saved while they nested in threads stand on their own now.
+      flatten(this.records)
+      flatten(data.archived ?? [])
+      // Kept tabs from before pinned pages are kept on the page they're on.
+      for (const t of this.records) if (t.kept && !t.home) this.setHome(t)
       this.folders = data.folders ?? []
       this.splits = data.splits ?? []
       this.prune()
@@ -327,7 +334,7 @@ export class Tabs {
     return undefined
   }
   uiTabs(): UiTab[] {
-    return this.records.map((t) => ({ ...t, loading: this.live.get(t.id)?.loading ?? false, crashed: this.crashed.get(t.id)?.reason ? true : undefined }))
+    return this.records.map((t) => ({ ...t, loading: this.live.get(t.id)?.loading ?? false, loaded: this.live.has(t.id), crashed: this.crashed.get(t.id)?.reason ? true : undefined }))
   }
   navState() {
     const wc = this.activeWebContents()
@@ -342,13 +349,14 @@ export class Tabs {
 
   create(opts: CreateOptions): TabRecord {
     const now = Date.now()
+    const from = opts.opener ? this.get(opts.opener) : undefined
     const rec: TabRecord = {
       id: randomUUID(),
       profile: opts.profile,
-      parent: opts.parent,
-      scope: opts.parent ? undefined : opts.scope,
-      scopeName: opts.parent ? undefined : opts.scopeName,
-      app: opts.parent ? undefined : opts.app,
+      opener: from?.id,
+      scope: from ? from.scope : opts.scope,
+      scopeName: from ? from.scopeName : opts.scopeName,
+      app: from ? from.app : opts.app,
       url: opts.url ?? '',
       title: '',
       createdAt: now,
@@ -362,10 +370,10 @@ export class Tabs {
     return rec
   }
 
-  /** Reuses the active tab if it's an empty new tab, so new tabs don't pile up. */
+  /** Reuses the active tab if it's an empty new tab outside a split, so new tabs don't pile up. */
   newTab(opts: Omit<CreateOptions, 'url'>): TabRecord {
     const cur = this.active()
-    if (cur && !cur.url && !cur.parent) {
+    if (cur && !cur.url && !this.splitOf(cur.id)) {
       cur.profile = opts.profile
       cur.scope = opts.scope
       cur.scopeName = opts.scopeName
@@ -426,6 +434,7 @@ export class Tabs {
       const r = rec()
       if (r) {
         r.title = title
+        if (r.home && samePage(wc.getURL()) === samePage(r.home.url)) r.home.title = title
         this.changed()
       }
       this.deps.onTitle(r?.profile ?? rt.profile.id, wc.getURL(), title)
@@ -434,6 +443,7 @@ export class Tabs {
       const r = rec()
       if (r && favicons[0]) {
         r.favicon = faviconUrl(r.profile, favicons[0])
+        if (r.home && samePage(wc.getURL()) === samePage(r.home.url)) r.home.favicon = r.favicon
         this.changed()
       }
     })
@@ -441,6 +451,8 @@ export class Tabs {
       const r = rec()
       if (r) {
         r.url = url
+        // A kept tab that had no page yet (a new pane split from one) is kept on its first.
+        if (r.kept && !r.home) this.setHome(r)
         this.changed()
       }
       this.saveHistory()
@@ -557,7 +569,7 @@ export class Tabs {
           const r = rec()
           const child = this.create({
             profile: r?.profile ?? rt.profile.id,
-            parent: id,
+            opener: id,
             webContents: guest,
             url: details.url,
             activate: !background,
@@ -574,7 +586,7 @@ export class Tabs {
       const closing = this.closing.get(id)
       if (closing) {
         this.closing.delete(id)
-        if (this.live.get(id)?.wc === wc) this.close(id, closing.remember, closing.history)
+        if (this.live.get(id)?.wc === wc) this.close(id, closing.remember, closing.history, closing.remove)
         closing.done(true)
       }
       if (this.fullscreenId === id) this.setFullscreen(null)
@@ -660,7 +672,7 @@ export class Tabs {
     const items: Electron.MenuItemConstructorOptions[] = []
     const section = (...more: Electron.MenuItemConstructorOptions[]) => items.push(...more, { type: 'separator' })
     const openHere = (url: string, background = false) =>
-      this.create({ profile: rt.profile.id, parent: id, url, activate: !background, unread: background || undefined })
+      this.create({ profile: rt.profile.id, opener: id, url, activate: !background, unread: background || undefined })
     const others = this.deps.profiles().filter((p) => p.id !== rt.profile.id)
 
     if (params.misspelledWord) {
@@ -675,7 +687,7 @@ export class Tabs {
     if (params.linkURL) {
       const web = isWebUrl(params.linkURL)
       section(
-        { label: 'Open link in this thread', enabled: web, click: () => openHere(params.linkURL) },
+        { label: 'Open link in new tab', enabled: web, click: () => openHere(params.linkURL) },
         { label: 'Open link in background', enabled: web, click: () => openHere(params.linkURL, true) },
         ...(others.length
           ? [{
@@ -693,7 +705,7 @@ export class Tabs {
       // blob: and MediaSource addresses (most streaming video) only exist inside the page.
       const reachable = isWebUrl(params.srcURL) || (media === 'image' && params.srcURL.startsWith('data:'))
       section(
-        { label: `Open ${media} in this thread`, enabled: isWebUrl(params.srcURL), click: () => openHere(params.srcURL) },
+        { label: `Open ${media} in new tab`, enabled: isWebUrl(params.srcURL), click: () => openHere(params.srcURL) },
         { label: `Save ${media}`, enabled: reachable, click: () => this.deps.download(wc, params.srcURL) },
         ...(media === 'image' ? [{ label: 'Copy image', enabled: params.hasImageContents, click: () => wc.copyImageAt(params.x, params.y) }] : []),
         { label: `Copy ${media} address`, enabled: reachable, click: () => clipboard.writeText(params.srcURL) },
@@ -824,17 +836,17 @@ export class Tabs {
    * (beforeunload), as in Chrome; resolves with whether the tab closed. A page that doesn't ask
    * closes a moment later, once its process lets it go. A crashed or stuck page can't ask.
    */
-  closeAsking(id: string, remember = true): Promise<boolean> {
+  closeAsking(id: string, remember = true, remove = false): Promise<boolean> {
     const wc = this.webContentsFor(id)
     if (!wc || this.crashed.has(id)) {
-      this.close(id, remember)
+      this.close(id, remember, undefined, remove)
       return Promise.resolve(true)
     }
     // Already asking: a second ⌘W waits on the same answer.
     const pending = this.closing.get(id)
     if (pending) return new Promise((resolve) => (pending.done = chain(pending.done, resolve)))
     return new Promise((resolve) => {
-      this.closing.set(id, { remember, history: this.historyOf(id), done: resolve })
+      this.closing.set(id, { remember, remove, history: this.historyOf(id), done: resolve })
       wc.close({ waitForBeforeUnload: true })
     })
   }
@@ -842,54 +854,76 @@ export class Tabs {
   /**
    * Closes a tab now; its page doesn't get to ask, as when Chrome discards a tab. For closes
    * jbrow does on its own or many at once. `remember` false leaves it out of what ⇧⌘T reopens.
+   * A kept or pinned tab only closes its page, as in Arc: it stays in the sidebar, back on its
+   * pinned page for when you next open it. `remove` takes it out of the sidebar too.
    */
-  close(id: string, remember = true, history?: NavHistory) {
+  close(id: string, remember = true, history?: NavHistory, remove = false) {
     const rec = this.get(id)
     if (!rec) return
-    if (remember && rec.url) this.remember(rec, history)
-    const thread = new Set(subtree(this.records, rootOf(this.records, rec)).map((t) => t.id))
     const panes = this.panesOf(id)
-    // Children move up to the closed tab's parent so a thread doesn't fall apart.
-    for (const child of childrenOf(this.records, id)) {
-      child.parent = rec.parent
-      if (!rec.parent) {
-        child.scope = rec.scope
-        child.scopeName = rec.scopeName
-        child.app = rec.app
-        child.kept = rec.kept
-        child.pinned = rec.pinned
-        child.folder = rec.folder
-        child.order = rec.order
-      }
+    if (rec.kept && rec.home && !remove) {
+      this.dropView(rec)
+      this.histories.delete(rec.id)
+      // Its split carries on without it, so opening the split doesn't load it again.
+      this.leaveSplit(id)
+      rec.url = rec.home.url
+      rec.title = rec.home.title
+      rec.favicon = rec.home.favicon
+      rec.unread = undefined
+    } else {
+      if (remember && rec.url) this.remember(rec, history)
+      this.dropView(rec)
+      this.records = this.records.filter((t) => t.id !== id)
     }
-    this.dropView(rec)
-    this.records = this.records.filter((t) => t.id !== id)
     this.mru = this.mru.filter((m) => m !== id)
     this.prune()
     if (this.activeId === id) {
       this.activeId = null
       // In a split, the pane to its left (or right) takes over. Otherwise the next tab comes from
-      // the same thread or from outside Kept; a kept thread only comes up when asked for.
+      // outside Kept; a kept tab only comes up when asked for.
       const i = panes.indexOf(id)
-      const beside = [panes[i - 1], panes[i + 1]].find((p) => p && this.get(p))
+      const beside = [panes[i - 1], panes[i + 1]].find((p) => p && p !== id && this.get(p))
       const next = beside ?? this.mru.find((m) => {
         const t = this.get(m)
-        return t && (thread.has(m) || !rootOf(this.records, t).kept)
+        return t && !t.kept
       })
       if (next) this.activate(next)
+      else this.layout()
     }
     this.changed()
   }
 
+  /** Remembers the page a kept tab is on as its pinned page. */
+  private setHome(rec: TabRecord) {
+    rec.home = rec.url ? { url: rec.url, title: rec.title, favicon: rec.favicon } : undefined
+  }
+
+  /** Makes the page a kept or pinned tab is on its pinned page, which closing it goes back to. */
+  keepHere(id: string) {
+    const rec = this.get(id)
+    if (!rec?.kept) return
+    this.setHome(rec)
+    this.changed()
+  }
+
+  /**
+   * Takes a kept or pinned tab back to its pinned page, as clicking the favicon of one that's
+   * wandered off does in Arc.
+   */
+  goHome(id: string) {
+    const rec = this.get(id)
+    if (!rec?.kept || !rec.home) return
+    const wc = this.webContentsFor(id)
+    if (wc) void wc.loadURL(rec.home.url).catch(() => {})
+    else {
+      rec.url = rec.home.url
+      this.histories.delete(id)
+    }
+    this.activate(id)
+  }
+
   private remember(rec: TabRecord, history = this.historyOf(rec.id)) {
-    const root = rootOf(this.records, rec)
-    this.closed.push({
-      rec: { ...rec },
-      index: this.records.indexOf(rec),
-      root: { scope: root.scope, scopeName: root.scopeName, app: root.app },
-      children: childrenOf(this.records, rec.id).map((c) => c.id),
-      history,
-    })
+    this.closed.push({ rec: { ...rec }, index: this.records.indexOf(rec), history })
     if (this.closed.length > CLOSED_KEEP) this.closed.shift()
   }
 
@@ -897,27 +931,13 @@ export class Tabs {
     return this.closed.some((c) => this.deps.runtime(c.rec.profile))
   }
 
-  /**
-   * ⇧⌘T: brings back the most recently closed tab, under its parent if that's still open,
-   * otherwise as a thread of its own. Children it had come back under it if they're still where
-   * closing it put them. Tabs of deleted profiles are skipped.
-   */
+  /** ⇧⌘T: brings back the most recently closed tab where it was. Tabs of deleted profiles are skipped. */
   reopen(): TabRecord | undefined {
     let c: ClosedTab | undefined
     while ((c = this.closed.pop()) && !this.deps.runtime(c.rec.profile));
     if (!c) return undefined
     const rec: TabRecord = { ...c.rec, id: this.get(c.rec.id) ? randomUUID() : c.rec.id, lastSeen: Date.now(), unread: undefined }
-    if (rec.parent && !this.get(rec.parent)) {
-      rec.parent = undefined
-      Object.assign(rec, c.root)
-    }
     if (rec.folder && !this.folder(rec.folder)) rec.folder = undefined
-    for (const child of c.children.map((id) => this.get(id))) {
-      if (!child || child.profile !== rec.profile || child.parent !== rec.parent) continue
-      if (!rec.parent && (child.kept !== rec.kept || child.pinned !== rec.pinned || child.folder !== rec.folder)) continue
-      child.parent = rec.id
-      child.kept = child.pinned = child.folder = child.order = child.scope = child.scopeName = child.app = undefined
-    }
     if (c.history) this.histories.set(rec.id, c.history)
     this.records.splice(Math.min(c.index, this.records.length), 0, rec)
     this.activate(rec.id)
@@ -956,43 +976,22 @@ export class Tabs {
     this.changed()
   }
 
-  /**
-   * Moves a tab (with everything under it) under another tab, or to the top level.
-   * Returns an error message for moves that aren't allowed.
-   */
-  move(id: string, parent: string | null, kept?: boolean, folder?: string): string | null {
+  /** Keeps a tab (in `folder`, if there is one) or moves it out of Kept. */
+  move(id: string, kept: boolean, folder?: string) {
     const rec = this.get(id)
-    if (!rec) return null
-    if (parent) {
-      const target = this.get(parent)
-      if (!target || target.id === id) return null
-      if (subtree(this.records, rec).includes(target)) return "A thread can't go inside one of its own sub-threads."
-      if (target.profile !== rec.profile) return 'Threads only merge within one profile, because their pages share a login.'
-      rec.parent = target.id
-      rec.kept = undefined
-      rec.pinned = undefined
-      rec.folder = undefined
-      rec.order = undefined
-      rec.scope = undefined
-      rec.scopeName = undefined
-      rec.app = undefined
-    } else this.toThread(rec, !!kept, folder)
+    if (!rec) return
+    this.toThread(rec, kept, folder)
     this.changed()
-    return null
   }
 
-  /** Makes a tab a thread of its own, kept (in `folder`, if there is one) or not. */
+  /** Puts a tab in Kept (in `folder`, if there is one) or out of it, unpinned either way. */
   private toThread(rec: TabRecord, kept: boolean, folder?: string) {
-    if (rec.parent) {
-      const root = rootOf(this.records, rec)
-      rec.scope = root.scope
-      rec.scopeName = root.scopeName
-      rec.app = root.app
-    }
     const into = kept && folder && this.folder(folder) ? folder : undefined
     // Somewhere new in Kept, it goes to the bottom.
-    if (rec.parent || !kept || !rec.kept || rec.pinned || rec.folder !== into) rec.order = undefined
-    rec.parent = undefined
+    if (!kept || !rec.kept || rec.pinned || rec.folder !== into) rec.order = undefined
+    // Kept now, it's kept on the page it's on; out of Kept, it has no pinned page.
+    if (kept && !rec.kept) this.setHome(rec)
+    if (!kept) rec.home = undefined
     rec.kept = kept || undefined
     rec.pinned = undefined
     rec.folder = into
@@ -1005,8 +1004,8 @@ export class Tabs {
   pin(id: string, target: string | null = null, after = false) {
     const rec = this.get(id)
     const at = target ? this.get(target) : undefined
-    if (!rec || id === target || (target && !(at?.pinned && at.kept && isRoot(this.records, at)))) return
-    if (!rec.pinned || rec.parent) this.toThread(rec, true)
+    if (!rec || id === target || (target && !(at?.pinned && at.kept))) return
+    if (!rec.pinned) this.toThread(rec, true)
     rec.pinned = true
     rec.order = at ? (at.order ?? 0) + (after ? 0.5 : -0.5) : undefined
     this.changed()
@@ -1016,9 +1015,7 @@ export class Tabs {
   /** Loads the pages of pinned threads that have none yet, when settings keep them loaded, so they're ready when clicked. */
   loadPinned() {
     if (!this.keepLoaded.pinned) return
-    for (const root of this.records.filter((t) => t.pinned && t.kept && isRoot(this.records, t))) {
-      for (const t of subtree(this.records, root)) if (t.url && !this.live.has(t.id)) this.ensureView(t)
-    }
+    for (const t of this.records) if (t.pinned && t.kept && t.url && !this.live.has(t.id)) this.ensureView(t)
   }
 
   /**
@@ -1028,7 +1025,7 @@ export class Tabs {
   place(id: string, target: string | null, after = false) {
     const at = target ? (this.folder(target) ?? this.get(target)) : undefined
     if (target && (!at || id === target)) return
-    if (at && !('rules' in at) && !(at.kept && !at.pinned && isRoot(this.records, at))) return
+    if (at && !('rules' in at) && !(at.kept && !at.pinned)) return
     const into = at && this.containerOf(at)
     const folder = this.folder(id)
     let item: Folder | TabRecord
@@ -1069,14 +1066,21 @@ export class Tabs {
   // ---------- split view ----------
 
   /**
-   * ⌘D: a new pane right of the active tab, in its profile, waiting for an address. It's a tab
-   * opened from the active one, so it sits under it in the sidebar. Returns why it can't, if it can't.
+   * ⌘D: a new pane right of the active tab, in its profile, waiting for an address. As in Arc, the
+   * split is one row in the sidebar where its first tab is: a kept tab's new pane is kept right
+   * after it, so the split stays in Kept. A pinned tab stays an icon, and its pane goes to Today
+   * like any tab opened from it. Returns why it can't, if it can't.
    */
   splitNew(): string | null {
     const cur = this.active()
     if (!cur?.url) return null
     if (this.panesOf(cur.id).length >= MAX_PANES) return `Split view holds up to ${MAX_PANES} tabs.`
-    const rec = this.create({ profile: cur.profile, parent: cur.id, activate: false })
+    const rec = this.create({ profile: cur.profile, opener: cur.id, activate: false })
+    if (cur.kept && !cur.pinned) {
+      rec.kept = true
+      rec.folder = cur.folder
+      rec.order = (cur.order ?? 0) + 0.5
+    }
     this.join(cur.id, rec.id)
     this.activate(rec.id)
     return null
@@ -1251,6 +1255,7 @@ export class Tabs {
       if (into) {
         root.kept = true
         root.folder = into.id
+        this.setHome(root)
       } else {
         for (const t of all) {
           this.dropView(t)

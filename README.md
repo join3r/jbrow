@@ -46,9 +46,9 @@ be the default browser, not `npm start`.
 
 Links you didn't click open quietly. If a link arrives with no click or key press in the last 2
 seconds (a script, a build tool, an app opening something on its own), jbrow doesn't come up: the
-thread opens in the background, muted, with a dot in the sidebar, and the menu bar item counts them
+tab opens in the background, muted, with a dot in the sidebar, and the menu bar item counts them
 (`jb •2`). Right-click the menu bar item for **Show quiet links**, or just look at them; viewing a
-thread clears its dot and unmutes it. Links that arrive while jbrow is up, or that launch it, open
+tab clears its dot and unmutes it. Links that arrive while jbrow is up, or that launch it, open
 as usual. Turn this off with **Quiet links** under **General** in settings.
 
 To change the icon, edit `build/icon.svg` and run `npm run icon`.
@@ -72,11 +72,11 @@ These are the defaults; change any of them under **Shortcuts** in settings. ⌘1
 
 | Key | Does |
 |---|---|
-| ⌥Space | Show or hide jbrow with every thread |
-| ⌥⇧Space | Show only the threads of the app you were in |
+| ⌥Space | Show or hide jbrow with every tab |
+| ⌥⇧Space | Show only the tabs of the app you were in |
 | ⌘T / ⇧⌘N | New tab / new tab in the next profile |
 | Tab | In the address bar: switch the profile what you type opens in |
-| ⌘1–9 | Jump to a thread |
+| ⌘1–9 | Jump to a tab |
 | ⌃Tab | Previous tab |
 | ⌘W | Close tab, or settings while it's showing |
 | ⌘D | Split view: a new tab beside this one (again for up to 4) |
@@ -121,7 +121,7 @@ While you type in the address bar, Tab (⇧Tab goes back) switches the profile t
 profile in the address bar changes to match, and the foot of the suggestions says which profile Tab goes to next. On a new tab the tab itself moves over. On a tab with a page,
 the page stays where it is and what you typed opens in a new tab in the chosen profile.
 
-The address bar suggests, as you type, matching open tabs, pages from your history, archived threads
+The address bar suggests, as you type, matching open tabs, pages from your history, archived tabs
 and the search engine's suggestions. History is per profile, so it follows the profile what you type
 opens in (Tab switches it, and the suggestions change with it). Pages whose site starts with what you
 typed come first, then by frecency: how often you visit and how recently. Pages already open in a tab
@@ -139,31 +139,47 @@ suggestions). They're fetched without cookies, a moment after you stop typing. B
 goes to the search engine, nothing that looks like an address (a dot before a domain, a port, a path,
 a scheme) or matches a private address pattern is sent. Turn them off under **General**.
 
-Threads opened from an app with ⌥⇧Space get their own section in the sidebar, under the app's name
-and icon (linked apps share one). Kept threads stay in Kept.
+The sidebar is a flat list of tabs, as in Arc: pinned icons at the top, then Kept, then Today. New
+tabs go to the top of Today, newest first. A tab opened from a page (a link opened in a new tab, ⌘-click,
+a script's `window.open`) is a tab of its own at the top of Today too, wherever it was opened from: a
+kept or pinned tab stays as it was and never collects the tabs opened from it.
+
+Tabs opened from an app with ⌥⇧Space get their own section in the sidebar, under the app's name and
+icon (linked apps share one), and tabs opened from those go to the top of the same section. Kept tabs
+stay in Kept.
 
 Pinned tabs sit at the top of the sidebar as icons only. Right-click a tab → **Pin to top**, or drag
 it onto the icons. They share one row and get smaller as you pin more; drag the line under them down
 for another row (double-click it for one row again). Drag the icons to reorder them, or drag one into
-the list to unpin it. Pinned threads count as kept, so they never archive; they show whichever app the
+the list to unpin it. Pinned tabs count as kept, so they never archive; they show whichever app the
 sidebar is narrowed to, and ⌘1–9 reach them first. Their pages load when jbrow starts and stay loaded,
-while kept threads unseen for the **Summarize** time unload theirs (keeping their full row). Switch
-either under **Threads** → **Keep loaded** in settings (`keepLoaded` in `settings.json`). The thread you're on opens under the icons
-when it has tabs inside.
+while kept tabs unseen for the **Summarize** time unload theirs (keeping their full row). Switch
+either under **Tabs** → **Keep loaded** in settings (`keepLoaded` in `settings.json`).
+
+Kept and pinned tabs remember the page they were kept on, as Arc's pinned tabs do. Once one goes
+somewhere else, its row shows a slash before the title, and its favicon turns into an arrow on hover:
+click it to go back to the pinned page. A pinned icon goes back when you click it while you're on it.
+Right-click for **Back to pinned page**, or **Pin this page here** to keep the tab on the page it's on
+now. ⌘W (or the row's ×) on a kept or pinned tab closes only its page: the tab stays where you put
+it, back on its pinned page for when you next open it, and focus moves to a tab outside Kept. To
+take it out of the sidebar, right-click it → **Delete**. A kept tab whose page is closed and back
+on its pinned page has no ×.
 
 Right-click a tab to rename it, pin it, keep it, move it to a folder, open it in another profile, copy its
-link or close it. Its close
+link, close it or, for a kept tab, delete it. Its close
 button shows on hover. ⇧⌘T, or right-click **+** → **Reopen closed tab**, brings back the last 25
-closed tabs one by one, in their old place with their back/forward history and any threads that were
-under them. The list is kept only until jbrow quits.
+closed tabs one by one, in their old place with their back/forward history. The list is kept only until jbrow quits.
 
 **Split view** shows up to 4 tabs side by side, as in Arc. ⌘D opens a new tab to the right of the one
-you're on, in its profile and under it in its thread, and puts you in the address bar. To split with a
+you're on, in its profile, and puts you in the address bar. As in Arc, a split is one row in the
+sidebar, its tabs side by side, where the first of them comes: ⌘D on a kept tab keeps the new tab
+right after it, so the split stays in Kept, while on a pinned tab the pinned icon stays and the new tab
+goes to the top of Today. To split with a
 tab you already have, right-click it and choose **Open in split view**. Drag the gap between two
 panes to resize them. The focused pane has a thin ring, and the address bar and your keys (reload,
-find, zoom, ⌘L, DevTools) act on it; click a pane or use ⌃⌘←/→ to focus another. In the sidebar, tabs
-in a split have a split icon (hover it to see the other tabs), and the panes on screen besides the
-focused one are lightly highlighted. Opening any of them shows the whole split with that one focused.
+find, zoom, ⌘L, DevTools) act on it; click a pane or use ⌃⌘←/→ to focus another. A tab whose split partners
+show elsewhere (a pinned icon, or a profile filtered out) has a split icon instead (hover it to see the
+other tabs), and the panes on screen besides the focused one are lightly highlighted. Opening any of them shows the whole split with that one focused.
 ⌘W closes the focused pane, and the tab left alone fills the page area again. Right-click a tab in a
 split for **Separate tabs**, or **Take out of split view** with 3 or more. Splits are saved with your
 tabs; archiving or closing a tab takes it out of its split.
@@ -171,11 +187,11 @@ tabs; archiving or closing a tab takes it out of its split.
 A page with unsaved changes asks before it goes, as in Chrome: closing its tab (⌘W, the close
 button, the tab's menu) or going elsewhere asks **Leave site?**, and reloading asks **Reload site?**.
 Pages only get to ask once you've clicked or typed in them. Tabs jbrow closes on its own, many at
-once, don't ask: threads falling asleep or being archived, deleting a profile, quitting. A page that
+once, don't ask: tabs falling asleep or being archived, deleting a profile, quitting. A page that
 asks while jbrow is hidden stays where it is.
 
 Right-click a page for **Print…** and **Save as PDF…** (saved to ~/Downloads by default). The same menu
-opens a link in this thread, in the background or in another profile, saves or copies a link, image or
+opens a link in a new tab, in the background or in another profile, saves or copies a link, image or
 video, copies an image, searches for or looks up selected text, and offers spelling suggestions in text
 fields (or **Add to dictionary**).
 
@@ -235,36 +251,41 @@ sites left out), downloaded every 12 hours into `blocklists/` next to `settings.
 you visit never leave your Mac. Downloads and pages inside frames aren't checked. Turn it off under
 **Privacy** in settings, which also shows how big the lists are and when they last updated.
 
-Kept is the top of the sidebar, above Today. Drag a thread there (or onto the line under it) to
-keep it. Drag kept threads and folders up and down to arrange them: a line shows where they'll go,
-and threads can sit above folders. Kept can hold folders: right-click the sidebar away from a
-thread for **New folder**, or use **Move to folder → New folder** on a thread. Drag threads or other
-folders onto the middle of a folder to put them inside it, click it to fold it away, and right-click it to rename, delete (its threads stay kept) or set its
-**auto-file rules**. A thread about to be archived moves into the first folder whose rules match one of
-its addresses instead of being archived. Rules are patterns like the private addresses ones.
+Kept is the top of the sidebar, above Today. Drag a tab there (or onto the line under it) to
+keep it, and onto Today's heading or a tab outside Kept to stop keeping it. Drag kept tabs and folders
+up and down to arrange them: a line shows where they'll go, and tabs can sit above folders. Kept can
+hold folders: right-click the sidebar away from a tab for **New folder**, or use **Move to folder →
+New folder** on a tab. Drag tabs or other folders onto the middle of a folder to put them inside it,
+click it to fold it away, and right-click it to rename, delete (its tabs stay kept) or set its
+**auto-file rules**. A tab about to be archived moves into the first folder whose rules match its
+address instead of being archived. Rules are patterns like the private addresses ones.
 
-Threads unseen for 3 days fall asleep: their pages unload and the sidebar shows them as one line
-saying how many tabs, which sites and how long ago. Clicking one loads it again. A page that's playing
-sound stays loaded, and kept threads never sleep.
+Tabs unseen for 3 days fall asleep: their pages unload and the sidebar shows them with a line
+saying which site and how long ago. Clicking one loads it again. A page that's playing sound stays
+loaded, and kept tabs never sleep.
 
-Threads unseen for a week are archived (change both under **Threads** in settings, or turn them off):
-their pages close and they leave the sidebar. The bottom of the sidebar then says **Archived 3
-threads** with **Undo**, which puts exactly those threads back where they were (same place and app
-section, sub-threads and back and forward included) and gives them the full time again before archiving. Archiving that happens
+Tabs unseen for a week are archived (change both under **Tabs** in settings, or turn them off): their
+pages close and they leave the sidebar. The bottom of the sidebar then says **Archived 3 tabs** with
+**Undo**, which puts exactly those tabs back where they were (same place and app section, back and
+forward included) and gives them the full time again before archiving. Archiving that happens
 while jbrow is hidden shows the notice the next time you open it; it goes away when you hide jbrow after
 it's been on screen for a few seconds at a time, or with its ×.
 
 The **N archived** line at the very bottom of the sidebar opens **Archived** in settings: every
-archived thread with its sites and when it was archived, newest first under Today, Yesterday, This
+archived tab with its site and when it was archived, newest first under Today, Yesterday, This
 week and then by month, and on hover **Restore** (back into the sidebar as seen now) and **Forget**.
-The search above it finds threads by name, title or address (every word has to match), and next to
+The search above it finds tabs by name, title or address (every word has to match), and next to
 it you can narrow the list by site, by when it was archived (today, the last 7 or 30 days, older, or
 between two dates) and by profile. Just type, or press ⌘F, to search; ↑↓ move through the list and
-Return (or a double-click) opens a thread. Select threads with the box by each one, ⌘-click, Space or
+Return (or a double-click) opens a tab. Select tabs with the box by each one, ⌘-click, Space or
 ⇧↑↓ (⇧-click selects a run, the box at the top everything that matches, ⌘A too) to **Restore** or
 **Forget** them together. Forgetting more than one asks first, and so does restoring more than 10.
-Long lists show more as you scroll. Typing in the address bar finds archived threads too and brings
-the whole thread back. Archived threads are forgotten after 90 days.
+Long lists show more as you scroll. Typing in the address bar finds archived tabs too and brings them
+back. Archived tabs are forgotten after 90 days.
+
+Tabs saved by an older jbrow, while tabs nested in threads, come out of their threads on the first
+start: each takes its thread's app section, and a kept thread's tabs stay kept right after its first
+tab, in the same folder (a pinned thread's go to the bottom of Kept).
 
 Downloads go straight into ~/Downloads, renamed `name (1).ext` if the name is taken. Each one shows
 as a small pie in the toolbar while it runs. Click it for the name, size, speed, time left, folder and
@@ -301,7 +322,7 @@ Sonnet takes about 10 seconds. Styles are kept in `styles.json` next to `setting
 ## Settings
 
 The settings screen (⌘, or the sliders icon) has a sidebar of sections: **General** (pinning and the window's size, search engine and
-search suggestions, quiet links, the default browser), **Profiles**, **Threads** (archiving), **Archived**, **Apps**, **Animation**, **Restyling**,
+search suggestions, quiet links, the default browser), **Profiles**, **Tabs** (archiving), **Archived**, **Apps**, **Animation**, **Restyling**,
 **Privacy** (private addresses, dangerous sites, clearing browsing data, screen sharing) and **Shortcuts** (jbrow's own and extensions').
 The search above the sections finds any setting or shortcut, and **Shortcuts** has its own search.
 Changes apply right away. Private addresses: any address that contains
@@ -324,7 +345,7 @@ on first run. Restart jbrow after editing the file by hand (menu bar item, **Res
 - `appProfiles`: default profile per app bundle ID, for links from and new tabs in that app's view.
   Set it under **Apps** in settings.
 - `linkedApps`: groups of bundle IDs that share one set of tabs for ⌥⇧Space. Under **Apps**,
-  right-click an app to link or unlink it; its threads move along right away.
+  right-click an app to link or unlink it; its tabs move along right away.
 - `animation`: `style` (materialize, slide, scale, fade, off), `durationMs`, `ease` (spring, snappy, smooth).
 - `panel`: the window's default size as a fraction of the screen (`widthFraction`, `heightFraction`),
   where you left the unpinned window on each display (`displays`, by macOS display ID, relative to
@@ -344,13 +365,13 @@ on first run. Restart jbrow after editing the file by hand (menu bar item, **Res
   Commands not listed use their defaults. Older settings files kept the summon keys under
   `hotkeys`; jbrow still reads those and writes them here the next time it saves settings.
 - `extensionShortcuts`: your extension shortcuts per profile, extension and command (`""` removes one).
-- `archiveAfterDays`: archive threads unseen this many days; 0 turns archiving off.
+- `archiveAfterDays`: archive tabs unseen this many days; 0 turns archiving off.
 - `zoom`: `defaultPercent`, `remember`, and `sites`, each zoomed site (hostname without www) with its zoom in percent.
 - `sidePanelWidth`: width of an extension's side panel in pixels; dragging its edge sets it.
 - `restyle`: `model` for restyling (a Claude model alias such as sonnet, opus or haiku) and
   `claudePath`, the claude command if jbrow doesn't find it on its own.
 
-Tabs, folders and archived threads are in `tabs.json` next to it, and the browsing history in `visits.json`.
+Tabs, folders and archived tabs are in `tabs.json` next to it, and the browsing history in `visits.json`.
 Extensions' side panel options are in `side-panel.json` and their user scripts in `user-scripts.json`.
 
 ## Extensions
@@ -420,7 +441,7 @@ Don't add `session.webRequest` listeners: one is enough to switch off every exte
 (`src/main/jbrow-extension.ts`) as rules.
 
 Layout: `src/main` (Electron main process: panel, tabs, profiles, hotkeys), `src/preload` (UI
-bridge and extension shims), `src/ui` (the toolbar and sidebar), `src/shared` (thread logic both
+bridge and extension shims), `src/ui` (the toolbar and sidebar), `src/shared` (sidebar logic both
 sides use), `scripts/patch-deps.mjs` (fixes to electron-chrome-extensions).
 The log is at `~/Library/Logs/jbrow/main.log` (menu bar item, **Show log file**).
 

@@ -104,7 +104,7 @@
         <div id="pinDivider" class="pin-divider" role="separator" aria-orientation="horizontal" hidden
           title="Drag down for another row of pinned tabs, up for fewer. Double-click for one row."></div>
         <div id="scope" class="scope" hidden></div>
-        <nav id="threads" aria-label="Threads"></nav>
+        <nav id="threads" aria-label="Tabs"></nav>
         <section id="restylePane" class="restyle-pane" hidden aria-label="Restyle">
           <div class="restyle-head">
             <span id="restyleHead"></span>
@@ -129,7 +129,7 @@
         <div id="rulesPop" class="pop rules-pop" hidden>
           <div id="rulesHead" class="pop-head"></div>
           <p class="pop-help">
-            A thread about to be archived moves into this folder instead when one of its addresses contains a pattern.
+            A tab about to be archived moves into this folder instead when its address contains a pattern.
             One per line; <code>*</code> matches anything, as for private addresses.
           </p>
           <textarea id="folderRules" rows="4" spellcheck="false" placeholder="github.com/acme&#10;*.atlassian.net"></textarea>
@@ -211,7 +211,7 @@
               <button class="set-nav-item" data-section="general"><span data-icon="settings"></span>General</button>
               <button class="set-nav-item" data-section="appearance"><span data-icon="palette"></span>Appearance</button>
               <button class="set-nav-item" data-section="profiles"><span data-icon="user"></span>Profiles</button>
-              <button class="set-nav-item" data-section="threads"><span data-icon="listTree"></span>Threads</button>
+              <button class="set-nav-item" data-section="threads"><span data-icon="listTree"></span>Tabs</button>
               <button class="set-nav-item" data-section="archived"><span data-icon="archive"></span>Archived</button>
               <button class="set-nav-item" data-section="apps"><span data-icon="grid"></span>Apps</button>
               <button class="set-nav-item" data-section="miniPlayer"><span data-icon="pip"></span>Mini player</button>
@@ -269,7 +269,7 @@
                 <label class="check">
                   <input id="quietLinks" type="checkbox" />
                   <span>Open links you didn't click in the background. When a script or another app opens a link on its
-                    own, jbrow stays hidden, marks the thread with a dot and counts it next to jb in the menu bar.</span>
+                    own, jbrow stays hidden, marks the tab with a dot and counts it next to jb in the menu bar.</span>
                 </label>
               </div>
             </section>
@@ -340,12 +340,12 @@
             </section>
 
             <section class="set-section" data-section="threads">
-              <h2 class="set-section-title">Threads</h2>
+              <h2 class="set-section-title">Tabs</h2>
               <div class="set-item" data-keywords="earlier today recent bottom top sidebar threads tabs">
                 <h3>Recent</h3>
                 <div class="field">
                   <span class="label">Keep on top</span>
-                  <div id="earlierAfter" class="seg" role="group" aria-label="Keep threads on top of the sidebar for">
+                  <div id="earlierAfter" class="seg" role="group" aria-label="Keep tabs on top of the sidebar for">
                     <button data-value="12">12 hours</button>
                     <button data-value="24">1 day</button>
                     <button data-value="72">3 days</button>
@@ -353,14 +353,14 @@
                   </div>
                 </div>
                 <p class="help">
-                  Threads you've opened within this time sit at the top of the sidebar. Older ones move to Earlier at the bottom.
+                  Tabs you've opened within this time sit at the top of the sidebar, newest first. Older ones move to Earlier at the bottom.
                 </p>
               </div>
               <div class="set-item" data-keywords="archive archiving summarize sleep unload loaded memory threads tabs kept pinned folders">
                 <h3>Archiving</h3>
                 <div class="field">
                   <span class="label">Summarize</span>
-                  <div id="summarizeAfter" class="seg" role="group" aria-label="Summarize threads unseen for">
+                  <div id="summarizeAfter" class="seg" role="group" aria-label="Summarize tabs unseen for">
                     <button data-value="1">1 day</button>
                     <button data-value="3">3 days</button>
                     <button data-value="7">1 week</button>
@@ -369,7 +369,7 @@
                 </div>
                 <div class="field">
                   <span class="label">Archive</span>
-                  <div id="archiveAfter" class="seg" role="group" aria-label="Archive threads unseen for">
+                  <div id="archiveAfter" class="seg" role="group" aria-label="Archive tabs unseen for">
                     <button data-value="1">1 day</button>
                     <button data-value="3">3 days</button>
                     <button data-value="7">1 week</button>
@@ -381,15 +381,15 @@
                   <span class="label">Keep loaded</span>
                   <div class="checks">
                     <label class="check"><input id="keepLoadedPinned" type="checkbox" /><span>Pinned tabs</span></label>
-                    <label class="check"><input id="keepLoadedKept" type="checkbox" /><span>Kept threads</span></label>
+                    <label class="check"><input id="keepLoadedKept" type="checkbox" /><span>Kept tabs</span></label>
                   </div>
                 </div>
                 <p class="help">
-                  Threads you haven't opened for a while first unload their pages and shrink to one line: how many tabs, which
-                  sites, how long ago. Opening one loads it again. Later they close and leave the sidebar, which offers
+                  Tabs you haven't opened for a while first unload their pages and shrink to one line: which site, how long
+                  ago. Opening one loads it again. Later they close and leave the sidebar, which offers
                   <b>Undo</b> until you've seen it and hide jbrow. Find them under <b>Archived</b> or by typing in the address bar. Kept and pinned
-                  threads never archive. Their pages unload too, keeping their full row, unless <b>Keep loaded</b> is on for them; pinned tabs
-                  kept loaded also load when jbrow starts, so they're ready when you click. A folder in Kept can catch threads by address
+                  tabs never archive. Their pages unload too, keeping their full row, unless <b>Keep loaded</b> is on for them; pinned tabs
+                  kept loaded also load when jbrow starts, so they're ready when you click. A folder in Kept can catch tabs by address
                   before they archive:
                   right-click the folder and choose <b>Auto-file rules</b>.
                 </p>
@@ -399,13 +399,13 @@
             <section class="set-section" data-section="archived">
               <h2 class="set-section-title">Archived</h2>
               <div id="archivedItem" class="set-item" data-keywords="archived archive restore forget undo threads closed search find history">
-                <p class="help">Return or a double-click opens a thread, Restore puts it back in the sidebar, both with its back and forward history.
-                  ⌘-click, Space or the box by a thread selects it. Archived threads are forgotten after 90 days.</p>
+                <p class="help">Return or a double-click opens a tab, Restore puts it back in the sidebar, both with its back and forward history.
+                  ⌘-click, Space or the box by a tab selects it. Archived tabs are forgotten after 90 days.</p>
                 <div id="archBar" class="arch-bar">
                   <div class="arch-filters">
                     <label class="set-search arch-search">
                       <span data-icon="search"></span>
-                      <input id="archSearch" type="search" spellcheck="false" placeholder="Search names, titles and addresses" aria-label="Search archived threads" />
+                      <input id="archSearch" type="search" spellcheck="false" placeholder="Search names, titles and addresses" aria-label="Search archived tabs" />
                     </label>
                     <select id="archSite" class="arch-site" aria-label="Site"></select>
                   </div>
@@ -432,7 +432,7 @@
                     </span>
                   </div>
                 </div>
-                <div id="archivedList" class="archived-list" tabindex="0" aria-label="Archived threads"></div>
+                <div id="archivedList" class="archived-list" tabindex="0" aria-label="Archived tabs"></div>
               </div>
             </section>
 
@@ -440,9 +440,9 @@
               <h2 class="set-section-title">Apps</h2>
               <div class="set-item" data-keywords="apps app hotkey link linked profile bundle">
                 <p class="help">
-                  <b id="appHotkey">⌥⇧Space</b> shows only the threads of the app you were in, and the sidebar groups each app's threads
+                  <b id="appHotkey">⌥⇧Space</b> shows only the tabs of the app you were in, and the sidebar groups each app's tabs
                   under its name. Pick the profile an app's new tabs open in; <b>Auto</b> uses the tab you were on.
-                  Right-click an app to link it with another, so they share one set of threads.
+                  Right-click an app to link it with another, so they share one set of tabs.
                 </p>
                 <div id="appList" class="app-list"></div>
                 <button id="addApp" class="chip">Add app…</button>

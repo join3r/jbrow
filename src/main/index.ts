@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, M
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { urlMatcher } from '../shared/patterns'
-import { isInFolder, isPinned, keptThreads, numberedThreads, rootOf, sections, type FolderView } from '../shared/threads'
+import { awayFromHome, isInFolder, isPinned, keptThreads, numberedThreads, sections, type FolderView } from '../shared/threads'
 import { isSearchUrl, looksLikeAddress, suggestUrlFor } from '../shared/engines'
 import { THEMES, type AppEntry, type AppLabel, type Folder, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
@@ -270,7 +270,7 @@ function sendDownloads() {
 function closeDownloadOnlyTab(wc: Electron.WebContents) {
   const id = tabs.idForWebContents(wc)
   const rec = tabs.get(id)
-  if (!id || !rec?.parent) return
+  if (!id || !rec?.opener) return
   const committed = wc.getURL()
   if (wc.navigationHistory.canGoBack() || (committed && committed !== 'about:blank')) return
   setTimeout(() => void closeTab(id, false, false), 0)
@@ -356,7 +356,7 @@ async function unarchiveThreads(ids: string[]) {
   if (ids.length > RESTORE_ASK) {
     const { response } = await dialog.showMessageBox(panel.win, {
       type: 'question',
-      message: `Restore ${ids.length} threads?`,
+      message: `Restore ${ids.length} tabs?`,
       detail: "They go back into the sidebar as seen now, and archive again if you don't open them.",
       buttons: ['Cancel', 'Restore'],
       defaultId: 1,
@@ -372,7 +372,7 @@ async function forgetArchived(ids: string[]) {
   if (ids.length > 1) {
     const { response } = await dialog.showMessageBox(panel.win, {
       type: 'warning',
-      message: `Forget ${ids.length} archived threads?`,
+      message: `Forget ${ids.length} archived tabs?`,
       detail: 'Their tabs and back and forward history are gone for good. This cannot be undone.',
       buttons: ['Cancel', 'Forget'],
       defaultId: 0,
@@ -400,8 +400,7 @@ function mostRecentInView(): string | undefined {
 function activeInView(): boolean {
   const active = tabs.active()
   if (!active) return false
-  const root = rootOf(tabs.records, active)
-  return (filter === 'all' || root.profile === filter) && (!scope || root.scope === scope.key || isPinned(root))
+  return (filter === 'all' || active.profile === filter) && (!scope || active.scope === scope.key || isPinned(active))
 }
 
 // ---------- summoning ----------
@@ -548,7 +547,7 @@ function switchProfile(id: string, next: string) {
     pushState()
     return
   }
-  tabs.create({ profile: next, url: cur.url, ...(cur.parent ? {} : { scope: cur.scope, scopeName: cur.scopeName, app: cur.app }) })
+  tabs.create({ profile: next, url: cur.url, scope: cur.scope, scopeName: cur.scopeName, app: cur.app })
 }
 
 /** The host a page is on, for notices; '' for one without (a file, a blank page). */
@@ -901,9 +900,10 @@ async function savePageAsPdf(wc: Electron.WebContents) {
  * Closes a tab, leaving a new one if it was the last. Its page can ask first if it has unsaved
  * changes, unless `ask` is false: jbrow closing it on its own, or a page it warned you about.
  */
-async function closeTab(id: string, remember = true, ask = true) {
-  if (ask) await tabs.closeAsking(id, remember)
-  else tabs.close(id, remember)
+/** Closes a tab; a kept or pinned one only closes its page unless `remove`. */
+async function closeTab(id: string, remember = true, ask = true, remove = false) {
+  if (ask) await tabs.closeAsking(id, remember, remove)
+  else tabs.close(id, remember, undefined, remove)
   if (!tabs.active()) tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
 }
 
@@ -991,14 +991,20 @@ function threadMenu(id: string) {
     { label: 'Rename', click: () => panel.ui.send('rename-tab', id) },
   ]
   if (rec.url) items.push({ label: 'Copy link', click: () => clipboard.writeText(rec.url) })
+  if (rec.kept && rec.home) {
+    const away = awayFromHome(rec)
+    items.push(
+      { label: 'Back to pinned page', enabled: away, click: () => tabs.goHome(id) },
+      { label: 'Pin this page here', enabled: away, click: () => tabs.keepHere(id) },
+    )
+  }
   for (const p of settings.profiles) {
     if (p.id !== rec.profile) items.push({ label: `Open in ${p.name}`, click: () => switchProfile(id, p.id) })
   }
   items.push(...splitItems(id))
-  items.push({ label: pinned ? 'Unpin' : 'Pin to top', click: () => (pinned ? tabs.move(id, null, true) : tabs.pin(id)) })
-  if (rec.parent) items.push({ label: 'Move out of thread', click: () => tabs.move(id, null) })
-  else if (!pinned) items.push({ label: rec.kept ? 'Stop keeping' : 'Keep', click: () => tabs.move(id, null, !rec.kept) })
-  if (!rec.parent && !pinned) {
+  items.push({ label: pinned ? 'Unpin' : 'Pin to top', click: () => (pinned ? tabs.move(id, true) : tabs.pin(id)) })
+  if (!pinned) items.push({ label: rec.kept ? 'Stop keeping' : 'Keep', click: () => tabs.move(id, !rec.kept) })
+  if (!pinned) {
     items.push({
       label: 'Move to folder',
       submenu: [
@@ -1006,15 +1012,23 @@ function threadMenu(id: string) {
           label,
           type: 'checkbox',
           checked: rec.kept && rec.folder === folder.id,
-          click: () => tabs.move(id, null, true, folder.id),
+          click: () => tabs.move(id, true, folder.id),
         })),
-        ...(rec.kept && rec.folder ? [{ label: 'Out of folder', click: () => tabs.move(id, null, true) }] : []),
+        ...(rec.kept && rec.folder ? [{ label: 'Out of folder', click: () => tabs.move(id, true) }] : []),
         ...(tabs.folders.length ? [{ type: 'separator' as const }] : []),
         { label: 'New folder', click: () => newFolder(rec.kept ? rec.folder : undefined, id) },
       ],
     })
   }
-  items.push({ type: 'separator' }, { label: 'Close', accelerator: id === tabs.activeId ? 'Cmd+W' : undefined, click: () => void closeTab(id) })
+  const closeKey = id === tabs.activeId ? 'Cmd+W' : undefined
+  items.push({ type: 'separator' })
+  // A kept tab's Close only closes its page, so it stays where you put it; Delete takes it away.
+  if (rec.kept) {
+    items.push(
+      { label: 'Close', accelerator: closeKey, enabled: !!tabs.webContentsFor(id) || awayFromHome(rec), click: () => void closeTab(id) },
+      { label: 'Delete', click: () => void closeTab(id, true, true, true) },
+    )
+  } else items.push({ label: 'Close', accelerator: closeKey, click: () => void closeTab(id) })
   Menu.buildFromTemplate(items).popup({ window: panel.win })
 }
 
@@ -1060,7 +1074,7 @@ function newTabMenu() {
 function newFolder(parent?: string, withThread?: string) {
   const folder = tabs.createFolder('New folder', parent)
   if (parent) tabs.updateFolder(parent, { collapsed: false })
-  if (withThread) tabs.move(withThread, null, true, folder.id)
+  if (withThread) tabs.move(withThread, true, folder.id)
   panel.ui.send('rename-tab', folder.id)
 }
 
@@ -1516,7 +1530,7 @@ async function deleteProfile(id: string) {
 
   // Children first, so closing a tab never hands its children to another tab of this profile.
   const doomed = tabs.records.filter((t) => t.profile === id)
-  for (const t of doomed.reverse()) tabs.close(t.id)
+  for (const t of doomed.reverse()) tabs.close(t.id, true, undefined, true)
   tabs.forgetProfile(id)
   sidePanels.forgetProfile(id)
   idle.forgetProfile(id)
@@ -1569,7 +1583,7 @@ function appEntries(): AppEntry[] {
   const keys = new Set<string>()
   for (const g of settings.linkedApps) if (g.length > 1) keys.add(scopeForApp(settings, g[0]))
   for (const id of [...Object.keys(settings.appProfiles), ...addedApps]) keys.add(scopeForApp(settings, id))
-  for (const t of tabs.records) if (t.scope && !t.parent) keys.add(t.scope)
+  for (const t of tabs.records) if (t.scope) keys.add(t.scope)
   return [...keys]
     .map<AppEntry>((key) => {
       const ids = appsIn(key)
@@ -1578,7 +1592,7 @@ function appEntries(): AppEntry[] {
         key,
         apps: ids.map((bundleId) => ({ bundleId, name: apps.name(bundleId), icon: apps.icon(bundleId) })),
         profile: profiles.size === 1 ? [...profiles][0] : null,
-        threads: tabs.records.filter((t) => t.scope === key && !t.parent).length,
+        threads: tabs.records.filter((t) => t.scope === key).length,
       }
     })
     .sort((a, b) => scopeName(a.key).localeCompare(scopeName(b.key)))
@@ -1673,7 +1687,7 @@ function appMenu(key: string) {
   }
   items.push(
     { type: 'separator' },
-    { label: entry.threads ? 'Remove (close its threads first)' : 'Remove', enabled: !entry.threads, click: () => removeApp(key) },
+    { label: entry.threads ? 'Remove (close its tabs first)' : 'Remove', enabled: !entry.threads, click: () => removeApp(key) },
   )
   Menu.buildFromTemplate(items).popup({ window: panel.win })
 }
@@ -1775,6 +1789,7 @@ function wireIpc() {
   on('suggest-cancel', () => cancelSearchSuggestions())
   on<{ profile?: string; url: string }>('forget-visit', ({ profile, url }) => visits.forget(profile ?? tabs.active()?.profile ?? settings.defaultProfile, url))
   on<{ id: string }>('close', ({ id }) => void closeTab(id))
+  on<{ id: string }>('go-home', ({ id }) => tabs.goHome(id))
   on<{ id: string }>('thread-menu', ({ id }) => threadMenu(id))
   on<{ id: string }>('close-pane', ({ id }) => tabs.closePane(id))
   on<{ id: string; sizes: number[]; done?: boolean }>('split-sizes', ({ id, sizes, done }) => tabs.resizeSplit(id, sizes, !!done))
@@ -1797,10 +1812,7 @@ function wireIpc() {
   on('sidebar-menu', () => sidebarMenu())
   on<{ id: string }>('folder-menu', ({ id }) => folderMenu(id))
   on<{ id: string; name?: string; rules?: string[]; collapsed?: boolean }>('folder', ({ id, ...change }) => tabs.updateFolder(id, change))
-  on<{ id: string; parent: string | null; kept?: boolean; folder?: string }>('move', ({ id, parent, kept, folder }) => {
-    const error = tabs.move(id, parent, kept, folder)
-    if (error) toast(error)
-  })
+  on<{ id: string; kept?: boolean; folder?: string }>('move', ({ id, kept, folder }) => tabs.move(id, !!kept, folder))
   on<{ id: string; target: string | null; after?: boolean }>('place', ({ id, target, after }) => tabs.place(id, target, after))
   on<{ id: string; target: string | null; after?: boolean }>('pin-tab', ({ id, target, after }) => tabs.pin(id, target, after))
   on<{ id: string; parent: string | null }>('move-folder', ({ id, parent }) => tabs.moveFolder(id, parent))
@@ -2221,9 +2233,8 @@ app.whenReady().then(async () => {
     profiles: () => settings.profiles,
     openInProfile: (fromId, profile, url) => {
       const from = tabs.get(fromId)
-      const root = from && rootOf(tabs.records, from)
       if (filter !== 'all' && filter !== profile) filter = 'all'
-      tabs.create({ profile, url, scope: root?.scope, scopeName: root?.scopeName, app: root?.app })
+      tabs.create({ profile, url, scope: from?.scope, scopeName: from?.scopeName, app: from?.app })
     },
   })
 

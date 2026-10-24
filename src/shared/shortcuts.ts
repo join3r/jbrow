@@ -64,7 +64,7 @@ export function shortcutLabel(shortcut: string): string {
 /** jbrow's own commands whose keys you can change in settings. Global ones work while jbrow is hidden. */
 export const ACTIONS = [
   { id: 'show', label: 'Show jbrow', key: 'Alt+Space', global: true },
-  { id: 'showApp', label: "Show the threads of the app you're in", key: 'Alt+Shift+Space', global: true },
+  { id: 'showApp', label: "Show the tabs of the app you're in", key: 'Alt+Shift+Space', global: true },
   { id: 'newTab', label: 'New tab', key: 'Command+T' },
   { id: 'newTabNextProfile', label: 'New tab in the next profile', key: 'Command+Shift+N' },
   { id: 'closeTab', label: 'Close tab', key: 'Command+W' },

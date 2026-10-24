@@ -1,7 +1,7 @@
 import { cssEase } from '../shared/ease'
 import { engineOf, isSearchUrl, SEARCH_ENGINES, suggestUrlFor } from '../shared/engines'
 import { urlMatcher } from '../shared/patterns'
-import { childrenOf, displayName, folderThreads, isAsleep, isFolder, isPinned, isRoot, numberedThreads, sections, subtree, threadsOf, type AppView, type FolderView, type KeptItem, type ThreadView } from '../shared/threads'
+import { awayFromHome, displayName, folderThreads, isAsleep, isFolder, isPinned, keptThreads, numberedThreads, samePage, sections, threadsOf, type AppView, type FolderView, type KeptItem, type ThreadView } from '../shared/threads'
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { dragDivider, PANE_GAP, paneSpans, splitOf } from '../shared/split'
 import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type VisitView } from '../shared/types'
@@ -263,7 +263,7 @@ function render() {
       [keyLabel('newTab'), 'New tab'],
       [keyLabel('newTabNextProfile'), 'New tab in the next profile'],
       ['Tab', 'Switch the profile a typed address opens in'],
-      ['⌘1–9', 'Jump to a thread'],
+      ['⌘1–9', 'Jump to a tab'],
       [keyLabel('previousTab'), 'Previous tab'],
       [keyLabel('splitView'), 'Split view'],
       [keyLabel('closeTab'), 'Close tab'],
@@ -510,9 +510,20 @@ function renderThreads() {
   const appNames = Object.fromEntries(Object.entries(S.apps).map(([k, l]) => [k, l.name]))
   const s = sections(S.tabs, { filter: S.filter, scope: S.scope?.key ?? null, activeId: S.activeId, now: S.now, folders: S.folders, appNames, earlierAfterMs: S.prefs.earlierAfterHours * HOUR_MS })
   const numbered = new Map(numberedThreads(s).map((v, i) => [v.root.id, i + 1]))
-  const block = (v: ThreadView<UiTab>) => row(v.root, 0, v, numbered.get(v.root.id))
-  // Under its app's heading a thread doesn't need the app's name again.
-  const appBlock = (v: ThreadView<UiTab>) => row(v.root, 0, v, numbered.get(v.root.id), false)
+  // As in Arc, a split view is one row, where the first of its tabs comes in the sidebar; its
+  // other tabs don't show again further down. Pinned tabs stay icons.
+  const listed = new Map([...keptThreads(s), ...s.today, ...s.apps.flatMap((a) => [...a.threads, ...a.earlier]), ...s.earlier].map((v) => [v.root.id, v]))
+  const drawn = new Set<string>()
+  const tile = (v: ThreadView<UiTab>, showApp: boolean) => {
+    if (drawn.has(v.root.id)) return ''
+    const panes = (splitOf(S!.splits, v.root.id)?.tabs ?? []).map((id) => listed.get(id)).filter((p) => !!p)
+    if (panes.length < 2) return row(v.root, v, numbered.get(v.root.id), showApp)
+    for (const p of panes) drawn.add(p.root.id)
+    return `<div class="split-row">${panes.map((p) => row(p.root, p, numbered.get(p.root.id), showApp)).join('')}</div>`
+  }
+  const block = (v: ThreadView<UiTab>) => tile(v, true)
+  // Under its app's heading a tab doesn't need the app's name again.
+  const appBlock = (v: ThreadView<UiTab>) => tile(v, false)
   // While filtered to a profile or an app, folders with nothing to show stay out of the way.
   const narrowed = S.filter !== 'all' || !!S.scope
   renderPins(s.pinned, numbered)
@@ -522,18 +533,18 @@ function renderThreads() {
         <span class="end"><button class="act" data-close-settings title="Close" aria-label="Close settings">${icon('close')}</button></span>
       </div>`
     : ''
-  // The pinned thread you're on opens under the icons when it has tabs inside, as does one being renamed.
-  const pinOpen = s.pinned.find((v) => renaming === v.root.id || (holdsActive(v) && v.all.length > 1))
-  if (pinOpen) html += `<div class="pin-open">${block(pinOpen)}</div>`
+  // A pinned tab being renamed shows as a row under the icons.
+  const pinOpen = s.pinned.find((v) => renaming === v.root.id)
+  if (pinOpen) html += `<div class="pin-open">${row(pinOpen.root, pinOpen)}</div>`
   // Kept has no heading: it's the top section. The strip under it takes drops to keep a thread at its bottom.
   const kept = s.top.filter((i) => !isFolder(i) || keptFolderShown(i, narrowed)).map((i) => (isFolder(i) ? folderRow(i, block, narrowed) : block(i))).join('')
   html += `<div id="kept" class="kept">${kept}</div><div class="keep-zone"></div>`
   html += `<div class="head" data-head="today">${recentLabel(S.prefs.earlierAfterHours)}</div>`
-  html += s.today.length ? s.today.map(block).join('') : `<div class="empty">Nothing here yet</div>`
+  html += s.today.map(block).join('') || `<div class="empty">Nothing here yet</div>`
   html += s.apps.map((a) => appSection(a, appBlock)).join('')
   // Earlier sits at the bottom of the sidebar, away from what's current, and the way to archived threads under it.
   const archivedLink = archivedList.length
-    ? `<button class="archived-link" data-show-archived title="Archived threads">${icon('archive')}${archivedList.length.toLocaleString()} archived</button>`
+    ? `<button class="archived-link" data-show-archived title="Archived tabs">${icon('archive')}${archivedList.length.toLocaleString()} archived</button>`
     : ''
   if (s.earlier.length) html += `<div class="earlier-sec"><div class="head" data-head="today">Earlier</div><div class="earlier">${s.earlier.map(block).join('')}</div>${archivedLink}</div>`
   else html += archivedLink
@@ -598,8 +609,9 @@ function renderPins(pinned: ThreadView<UiTab>[], numbered: Map<string, number>) 
       const shown = open ? t : v.last
       const fav = shown.favicon || t.favicon
       const letter = esc((hostOf(t.url) || displayName(t)).charAt(0).toUpperCase())
-      const title = `${displayName(t)}${v.all.length > 1 ? ` · ${v.all.length} tabs` : ''}${n ? ` (⌘${n})` : ''}`
-      return `<button class="${classes}" role="listitem" draggable="true" data-id="${t.id}" data-target="${open ? t.id : v.last.id}"
+      const away = awayFromHome(t)
+      const title = `${away ? `${t.home!.title || t.home!.url} / ` : ''}${displayName(t)}${n ? ` (⌘${n})` : ''}${away && open ? '\nClick to go back to the pinned page' : ''}`
+      return `<button class="${classes}" role="listitem" draggable="true" data-id="${t.id}" data-target="${open ? t.id : v.last.id}"${away ? ' data-away' : ''}
         title="${esc(title)}" aria-label="${esc(displayName(t))}" style="--pc:${esc(profile(t.profile)?.color ?? '')}">${
           fav ? `<img class="fav" src="${esc(fav)}" alt="">` : `<span class="fav letter">${letter}</span>`
         }</button>`
@@ -612,7 +624,9 @@ pinsEl.addEventListener('click', (e) => {
   const tile = (e.target as HTMLElement).closest<HTMLElement>('.pin-tile')
   if (!tile) return
   showSettings(false)
-  send('activate', { id: tile.dataset.target })
+  // Clicking the pinned tab you're on, once it's wandered off, takes it back to its pinned page.
+  if (tile.classList.contains('cur') && tile.hasAttribute('data-away')) send('go-home', { id: tile.dataset.id })
+  else send('activate', { id: tile.dataset.target })
 })
 pinsEl.addEventListener('contextmenu', (e) => {
   const tile = (e.target as HTMLElement).closest<HTMLElement>('.pin-tile')
@@ -702,7 +716,7 @@ function renderArchiveNotice() {
   const el = $('archiveNotice')
   el.hidden = !roots
   if (!roots || !S) return
-  $('archiveNoticeText').textContent = `Archived ${roots.length} ${roots.length === 1 ? 'thread' : 'threads'}`
+  $('archiveNoticeText').textContent = `Archived ${roots.length} ${roots.length === 1 ? 'tab' : 'tabs'}`
   el.title = roots.flatMap((id) => archivedById.get(id) ?? []).map(displayName).join('\n')
 }
 
@@ -754,43 +768,43 @@ const toggleFolder = (id: string) => {
   if (f) send('folder', { id, collapsed: !f.collapsed })
 }
 
-function row(t: UiTab, depth: number, thread: ThreadView<UiTab> | null, number?: number, showApp = true): string {
+function row(t: UiTab, thread: ThreadView<UiTab>, number?: number, showApp = true): string {
   if (!S) return ''
-  const kids = childrenOf(S.tabs, t.id)
-  const open = thread ? holdsActive(thread) : true
-  const target = thread && !open ? thread.last.id : t.id
-  const asleep = !!thread && !open && isAsleep(thread.all, { now: S.now, afterMs: S.prefs.summarizeAfterDays * DAY_MS, activeId: S.activeId })
-  const count = thread && !open && !asleep && thread.all.length > 1 ? String(thread.all.length) : ''
-  const app = showApp && depth === 0 && t.scope && !S.scope ? (S.apps[t.scope]?.name ?? t.scopeName ?? '') : ''
-  const meta = [app, count].filter(Boolean).join(' · ')
+  const open = holdsActive(thread)
+  const asleep = !open && isAsleep(thread.all, { now: S.now, afterMs: S.prefs.summarizeAfterDays * DAY_MS, activeId: S.activeId })
+  const meta = showApp && t.scope && !S.scope ? (S.apps[t.scope]?.name ?? t.scopeName ?? '') : ''
   const key = number ? `⌘${number}` : ''
-  const fav = t.favicon ? `<img class="fav" src="${esc(t.favicon)}" alt="">` : `<span class="fav none"></span>`
+  // A kept tab on another page than its pinned one shows a slash before the title, as in Arc, and
+  // its favicon turns into a way back on hover.
+  const away = awayFromHome(t)
+  const img = t.favicon ? `<img class="fav" src="${esc(t.favicon)}" alt="">` : `<span class="fav none"></span>`
+  const fav = away
+    ? `<span class="fav-home" data-home="${t.id}" title="${esc(`Back to ${t.home!.title || t.home!.url}`)}">${img}${icon('undo')}</span>`
+    : img
   const name =
     renaming === t.id
-      ? `<input class="ren" id="ren" value="${esc(displayName(t))}" aria-label="Thread name">`
-      : `<span class="t" title="${esc(isPrivate(t.url) ? displayName(t) : t.url)}">${esc(displayName(t))}</span>`
+      ? `<input class="ren" id="ren" value="${esc(displayName(t))}" aria-label="Tab name">`
+      : `<span class="t" title="${esc(isPrivate(t.url) ? displayName(t) : t.url)}">${away ? '<span class="away">/</span>' : ''}${esc(displayName(t))}</span>`
+  // A kept tab whose page is closed and back home has nothing to close.
+  const closable = !t.kept || t.loaded || away
   const classes = [
     'row',
-    depth > 0 ? 'sub' : '',
     t.id === S.activeId && settingsEl.hidden ? 'cur' : '',
     t.id !== S.activeId && settingsEl.hidden && shownPanes().includes(t.id) ? 'beside' : '',
-    thread && open ? 'open' : '',
     t.loading ? 'loading' : '',
     t.unread ? 'unread' : '',
     t.crashed ? 'crashed' : '',
     asleep ? 'asleep' : '',
   ].join(' ')
   const color = profile(t.profile)?.color ?? ''
-  // Tabs in a split view say so, and who they share it with.
+  // A tab in a split view whose other tabs show elsewhere (an icon, or out of view) says so.
   const split = splitOf(S.splits, t.id)
   const partners = split?.tabs.filter((id) => id !== t.id).map((id) => S!.tabs.find((x) => x.id === id)).filter((x) => !!x) ?? []
   const mark = split ? `<span class="split-mark" title="${esc(`Split view with ${partners.map(displayName).join(', ')}`)}">${icon('columns')}</span>` : ''
-  let html = `<div class="${classes}" role="button" tabindex="0" draggable="true" data-id="${t.id}" data-target="${target}" style="--d:${depth};--pc:${esc(color)}">
-    ${fav}${name}<span class="end">${mark}<span class="meta">${esc(meta || key)}</span><button class="act" data-close="${t.id}" title="Close" aria-label="Close">${icon('close')}</button></span>
-    ${asleep ? `<span class="sum">${esc(sleepSummary(thread!, S.now))}</span>` : ''}
+  return `<div class="${classes}" role="button" tabindex="0" draggable="true" data-id="${t.id}" data-target="${t.id}" style="--pc:${esc(color)}">
+    ${fav}${name}<span class="end">${mark}<span class="meta">${esc(meta || key)}</span>${closable ? `<button class="act" data-close="${t.id}" title="Close" aria-label="Close">${icon('close')}</button>` : ''}</span>
+    ${asleep ? `<span class="sum">${esc(sleepSummary(thread, S.now))}</span>` : ''}
   </div>`
-  if (open) html += kids.map((k) => row(k, depth + 1, null)).join('')
-  return html
 }
 
 // ---------- suggestions ----------
@@ -826,8 +840,6 @@ let arrowed = false
 const typedIn = () => typedProfile ?? activeTab()?.profile
 /** The completion, while it's still there as the address bar added it. Accepting it with → keeps it. */
 const completion = () => (completed && omnibox.value.toLowerCase() === completed.text.toLowerCase() ? completed : null)
-/** For telling the same page apart from another: no #fragment or trailing slash. */
-const samePage = (url: string) => url.replace(/#.*$/, '').replace(/\/$/, '')
 const tabMatches = (t: TabRecord, q: string) =>
   `${displayName(t)} ${t.title} ${t.url}`.toLowerCase().includes(q)
 
@@ -1078,6 +1090,11 @@ threadsEl.addEventListener('click', (e) => {
   if (el.closest('#ren')) return
   const closeBtn = el.closest<HTMLElement>('[data-close]')
   if (closeBtn) return send('close', { id: closeBtn.dataset.close })
+  const home = el.closest<HTMLElement>('[data-home]')
+  if (home) {
+    showSettings(false)
+    return send('go-home', { id: home.dataset.home })
+  }
   if (el.closest('[data-show-archived]')) return showArchived()
   if (el.closest('[data-close-settings]')) return setSettings(false)
   if (el.closest('[data-settings]')) return showSettings(true)
@@ -1170,9 +1187,10 @@ function startDrag(id: string, folder: boolean, e: DragEvent) {
 }
 
 /**
- * Where a drag over the sidebar would land. In Kept, the top or bottom of a row places the item
- * before or after it, and the middle files it into a folder or, for a thread as elsewhere, merges
- * it into a thread. Folders only move within Kept, and never into themselves.
+ * Where a drag over the sidebar would land. In Kept, the top or bottom half of a tab's row places
+ * the item before or after it, and the middle of a folder's row files it into the folder. Dropped
+ * on a row or heading outside Kept, a tab leaves Kept. Folders only move within Kept, and never
+ * into themselves.
  */
 function dropTarget(e: DragEvent): { el: HTMLElement; where: 'before' | 'after' | 'into' | 'keep' } | null {
   const el = (e.target as HTMLElement).closest<HTMLElement>('.row:not([data-settings]), .head:not(.app-head), .keep-zone, #kept')
@@ -1180,16 +1198,16 @@ function dropTarget(e: DragEvent): { el: HTMLElement; where: 'before' | 'after' 
   const dragged = dragFolder ? threadsEl.querySelector(`[data-folder="${dragId}"]`)?.nextElementSibling : null
   if (dragged?.classList.contains('folder-body') && dragged.contains(el)) return null
   if (el.matches('.keep-zone, #kept')) return { el: threadsEl.querySelector<HTMLElement>('.keep-zone')!, where: 'keep' }
-  if (!el.matches('#kept .row:not(.sub)')) return dragFolder ? null : { el, where: 'into' }
+  if (!el.matches('#kept .row')) return dragFolder ? null : { el, where: 'into' }
   const box = el.getBoundingClientRect()
   const y = (e.clientY - box.top) / box.height
   // An open folder's bottom edge is its first item's top, so a drop there goes into the folder.
   const openFolder = !!el.dataset.folder && !!el.nextElementSibling?.classList.contains('folder-body')
-  // A folder doesn't merge into a thread: it goes above or below.
-  const edge = dragFolder && !el.dataset.folder ? 0.5 : 0.25
+  // Only a folder takes things into it; a tab's row is all above or below.
+  const edge = el.dataset.folder ? 0.25 : 0.5
   if (y < edge) return { el, where: 'before' }
   if (y > 1 - edge && !openFolder) return { el, where: 'after' }
-  return { el, where: dragFolder && !el.dataset.folder ? 'after' : 'into' }
+  return { el, where: el.dataset.folder ? 'into' : 'after' }
 }
 
 const DROP_MARKS = ['dz', 'ins-before', 'ins-after', 'ins-left', 'ins-right']
@@ -1227,9 +1245,8 @@ threadsEl.addEventListener('drop', (e) => {
   if (where === 'keep') send('place', { id, target: null })
   else if (where !== 'into') send('place', { id, target: el.dataset.id ?? el.dataset.folder, after: where === 'after' })
   else if (movingFolder) send('move-folder', { id, parent: el.dataset.folder })
-  else if (el.classList.contains('head')) send('move', { id, parent: null, kept: false })
-  else if (el.dataset.folder) send('move', { id, parent: null, kept: true, folder: el.dataset.folder })
-  else send('move', { id, parent: el.dataset.id })
+  else if (el.dataset.folder) send('move', { id, kept: true, folder: el.dataset.folder })
+  else send('move', { id, kept: false })
 })
 threadsEl.addEventListener('dragend', () => endDrag())
 
@@ -1576,7 +1593,7 @@ const SECTION_NAMES: Record<string, string> = {
   general: 'General',
   appearance: 'Appearance',
   profiles: 'Profiles',
-  threads: 'Threads',
+  threads: 'Tabs',
   archived: 'Archived',
   apps: 'Apps',
   miniPlayer: 'Mini player',
@@ -2059,7 +2076,7 @@ function renderArchived() {
   archShown = refiltered ? ARCH_CHUNK : Math.max(ARCH_CHUNK, archShown)
   archivedListEl.innerHTML = archMatches.length
     ? archRows(0, archShown)
-    : `<p class="help">${archivedList.length ? 'No archived thread matches.' : 'Nothing archived.'}</p>`
+    : `<p class="help">${archivedList.length ? 'No archived tab matches.' : 'Nothing archived.'}</p>`
   if (refiltered && settingsEl.querySelector('.set-section.cur[data-section="archived"]')) $('setBody').scrollTop = 0
   syncArchSelection()
   moreArchived()
@@ -2088,7 +2105,7 @@ function syncArchSelection() {
   archivedListEl.classList.toggle('picking', archSel.size > 0)
   const n = archMatches.length
   const total = archivedList.length
-  const threads = (k: number) => `${k.toLocaleString()} ${k === 1 ? 'thread' : 'threads'}`
+  const threads = (k: number) => `${k.toLocaleString()} ${k === 1 ? 'tab' : 'tabs'}`
   $('archCount').textContent = archSel.size
     ? `${archSel.size.toLocaleString()} of ${threads(n)} selected`
     : n === total
@@ -2426,7 +2443,7 @@ function renderApps() {
         .join('')
       const name = e.apps.map((a) => a.name).join(' + ')
       const ids = e.apps.map((a) => a.bundleId).join(', ')
-      const count = e.threads ? `<em>${e.threads} ${e.threads === 1 ? 'thread' : 'threads'}</em>` : ''
+      const count = e.threads ? `<em>${e.threads} ${e.threads === 1 ? 'tab' : 'tabs'}</em>` : ''
       const seg = options
         .map((p) => {
           const dot = p.color ? `<span class="dot" style="background:${esc(p.color)}"></span>` : ''
@@ -2481,7 +2498,7 @@ function renderActionKeys() {
       const note = 'global' in a ? '<em>works in any app</em>' : ''
       return `<div class="sc-row"><span title="${esc(a.label)}">${esc(a.label)}${note}</span>${keyButton(`action ${a.id}`, S!.keys[a.id])}</div>`
     }).join('') +
-    fixed('Jump to a thread', '⌘1–9') +
+    fixed('Jump to a tab', '⌘1–9') +
     fixed('Zoom in, out, reset', '⌘+ ⌘− ⌘0')
   // State arrives often; rebuilding the same rows would only cost a repaint.
   if (html !== actionKeysHtml) {

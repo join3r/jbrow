@@ -10,15 +10,22 @@ export interface Profile {
 export interface TabRecord {
   id: string
   profile: string
+  /** Only in tabs saved while tabs nested in threads; flatten() lifts them out on load. */
   parent?: string
+  /** The tab it was opened from by a link or a script, if any. */
+  opener?: string
   /** User-given name, shown instead of the page title. */
   name?: string
-  /** Only meaningful on a thread (a tab without a parent). */
   kept?: boolean
   /** Folder in the Kept section. Only meaningful on a kept thread. */
   folder?: string
   /** Place among the items next to it in Kept (see Folder.order), or among the pinned tabs. Only meaningful on a kept thread. */
   order?: number
+  /**
+   * The page a kept or pinned tab was kept on, as Arc's pinned URL: closing the tab takes it back
+   * there, and the sidebar shows when it's somewhere else. Set when the tab is kept.
+   */
+  home?: { url: string; title: string; favicon?: string }
   /** Shown as an icon at the top of the sidebar instead of a row in Kept. Only meaningful on a kept thread. */
   pinned?: boolean
   /** App scope key (bundle ID, or a linked group) this thread belongs to. */
@@ -63,6 +70,8 @@ export interface Split {
 
 export interface UiTab extends TabRecord {
   loading: boolean
+  /** Its page is open. A kept tab you closed has none until you open it again. */
+  loaded: boolean
   /** Its page crashed and hasn't been reloaded. */
   crashed?: boolean
 }
