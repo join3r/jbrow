@@ -3087,6 +3087,9 @@ window.jbrow.on('anim', (m: AnimMessage) => {
   root.style.setProperty('--dur', `${m.durationMs}ms`)
   root.style.setProperty('--ease', 'cubic-bezier(.4,0,1,1)')
   root.classList.remove('shown')
+  // Left focused, the address bar would take focus again when the window does on the next show,
+  // revealing a private address and opening the suggestions.
+  omnibox.blur()
   hideSuggestions()
   setExtensions(false)
   setDownload(null)

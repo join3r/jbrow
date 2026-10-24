@@ -38,7 +38,6 @@ import { rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const AWAY_FOCUS_MS = 60 * 1000
 /** A link this long after your last click or key press opens quietly. */
 const QUIET_AFTER_S = 2
 const AWAY_FRESH_MS = 4 * 60 * 60 * 1000
@@ -406,30 +405,20 @@ function activeInView(): boolean {
 // ---------- summoning ----------
 
 async function summon() {
-  let focusOmnibox = false
   if (!panel.visible) {
     sweep()
     const away = hiddenAt ? Date.now() - hiddenAt : 0
-    if (away > AWAY_FRESH_MS) {
-      tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
-      focusOmnibox = true
-    } else if (away > AWAY_FOCUS_MS) {
-      focusOmnibox = true
-    }
+    if (away > AWAY_FRESH_MS) tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
   }
   if (!activeInView()) {
     const recent = mostRecentInView()
     if (recent) tabs.activate(recent)
-    else {
-      tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
-      focusOmnibox = true
-    }
+    else tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
   }
-  if (!tabs.active()?.url) focusOmnibox = true
   pushState()
   await panel.show()
-  if (focusOmnibox) focusAddressBar()
-  else focusActive()
+  // The page, or the address bar for an empty tab.
+  focusActive()
 }
 
 async function onHotkey() {
