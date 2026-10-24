@@ -17,8 +17,10 @@ export interface TabRecord {
   kept?: boolean
   /** Folder in the Kept section. Only meaningful on a kept thread. */
   folder?: string
-  /** Place among the items next to it in Kept (see Folder.order). Only meaningful on a kept thread. */
+  /** Place among the items next to it in Kept (see Folder.order), or among the pinned tabs. Only meaningful on a kept thread. */
   order?: number
+  /** Shown as an icon at the top of the sidebar instead of a row in Kept. Only meaningful on a kept thread. */
+  pinned?: boolean
   /** App scope key (bundle ID, or a linked group) this thread belongs to. */
   scope?: string
   scopeName?: string
@@ -146,9 +148,13 @@ export interface Prefs {
   summarizeAfterDays: number
   /** Threads unseen this many days are archived. 0 never archives. */
   archiveAfterDays: number
+  /** Kept and pinned threads whose pages stay loaded however long they go unseen. Pinned ones load at launch too. */
+  keepLoaded: KeepLoaded
   /** Threads unseen this many hours leave the top of the sidebar for Earlier at the bottom. */
   earlierAfterHours: number
   pinnedExtensions: string[]
+  /** Rows the pinned tabs' icons share at the top of the sidebar; drag the line under them to change it. */
+  pinnedRows: number
   /** Claude model alias for restyling sites. */
   restyleAgent: RestyleAgent
   restyleModel: string
@@ -162,6 +168,12 @@ export interface Prefs {
   searchUrl: string
   /** Ask the search engine for suggestions while you type in the address bar. */
   searchSuggestions: boolean
+}
+
+/** Which kept threads keep their pages loaded. Pinned threads are kept too, but have their own switch. */
+export interface KeepLoaded {
+  kept: boolean
+  pinned: boolean
 }
 
 /** A page from the browsing history, as the address bar suggests it. */

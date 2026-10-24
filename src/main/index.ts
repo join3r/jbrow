@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, M
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { urlMatcher } from '../shared/patterns'
-import { isInFolder, keptThreads, numberedThreads, rootOf, sections, type FolderView } from '../shared/threads'
+import { isInFolder, isPinned, keptThreads, numberedThreads, rootOf, sections, type FolderView } from '../shared/threads'
 import { isSearchUrl, looksLikeAddress, suggestUrlFor } from '../shared/engines'
 import { THEMES, type AppEntry, type AppLabel, type Folder, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
@@ -175,8 +175,10 @@ function state(): UiState {
       quietLinks: settings.quietLinks,
       summarizeAfterDays: settings.summarizeAfterDays,
       archiveAfterDays: settings.archiveAfterDays,
+      keepLoaded: settings.keepLoaded,
       earlierAfterHours: settings.earlierAfterHours,
       pinnedExtensions: settings.pinnedExtensions,
+      pinnedRows: settings.pinnedRows,
       restyleAgent: settings.restyle.agent,
       restyleModel: settings.restyle.model,
       restyleCodexModel: settings.restyle.codexModel,
@@ -385,7 +387,7 @@ function undoArchive() {
 /** Most recently seen tab among the threads the sidebar currently shows. */
 function mostRecentInView(): string | undefined {
   const s = threadsInView()
-  const all = [...keptThreads(s), ...s.today, ...s.apps.flatMap((a) => [...a.threads, ...a.earlier]), ...s.earlier]
+  const all = [...s.pinned, ...keptThreads(s), ...s.today, ...s.apps.flatMap((a) => [...a.threads, ...a.earlier]), ...s.earlier]
   return all.sort((a, b) => b.lastSeen - a.lastSeen)[0]?.last.id
 }
 
@@ -393,7 +395,7 @@ function activeInView(): boolean {
   const active = tabs.active()
   if (!active) return false
   const root = rootOf(tabs.records, active)
-  return (filter === 'all' || root.profile === filter) && (!scope || root.scope === scope.key)
+  return (filter === 'all' || root.profile === filter) && (!scope || root.scope === scope.key || isPinned(root))
 }
 
 // ---------- summoning ----------
@@ -779,6 +781,7 @@ function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.restyleModel) settings.restyle = { ...settings.restyle, model: prefs.restyleModel }
   if (prefs.restyleCodexModel !== undefined) settings.restyle = { ...settings.restyle, codexModel: prefs.restyleCodexModel.trim() }
   if (prefs.earlierAfterHours !== undefined) settings.earlierAfterHours = Math.max(1, prefs.earlierAfterHours)
+  if (Number.isFinite(prefs.pinnedRows)) settings.pinnedRows = Math.max(1, Math.round(prefs.pinnedRows!))
   if (prefs.miniPlayer) {
     const mp = { ...settings.miniPlayer, ...prefs.miniPlayer }
     const clean = (list: string[]) => list.map((p) => p.trim()).filter(Boolean)
@@ -792,6 +795,12 @@ function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.archiveAfterDays !== undefined || prefs.summarizeAfterDays !== undefined) {
     if (prefs.archiveAfterDays !== undefined) settings.archiveAfterDays = Math.max(0, prefs.archiveAfterDays)
     if (prefs.summarizeAfterDays !== undefined) settings.summarizeAfterDays = Math.max(0, prefs.summarizeAfterDays)
+    sweep()
+  }
+  if (prefs.keepLoaded) {
+    settings.keepLoaded = { ...settings.keepLoaded, ...prefs.keepLoaded }
+    tabs.keepLoaded = settings.keepLoaded
+    tabs.loadPinned()
     sweep()
   }
   saveSettings(settings)
@@ -964,6 +973,7 @@ async function confirmQuit(): Promise<boolean> {
 function threadMenu(id: string) {
   const rec = tabs.get(id)
   if (!rec) return
+  const pinned = isPinned(rec)
   const items: Electron.MenuItemConstructorOptions[] = [
     { label: 'Rename', click: () => panel.ui.send('rename-tab', id) },
   ]
@@ -972,9 +982,10 @@ function threadMenu(id: string) {
     if (p.id !== rec.profile) items.push({ label: `Open in ${p.name}`, click: () => switchProfile(id, p.id) })
   }
   items.push(...splitItems(id))
+  items.push({ label: pinned ? 'Unpin' : 'Pin to top', click: () => (pinned ? tabs.move(id, null, true) : tabs.pin(id)) })
   if (rec.parent) items.push({ label: 'Move out of thread', click: () => tabs.move(id, null) })
-  else items.push({ label: rec.kept ? 'Stop keeping' : 'Keep', click: () => tabs.move(id, null, !rec.kept) })
-  if (!rec.parent) {
+  else if (!pinned) items.push({ label: rec.kept ? 'Stop keeping' : 'Keep', click: () => tabs.move(id, null, !rec.kept) })
+  if (!rec.parent && !pinned) {
     items.push({
       label: 'Move to folder',
       submenu: [
@@ -1777,6 +1788,7 @@ function wireIpc() {
     if (error) toast(error)
   })
   on<{ id: string; target: string | null; after?: boolean }>('place', ({ id, target, after }) => tabs.place(id, target, after))
+  on<{ id: string; target: string | null; after?: boolean }>('pin-tab', ({ id, target, after }) => tabs.pin(id, target, after))
   on<{ id: string; parent: string | null }>('move-folder', ({ id, parent }) => tabs.moveFolder(id, parent))
   on<{ filter: string }>('filter', ({ filter: f }) => {
     filter = f
@@ -2252,6 +2264,7 @@ app.whenReady().then(async () => {
   })
   commands.watch()
 
+  tabs.keepLoaded = settings.keepLoaded
   tabs.load()
   visits.load()
   // Threads opened from one app carry the name it had in front.
@@ -2263,6 +2276,8 @@ app.whenReady().then(async () => {
   const first = tabs.active() ?? [...tabs.records].sort((a, b) => b.lastSeen - a.lastSeen)[0]
   if (first) tabs.activate(first.id)
   else tabs.newTab({ profile: settings.defaultProfile })
+  // Pinned pages load in the background after the one you'll see.
+  tabs.loadPinned()
 
   registerHotkeys(true)
   if (!BACKGROUND) buildTray()

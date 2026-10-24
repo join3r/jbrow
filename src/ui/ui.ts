@@ -1,7 +1,7 @@
 import { cssEase } from '../shared/ease'
 import { engineOf, isSearchUrl, SEARCH_ENGINES, suggestUrlFor } from '../shared/engines'
 import { urlMatcher } from '../shared/patterns'
-import { childrenOf, displayName, folderThreads, isAsleep, isFolder, isRoot, numberedThreads, sections, subtree, threadsOf, type AppView, type FolderView, type KeptItem, type ThreadView } from '../shared/threads'
+import { childrenOf, displayName, folderThreads, isAsleep, isFolder, isPinned, isRoot, numberedThreads, sections, subtree, threadsOf, type AppView, type FolderView, type KeptItem, type ThreadView } from '../shared/threads'
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { dragDivider, PANE_GAP, paneSpans, splitOf } from '../shared/split'
 import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type VisitView } from '../shared/types'
@@ -75,6 +75,9 @@ const root = $('root')
 const omnibox = $<HTMLInputElement>('omnibox')
 const suggest = $('suggest')
 const threadsEl = $('threads')
+const sidebarEl = $('sidebar')
+const pinsEl = $('pins')
+const pinDivider = $('pinDivider')
 const actions = $('actions')
 const extPop = $('extPop')
 const restylePane = $('restylePane')
@@ -505,12 +508,16 @@ function renderThreads() {
   const appBlock = (v: ThreadView<UiTab>) => row(v.root, 0, v, numbered.get(v.root.id), false)
   // While filtered to a profile or an app, folders with nothing to show stay out of the way.
   const narrowed = S.filter !== 'all' || !!S.scope
+  renderPins(s.pinned, numbered)
   let html = settingsTab
     ? `<div class="row set-row ${settingsEl.hidden ? '' : 'cur'}" role="button" tabindex="0" data-settings>
         <span class="fav">${icon('settings')}</span><span class="t">Settings</span>
         <span class="end"><button class="act" data-close-settings title="Close" aria-label="Close settings">${icon('close')}</button></span>
       </div>`
     : ''
+  // The pinned thread you're on opens under the icons when it has tabs inside, as does one being renamed.
+  const pinOpen = s.pinned.find((v) => renaming === v.root.id || (holdsActive(v) && v.all.length > 1))
+  if (pinOpen) html += `<div class="pin-open">${block(pinOpen)}</div>`
   // Kept has no heading: it's the top section. The strip under it takes drops to keep a thread at its bottom.
   const kept = s.top.filter((i) => !isFolder(i) || keptFolderShown(i, narrowed)).map((i) => (isFolder(i) ? folderRow(i, block, narrowed) : block(i))).join('')
   html += `<div id="kept" class="kept">${kept}</div><div class="keep-zone"></div>`
@@ -533,6 +540,153 @@ function renderThreads() {
     } else input.select()
     input.focus()
   }
+}
+
+// ---------- pinned tabs ----------
+
+const PIN_GAP = 4
+/** Smallest and tallest an icon's tile gets. Tiles share a row's width, so more of them are smaller. */
+const PIN_MIN = 22
+const PIN_MAX = 40
+/** Rows while the line under the icons is being dragged, ahead of what main has. */
+let pinRowsDraft: number | null = null
+let pinCount = 0
+
+/** Columns, tile height and rows for `n` icons spread over `rows` rows, as wide as the sidebar. */
+function pinLayout(n: number, rows: number) {
+  const width = pinsEl.clientWidth || 240
+  const maxCols = Math.max(1, Math.floor((width + PIN_GAP) / (PIN_MIN + PIN_GAP)))
+  const cols = Math.max(1, Math.min(maxCols, Math.ceil(n / Math.max(1, rows))))
+  const tile = (width - PIN_GAP * (cols - 1)) / cols
+  const height = Math.round(Math.max(PIN_MIN, Math.min(PIN_MAX, tile)))
+  const shownRows = Math.ceil(n / cols)
+  return { cols, height, rows: shownRows, total: shownRows * height + (shownRows - 1) * PIN_GAP }
+}
+
+const pinRows = () => Math.max(1, Math.min(pinCount, pinRowsDraft ?? S?.prefs.pinnedRows ?? 1))
+
+function layoutPins() {
+  const l = pinLayout(pinCount, pinRows())
+  pinsEl.style.setProperty('--pin-cols', String(l.cols))
+  pinsEl.style.setProperty('--pin-h', `${l.height}px`)
+  pinsEl.style.setProperty('--pin-icon', `${Math.round(Math.max(12, Math.min(20, l.height * 0.5)))}px`)
+}
+
+/** Pinned threads as icons above the list, sharing as many rows as the line under them was dragged to. */
+function renderPins(pinned: ThreadView<UiTab>[], numbered: Map<string, number>) {
+  pinCount = pinned.length
+  pinDivider.hidden = !pinned.length
+  pinsEl.innerHTML = pinned
+    .map((v) => {
+      const t = v.root
+      const open = holdsActive(v)
+      const n = numbered.get(t.id)
+      const classes = [
+        'pin-tile',
+        open && settingsEl.hidden ? 'cur' : '',
+        v.all.some((x) => x.loading) ? 'loading' : '',
+        v.all.some((x) => x.unread) ? 'unread' : '',
+        t.crashed ? 'crashed' : '',
+      ].join(' ')
+      const shown = open ? t : v.last
+      const fav = shown.favicon || t.favicon
+      const letter = esc((hostOf(t.url) || displayName(t)).charAt(0).toUpperCase())
+      const title = `${displayName(t)}${v.all.length > 1 ? ` · ${v.all.length} tabs` : ''}${n ? ` (⌘${n})` : ''}`
+      return `<button class="${classes}" role="listitem" draggable="true" data-id="${t.id}" data-target="${open ? t.id : v.last.id}"
+        title="${esc(title)}" aria-label="${esc(displayName(t))}" style="--pc:${esc(profile(t.profile)?.color ?? '')}">${
+          fav ? `<img class="fav" src="${esc(fav)}" alt="">` : `<span class="fav letter">${letter}</span>`
+        }</button>`
+    })
+    .join('')
+  layoutPins()
+}
+
+pinsEl.addEventListener('click', (e) => {
+  const tile = (e.target as HTMLElement).closest<HTMLElement>('.pin-tile')
+  if (!tile) return
+  showSettings(false)
+  send('activate', { id: tile.dataset.target })
+})
+pinsEl.addEventListener('contextmenu', (e) => {
+  const tile = (e.target as HTMLElement).closest<HTMLElement>('.pin-tile')
+  if (!tile) return
+  e.preventDefault()
+  send('thread-menu', { id: tile.dataset.id })
+})
+pinsEl.addEventListener('dragstart', (e) => {
+  const tile = (e.target as HTMLElement).closest<HTMLElement>('.pin-tile')
+  if (!tile) return
+  startDrag(tile.dataset.id!, false, e)
+})
+
+/** Where a drag over the icons would land: beside an icon, by which half it's over, or after the last. */
+function pinDrop(e: DragEvent): { el: HTMLElement; target: string | null; after: boolean } | null {
+  if (!dragId || dragFolder) return null
+  const tile = (e.target as HTMLElement).closest<HTMLElement>('.pin-tile')
+  if (!tile) return { el: pinsEl, target: null, after: true }
+  if (tile.dataset.id === dragId) return null
+  const box = tile.getBoundingClientRect()
+  return { el: tile, target: tile.dataset.id!, after: e.clientX > box.left + box.width / 2 }
+}
+
+pinsEl.addEventListener('dragover', (e) => {
+  const at = pinDrop(e)
+  if (!at) return clearDrop()
+  e.preventDefault()
+  const mark = !at.target ? 'dz' : at.after ? 'ins-right' : 'ins-left'
+  if (!at.el.classList.contains(mark)) {
+    clearDrop()
+    at.el.classList.add(mark)
+  }
+})
+pinsEl.addEventListener('drop', (e) => {
+  const at = pinDrop(e)
+  const id = dragId
+  if (!id) return
+  e.preventDefault()
+  endDrag()
+  if (at) send('pin-tab', { id, target: at.target, after: at.after })
+})
+pinsEl.addEventListener('dragend', () => endDrag())
+
+// Dragging the line under the icons sets how many rows they share: the count whose height is nearest the pointer.
+let pinDrag: { y: number; height: number } | null = null
+pinDivider.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return
+  pinDrag = { y: e.clientY, height: pinLayout(pinCount, pinRows()).total }
+  pinRowsDraft = pinRows()
+  pinDivider.setPointerCapture(e.pointerId)
+  pinDivider.classList.add('dragging')
+})
+pinDivider.addEventListener('pointermove', (e) => {
+  if (!pinDrag) return
+  const want = pinDrag.height + e.clientY - pinDrag.y
+  let best = 1
+  for (let r = 1; r <= pinCount; r++) {
+    if (Math.abs(pinLayout(pinCount, r).total - want) < Math.abs(pinLayout(pinCount, best).total - want)) best = r
+  }
+  if (best !== pinRowsDraft) {
+    pinRowsDraft = best
+    layoutPins()
+  }
+})
+const endPinDrag = () => {
+  if (!pinDrag) return
+  pinDrag = null
+  pinDivider.classList.remove('dragging')
+  setPinnedRows(pinRowsDraft ?? 1)
+}
+pinDivider.addEventListener('pointerup', endPinDrag)
+pinDivider.addEventListener('pointercancel', endPinDrag)
+pinDivider.addEventListener('dblclick', () => setPinnedRows(1))
+
+function setPinnedRows(rows: number) {
+  pinRowsDraft = null
+  if (S && S.prefs.pinnedRows !== rows) {
+    S.prefs.pinnedRows = rows
+    sendPrefs({ pinnedRows: rows })
+  }
+  layoutPins()
 }
 
 /** "Archived 3 threads · Undo" after archiving, until jbrow hides once you've seen it. */
@@ -995,12 +1149,18 @@ function commitRename() {
 threadsEl.addEventListener('dragstart', (e) => {
   const r = (e.target as HTMLElement).closest<HTMLElement>('.row')
   if (!r) return
-  dragId = r.dataset.id ?? r.dataset.folder!
-  dragFolder = !!r.dataset.folder
-  threadsEl.classList.add('dragging')
-  e.dataTransfer!.effectAllowed = 'move'
-  e.dataTransfer!.setData('text/plain', dragId)
+  startDrag(r.dataset.id ?? r.dataset.folder!, !!r.dataset.folder, e)
 })
+
+/** A row or a pinned icon starts moving; it can land in the list or among the icons. */
+function startDrag(id: string, folder: boolean, e: DragEvent) {
+  dragId = id
+  dragFolder = folder
+  threadsEl.classList.add('dragging')
+  sidebarEl.classList.add('dragging')
+  e.dataTransfer!.effectAllowed = 'move'
+  e.dataTransfer!.setData('text/plain', id)
+}
 
 /**
  * Where a drag over the sidebar would land. In Kept, the top or bottom of a row places the item
@@ -1025,12 +1185,14 @@ function dropTarget(e: DragEvent): { el: HTMLElement; where: 'before' | 'after' 
   return { el, where: dragFolder && !el.dataset.folder ? 'after' : 'into' }
 }
 
-const clearDrop = () => threadsEl.querySelectorAll('.dz, .ins-before, .ins-after').forEach((x) => x.classList.remove('dz', 'ins-before', 'ins-after'))
+const DROP_MARKS = ['dz', 'ins-before', 'ins-after', 'ins-left', 'ins-right']
+const clearDrop = () => sidebarEl.querySelectorAll(DROP_MARKS.map((m) => `.${m}`).join(', ')).forEach((x) => x.classList.remove(...DROP_MARKS))
 
 function endDrag() {
   dragId = null
   dragFolder = false
   threadsEl.classList.remove('dragging')
+  sidebarEl.classList.remove('dragging')
   clearDrop()
   renderThreads()
 }
@@ -1395,6 +1557,8 @@ const pinWindow = $<HTMLInputElement>('pinWindow')
 const pipOnlySites = $<HTMLTextAreaElement>('pipOnlySites')
 const pipExceptSites = $<HTMLTextAreaElement>('pipExceptSites')
 const quietLinks = $<HTMLInputElement>('quietLinks')
+const keepLoadedPinned = $<HTMLInputElement>('keepLoadedPinned')
+const keepLoadedKept = $<HTMLInputElement>('keepLoadedKept')
 const dangerousSites = $<HTMLInputElement>('dangerousSites')
 /** The profile Clear data… clears, or 'all'. */
 let clearFrom = 'all'
@@ -1590,6 +1754,8 @@ function renderSettings(all = false) {
   if (all || document.activeElement !== pipExceptSites) pipExceptSites.value = mp.exceptSites.join('\n')
   pinWindow.checked = S.pinned
   quietLinks.checked = S.prefs.quietLinks
+  keepLoadedPinned.checked = S.prefs.keepLoaded.pinned
+  keepLoadedKept.checked = S.prefs.keepLoaded.kept
   renderSearchEngine(all)
   $('showHotkey').textContent = keyLabel('show') || 'its hotkey'
   $('appHotkey').textContent = keyLabel('showApp') || 'The app hotkey'
@@ -2065,6 +2231,8 @@ hideCapture.addEventListener('change', () => sendPrefs({ hideFromScreenCapture: 
 pinWindow.addEventListener('change', () => send('pin', { on: pinWindow.checked }))
 $('resetWindow').addEventListener('click', () => send('window-reset'))
 quietLinks.addEventListener('change', () => sendPrefs({ quietLinks: quietLinks.checked }))
+keepLoadedPinned.addEventListener('change', () => sendPrefs({ keepLoaded: { ...S!.prefs.keepLoaded, pinned: keepLoadedPinned.checked } }))
+keepLoadedKept.addEventListener('change', () => sendPrefs({ keepLoaded: { ...S!.prefs.keepLoaded, kept: keepLoadedKept.checked } }))
 dangerousSites.addEventListener('change', () => sendPrefs({ dangerousSites: dangerousSites.checked }))
 $('clearProfile').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')

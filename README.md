@@ -142,7 +142,16 @@ a scheme) or matches a private address pattern is sent. Turn them off under **Ge
 Threads opened from an app with ⌥⇧Space get their own section in the sidebar, under the app's name
 and icon (linked apps share one). Kept threads stay in Kept.
 
-Right-click a tab to rename it, keep it, move it to a folder, open it in another profile, copy its
+Pinned tabs sit at the top of the sidebar as icons only. Right-click a tab → **Pin to top**, or drag
+it onto the icons. They share one row and get smaller as you pin more; drag the line under them down
+for another row (double-click it for one row again). Drag the icons to reorder them, or drag one into
+the list to unpin it. Pinned threads count as kept, so they never archive; they show whichever app the
+sidebar is narrowed to, and ⌘1–9 reach them first. Their pages load when jbrow starts and stay loaded,
+while kept threads unseen for the **Summarize** time unload theirs (keeping their full row). Switch
+either under **Threads** → **Keep loaded** in settings (`keepLoaded` in `settings.json`). The thread you're on opens under the icons
+when it has tabs inside.
+
+Right-click a tab to rename it, pin it, keep it, move it to a folder, open it in another profile, copy its
 link or close it. Its close
 button shows on hover. ⇧⌘T, or right-click **+** → **Reopen closed tab**, brings back the last 25
 closed tabs one by one, in their old place with their back/forward history and any threads that were

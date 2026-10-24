@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { urlMatcher } from '../shared/patterns'
 import { MAX_PANES, paneSpans, splitOf } from '../shared/split'
 import { byOrder, childrenOf, isAsleep, isInFolder, isRoot, parentFolder, rootOf, subtree, threadsOf } from '../shared/threads'
-import type { CrashView, Folder, Profile, Split, TabRecord, UiTab } from '../shared/types'
+import type { CrashView, Folder, KeepLoaded, Profile, Split, TabRecord, UiTab } from '../shared/types'
 import type { Certificates } from './certs'
 import type { DangerousSites } from './dangerous'
 import type { DeviceChooser } from './devices'
@@ -168,6 +168,9 @@ export class Tabs {
   private histories = new Map<string, NavHistory>()
   private historyTimer: NodeJS.Timeout | null = null
 
+  /** Kept and pinned threads whose pages never unload (see sweep). Main sets it from settings. */
+  keepLoaded: KeepLoaded = { kept: false, pinned: true }
+
   constructor(private deps: TabsDeps) {}
 
   // ---------- persistence ----------
@@ -262,10 +265,13 @@ export class Tabs {
   /**
    * Numbers the items in Kept 0, 1, 2… wherever they sit: the top of Kept and each folder, each
    * holding folders and threads. Items without a place yet go to the bottom, which lays out a
-   * tabs.json from before ordering as folders first, then threads, oldest first.
+   * tabs.json from before ordering as folders first, then threads, oldest first. Pinned threads
+   * have their own numbering.
    */
   private renumber() {
-    const kept = this.records.filter((t) => t.kept && isRoot(this.records, t)).sort((a, b) => a.createdAt - b.createdAt)
+    const roots = this.records.filter((t) => t.kept && isRoot(this.records, t)).sort((a, b) => a.createdAt - b.createdAt)
+    const kept = roots.filter((t) => !t.pinned)
+    roots.filter((t) => t.pinned).sort(byOrder).forEach((t, i) => (t.order = i))
     const folders = [...this.folders].sort((a, b) => a.createdAt - b.createdAt)
     for (const container of [undefined, ...folders.map((f) => f.id)]) {
       const items = [
@@ -844,6 +850,7 @@ export class Tabs {
         child.scopeName = rec.scopeName
         child.app = rec.app
         child.kept = rec.kept
+        child.pinned = rec.pinned
         child.folder = rec.folder
         child.order = rec.order
       }
@@ -900,9 +907,9 @@ export class Tabs {
     if (rec.folder && !this.folder(rec.folder)) rec.folder = undefined
     for (const child of c.children.map((id) => this.get(id))) {
       if (!child || child.profile !== rec.profile || child.parent !== rec.parent) continue
-      if (!rec.parent && (child.kept !== rec.kept || child.folder !== rec.folder)) continue
+      if (!rec.parent && (child.kept !== rec.kept || child.pinned !== rec.pinned || child.folder !== rec.folder)) continue
       child.parent = rec.id
-      child.kept = child.folder = child.order = child.scope = child.scopeName = child.app = undefined
+      child.kept = child.pinned = child.folder = child.order = child.scope = child.scopeName = child.app = undefined
     }
     if (c.history) this.histories.set(rec.id, c.history)
     this.records.splice(Math.min(c.index, this.records.length), 0, rec)
@@ -956,6 +963,7 @@ export class Tabs {
       if (target.profile !== rec.profile) return 'Threads only merge within one profile, because their pages share a login.'
       rec.parent = target.id
       rec.kept = undefined
+      rec.pinned = undefined
       rec.folder = undefined
       rec.order = undefined
       rec.scope = undefined
@@ -976,10 +984,34 @@ export class Tabs {
     }
     const into = kept && folder && this.folder(folder) ? folder : undefined
     // Somewhere new in Kept, it goes to the bottom.
-    if (rec.parent || !kept || !rec.kept || rec.folder !== into) rec.order = undefined
+    if (rec.parent || !kept || !rec.kept || rec.pinned || rec.folder !== into) rec.order = undefined
     rec.parent = undefined
     rec.kept = kept || undefined
+    rec.pinned = undefined
     rec.folder = into
+  }
+
+  /**
+   * Pins a tab as a thread of its own, just before or after another pinned thread, or after the
+   * last one without a `target`. Pinned threads are kept, so they never sleep or archive.
+   */
+  pin(id: string, target: string | null = null, after = false) {
+    const rec = this.get(id)
+    const at = target ? this.get(target) : undefined
+    if (!rec || id === target || (target && !(at?.pinned && at.kept && isRoot(this.records, at)))) return
+    if (!rec.pinned || rec.parent) this.toThread(rec, true)
+    rec.pinned = true
+    rec.order = at ? (at.order ?? 0) + (after ? 0.5 : -0.5) : undefined
+    this.changed()
+    this.loadPinned()
+  }
+
+  /** Loads the pages of pinned threads that have none yet, when settings keep them loaded, so they're ready when clicked. */
+  loadPinned() {
+    if (!this.keepLoaded.pinned) return
+    for (const root of this.records.filter((t) => t.pinned && t.kept && isRoot(this.records, t))) {
+      for (const t of subtree(this.records, root)) if (t.url && !this.live.has(t.id)) this.ensureView(t)
+    }
   }
 
   /**
@@ -989,7 +1021,7 @@ export class Tabs {
   place(id: string, target: string | null, after = false) {
     const at = target ? (this.folder(target) ?? this.get(target)) : undefined
     if (target && (!at || id === target)) return
-    if (at && !('rules' in at) && !(at.kept && isRoot(this.records, at))) return
+    if (at && !('rules' in at) && !(at.kept && !at.pinned && isRoot(this.records, at))) return
     const into = at && this.containerOf(at)
     const folder = this.folder(id)
     let item: Folder | TabRecord
@@ -1174,7 +1206,9 @@ export class Tabs {
   // ---------- archive ----------
 
   /**
-   * Archives threads unseen for `afterMs`. Kept threads and the active thread stay. A thread
+   * Archives threads unseen for `afterMs`. Kept threads and the active thread stay. Kept threads
+   * unseen for `sleepAfterMs` unload their pages too, unless `keepLoaded` keeps them, but stay
+   * full rows rather than summaries. A thread
    * with an address matching a folder's rules moves into that folder (and so becomes kept)
    * instead; the oldest folder wins. Threads unseen for `sleepAfterMs` but not yet archived
    * unload their pages (see isAsleep). 0 turns either off. Returns the root IDs of the threads
@@ -1214,6 +1248,14 @@ export class Tabs {
         archived.push(root.id)
       }
       changed = true
+    }
+    if (sleepAfterMs > 0) {
+      for (const root of this.records.filter((t) => isRoot(this.records, t) && t.kept)) {
+        if (root.pinned ? this.keepLoaded.pinned : this.keepLoaded.kept) continue
+        const all = subtree(this.records, root)
+        if (all.some((t) => t.id === this.activeId || shown.includes(t.id))) continue
+        if (now - Math.max(...all.map((t) => t.lastSeen)) >= sleepAfterMs && this.unload(all)) changed = true
+      }
     }
     const cutoff = now - ARCHIVE_KEEP_MS
     if (this.archived.some((t) => (t.archivedAt ?? 0) <= cutoff)) {

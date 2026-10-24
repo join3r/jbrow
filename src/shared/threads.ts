@@ -109,6 +109,8 @@ export interface AppView<T extends TabRecord> {
 }
 
 export interface Sections<T extends TabRecord> {
+  /** Pinned threads, the icons at the top of the sidebar, in their order. They show whichever app the list is narrowed to. */
+  pinned: ThreadView<T>[]
   /** Top-level folders in the Kept section. */
   folders: FolderView<T>[]
   /** Kept threads outside any folder. */
@@ -143,7 +145,7 @@ export function sections<T extends TabRecord>(
   const views = tabs
     .filter((t) => isRoot(tabs, t))
     .filter((r) => opts.filter === 'all' || r.profile === opts.filter)
-    .filter((r) => !opts.scope || r.scope === opts.scope)
+    .filter((r) => !opts.scope || r.scope === opts.scope || isPinned(r))
     .map((root) => {
       const all = subtree(tabs, root)
       const last = all.reduce((a, b) => (b.lastSeen > a.lastSeen ? b : a))
@@ -157,6 +159,7 @@ export function sections<T extends TabRecord>(
   // Showing one app, its threads are the whole list; otherwise each app gets its own section.
   const inApp = (v: ThreadView<T>) => !opts.scope && !!v.root.scope
   const loose = views.filter((v) => !v.root.kept && !inApp(v))
+  const kept = views.filter((v) => v.root.kept && !v.root.pinned)
   const apps = new Map<string, AppView<T>>()
   for (const v of views.filter((v) => !v.root.kept && inApp(v))) {
     const key = v.root.scope!
@@ -166,16 +169,17 @@ export function sections<T extends TabRecord>(
   }
   const byAge = [...opts.folders].sort((a, b) => a.createdAt - b.createdAt)
   const folderView = (folder: Folder): FolderView<T> => {
-    const threads = views.filter((v) => v.root.kept && v.root.folder === folder.id).sort((a, b) => byOrder(a.root, b.root))
+    const threads = kept.filter((v) => v.root.folder === folder.id).sort((a, b) => byOrder(a.root, b.root))
     const folders = byAge.filter((f) => parentFolder(opts.folders, f) === folder.id).sort(byOrder).map(folderView)
     return { folder, threads, folders, items: arranged(folders, threads) }
   }
   const folders = byAge.filter((f) => !parentFolder(opts.folders, f)).sort(byOrder).map(folderView)
-  const kept = views.filter((v) => v.root.kept && !inFolder(v)).sort((a, b) => byOrder(a.root, b.root))
+  const top = kept.filter((v) => !inFolder(v)).sort((a, b) => byOrder(a.root, b.root))
   return {
+    pinned: views.filter((v) => isPinned(v.root)).sort((a, b) => byOrder(a.root, b.root)),
     folders,
-    kept,
-    top: arranged(folders, kept),
+    kept: top,
+    top: arranged(folders, top),
     today: loose.filter((v) => !old(v)),
     apps: [...apps.values()].sort((a, b) => a.name.localeCompare(b.name) || a.scope.localeCompare(b.scope)),
     earlier: loose.filter((v) => old(v)),
@@ -189,9 +193,9 @@ export function keptThreads<T extends TabRecord>(s: Sections<T>, { skipCollapsed
   return shown(s.top)
 }
 
-/** Thread roots in the order ⌘1–9 address them, as the sidebar lists them. Threads in collapsed folders don't count. */
+/** Thread roots in the order ⌘1–9 address them, as the sidebar lists them: pinned first. Threads in collapsed folders don't count. */
 export function numberedThreads<T extends TabRecord>(s: Sections<T>): ThreadView<T>[] {
-  return [...keptThreads(s, { skipCollapsed: true }), ...s.today, ...s.apps.flatMap((a) => a.threads)].slice(0, 9)
+  return [...s.pinned, ...keptThreads(s, { skipCollapsed: true }), ...s.today, ...s.apps.flatMap((a) => a.threads)].slice(0, 9)
 }
 
 /**
@@ -203,5 +207,8 @@ export function isAsleep(all: TabRecord[], opts: { now: number; afterMs: number;
   if (opts.afterMs <= 0 || !all.length || all[0].kept || all.some((t) => t.id === opts.activeId)) return false
   return opts.now - Math.max(...all.map((t) => t.lastSeen)) >= opts.afterMs
 }
+
+/** A pinned thread's root. Pinning keeps a thread, so one that somehow lost `kept` isn't pinned either. */
+export const isPinned = (t: TabRecord) => !!t.pinned && !!t.kept
 
 export const displayName = (t: TabRecord) => t.name || t.title || (t.url ? t.url : 'New tab')

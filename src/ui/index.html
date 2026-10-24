@@ -100,6 +100,9 @@
         </div>
       </header>
       <aside id="sidebar">
+        <div id="pins" class="pins" role="list" aria-label="Pinned tabs"></div>
+        <div id="pinDivider" class="pin-divider" role="separator" aria-orientation="horizontal" hidden
+          title="Drag down for another row of pinned tabs, up for fewer. Double-click for one row."></div>
         <div id="scope" class="scope" hidden></div>
         <nav id="threads" aria-label="Threads"></nav>
         <section id="restylePane" class="restyle-pane" hidden aria-label="Restyle">
@@ -353,7 +356,7 @@
                   Threads you've opened within this time sit at the top of the sidebar. Older ones move to Earlier at the bottom.
                 </p>
               </div>
-              <div class="set-item" data-keywords="archive archiving summarize sleep unload threads tabs kept folders">
+              <div class="set-item" data-keywords="archive archiving summarize sleep unload loaded memory threads tabs kept pinned folders">
                 <h3>Archiving</h3>
                 <div class="field">
                   <span class="label">Summarize</span>
@@ -374,10 +377,20 @@
                     <button data-value="0">Never</button>
                   </div>
                 </div>
+                <div class="field">
+                  <span class="label">Keep loaded</span>
+                  <div class="checks">
+                    <label class="check"><input id="keepLoadedPinned" type="checkbox" /><span>Pinned tabs</span></label>
+                    <label class="check"><input id="keepLoadedKept" type="checkbox" /><span>Kept threads</span></label>
+                  </div>
+                </div>
                 <p class="help">
                   Threads you haven't opened for a while first unload their pages and shrink to one line: how many tabs, which
                   sites, how long ago. Opening one loads it again. Later they close and leave the sidebar, which offers
-                  <b>Undo</b> until you've seen it and hide jbrow. Find them under <b>Archived</b> or by typing in the address bar. Kept threads never archive, and a folder in Kept can catch threads by address before they do:
+                  <b>Undo</b> until you've seen it and hide jbrow. Find them under <b>Archived</b> or by typing in the address bar. Kept and pinned
+                  threads never archive. Their pages unload too, keeping their full row, unless <b>Keep loaded</b> is on for them; pinned tabs
+                  kept loaded also load when jbrow starts, so they're ready when you click. A folder in Kept can catch threads by address
+                  before they archive:
                   right-click the folder and choose <b>Auto-file rules</b>.
                 </p>
               </div>

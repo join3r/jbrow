@@ -2,7 +2,7 @@ import { app, type Rectangle } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ActionId } from '../shared/shortcuts'
-import { THEMES, type Appearance, type MiniPlayerPrefs, type Profile, type ProfileStyle, type RestyleAgent, type ThemeId } from '../shared/types'
+import { THEMES, type Appearance, type KeepLoaded, type MiniPlayerPrefs, type Profile, type ProfileStyle, type RestyleAgent, type ThemeId } from '../shared/types'
 
 export type AnimationStyle = 'materialize' | 'slide' | 'scale' | 'fade' | 'off'
 export type AnimationEase = 'spring' | 'snappy' | 'smooth'
@@ -58,14 +58,18 @@ export interface Settings {
   quietLinks: boolean
   /** Addresses matching these show as "Private" in the address bar until clicked. `*` matches anything. */
   privateUrls: string[]
-  /** Threads unseen this many days unload their pages and show as a one-line summary, unless kept. 0 never does. */
+  /** Threads unseen this many days unload their pages and show as a one-line summary. Kept ones unload without the summary, unless `keepLoaded` says not to. 0 never does. */
   summarizeAfterDays: number
   /** Threads unseen this many days are archived, unless kept or caught by a folder's rules. 0 never archives. */
   archiveAfterDays: number
+  /** Kept and pinned threads whose pages never unload. Pinned ones load at launch, so they're ready when clicked. */
+  keepLoaded: KeepLoaded
   /** Threads unseen this many hours leave the top of the sidebar for Earlier at the bottom. */
   earlierAfterHours: number
   /** Extension IDs shown as buttons in the toolbar, in this order, whenever the current profile has them. */
   pinnedExtensions: string[]
+  /** Rows the pinned tabs' icons share at the top of the sidebar. */
+  pinnedRows: number
   /** Your extension shortcuts, per profile, extension ID and command: Electron accelerators, '' for none. Unlisted commands use the extension's suggestion. */
   extensionShortcuts: Record<string, Record<string, Record<string, string>>>
   /** Restyling sites with Claude Code or Codex. */
@@ -105,8 +109,10 @@ const DEFAULTS: Settings = {
   privateUrls: [],
   summarizeAfterDays: 3,
   archiveAfterDays: 7,
+  keepLoaded: { kept: false, pinned: true },
   earlierAfterHours: 12,
   pinnedExtensions: [],
+  pinnedRows: 1,
   extensionShortcuts: {},
   restyle: { agent: 'claude', model: 'sonnet', codexModel: '', claudePath: '', codexPath: '' },
   miniPlayer: { onHide: true, onTabSwitch: false, mutedToo: false, sites: 'all', onlySites: [], exceptSites: [] },
@@ -132,6 +138,7 @@ export function loadSettings(): Settings {
     settings.restyle = { ...DEFAULTS.restyle, ...rest.restyle }
     settings.miniPlayer = { ...DEFAULTS.miniPlayer, ...rest.miniPlayer }
     settings.zoom = { ...DEFAULTS.zoom, ...rest.zoom }
+    settings.keepLoaded = { ...DEFAULTS.keepLoaded, ...rest.keepLoaded }
     // Older settings have only the fractions. A place that isn't a rectangle is dropped.
     const panel = { ...structuredClone(DEFAULTS.panel), ...rest.panel }
     const isRect = (r: unknown): r is Rectangle =>
@@ -139,6 +146,7 @@ export function loadSettings(): Settings {
     panel.displays = Object.fromEntries(Object.entries(panel.displays ?? {}).filter(([, r]) => isRect(r)))
     if (!isRect(panel.pinned)) panel.pinned = null
     settings.panel = panel
+    if (!Number.isInteger(settings.pinnedRows) || settings.pinnedRows < 1) settings.pinnedRows = DEFAULTS.pinnedRows
     if (!Number.isFinite(settings.sidePanelWidth)) settings.sidePanelWidth = DEFAULTS.sidePanelWidth
     if (!['system', 'light', 'dark'].includes(settings.appearance)) settings.appearance = DEFAULTS.appearance
     if (!THEMES.some((t) => t.id === settings.theme)) settings.theme = DEFAULTS.theme

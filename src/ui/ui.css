@@ -281,6 +281,31 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .scope { display: flex; justify-content: space-between; align-items: center; gap: 6px; background: var(--accent-soft); color: var(--accent); border-radius: 7px; padding: 6px 9px; margin-bottom: 4px; font-size: 12px; font-weight: 600; }
 .scope button { border: 0; background: none; color: inherit; text-decoration: underline; padding: 0; font-size: 12px; }
 .head { font: 600 10.5px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 12px 8px 5px; }
+/* Pinned tabs: icons above the list, sharing the rows the line under them was dragged to (see layoutPins). */
+.pins { flex: none; display: grid; grid-template-columns: repeat(var(--pin-cols, 1), minmax(0, 1fr)); grid-auto-rows: var(--pin-h, 40px); gap: 4px; }
+.pins:empty { display: none; }
+#sidebar.dragging .pins:empty { display: block; height: auto; padding: 6px 10px; margin-bottom: 4px; color: var(--muted); font-size: 12px; border-radius: 7px; outline: 1px dashed var(--line); outline-offset: -1px; }
+#sidebar.dragging .pins:empty::before { content: 'Drop here to pin'; }
+#sidebar.dragging .pins.dz:empty { color: var(--accent); outline: 2px dashed var(--accent); }
+.pin-tile { position: relative; display: grid; place-items: center; min-width: 0; padding: 0; border: 0; border-radius: 8px; background: var(--hover); color: var(--ink); transition: background-color 0.12s; }
+.pin-tile:hover { background: color-mix(in srgb, var(--hover) 100%, var(--ink) 6%); }
+.pin-tile.cur { background: var(--selected); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.pin-tile .fav { width: var(--pin-icon, 18px); height: var(--pin-icon, 18px); border-radius: 3px; object-fit: contain; }
+.pin-tile .fav.letter { display: grid; place-items: center; background: var(--muted); color: #fff; font-size: calc(var(--pin-icon, 18px) * 0.62); font-weight: 600; line-height: 1; }
+.pin-tile::before { content: ''; position: absolute; left: 50%; bottom: 3px; width: 8px; height: 2px; margin-left: -4px; border-radius: 1px; background: var(--pc, transparent); opacity: 0.8; }
+.pin-tile.unread::after { content: ''; position: absolute; top: 4px; right: 4px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.pin-tile.loading .fav { animation: pulse 1s ease-in-out infinite; }
+.pin-tile.crashed .fav { filter: grayscale(1); opacity: 0.45; }
+.pin-tile.ins-left, .pin-tile.ins-right { overflow: visible; }
+.pin-tile.ins-left::after, .pin-tile.ins-right::after { content: ''; position: absolute; top: 2px; bottom: 2px; width: 2px; height: auto; border-radius: 1px; background: var(--accent); pointer-events: none; }
+.pin-tile.ins-left::after { left: -3px; right: auto; }
+.pin-tile.ins-right::after { right: -3px; left: auto; }
+.pins.dz { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: 8px; }
+/* The line under the icons. Dragging it down gives them another row, up takes one away. */
+.pin-divider { position: relative; flex: none; height: 11px; cursor: row-resize; touch-action: none; }
+.pin-divider::after { content: ''; position: absolute; left: 6px; right: 6px; top: 5px; height: 1px; background: var(--line); transition: background-color 0.12s, height 0.12s, top 0.12s; }
+.pin-divider:hover::after, .pin-divider.dragging::after { top: 4px; height: 3px; border-radius: 2px; background: var(--accent); }
+.pin-open { display: flex; flex-direction: column; gap: 1px; padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
 /* Kept has no heading; its items come first. While dragging, the strip under them shows where a drop keeps a thread. */
 .kept { display: flex; flex-direction: column; gap: 1px; }
 .keep-zone { position: relative; flex: none; height: 8px; }
@@ -372,7 +397,7 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .restyle-prompts small { display: block; color: var(--muted); font-size: 11.5px; }
 .restyle-history.off .restyle-prompts { opacity: 0.5; }
 .restyle-acts { display: flex; gap: 2px; padding-top: 4px; border-top: 1px solid var(--line); }
-#sidebar.restyling > #threads, #sidebar.restyling > #scope { display: none; }
+#sidebar.restyling > #threads, #sidebar.restyling > #scope, #sidebar.restyling > #pins, #sidebar.restyling > .pin-divider { display: none; }
 
 /* Auto-file rules for a folder, opened from its context menu. */
 .rules-pop { left: 8px; right: 8px; width: auto; user-select: text; }
@@ -534,6 +559,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; }
 .settings textarea { display: block; width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 8px; background: var(--selected); color: var(--ink); padding: 8px 10px; }
 .check { display: flex; gap: 10px; align-items: flex-start; line-height: 1.45; }
 .check input { margin: 2px 0 0; accent-color: var(--accent); }
+.checks { display: flex; flex-wrap: wrap; gap: 6px 18px; }
 .set-item > .check + .check { margin-top: 8px; }
 .set-item > .check + .help { margin-top: 10px; }
 .set-item > .chip { display: inline-flex; }
