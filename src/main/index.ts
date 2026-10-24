@@ -184,6 +184,8 @@ function state(): UiState {
       earlierAfterHours: settings.earlierAfterHours,
       pinnedExtensions: settings.pinnedExtensions,
       pinnedRows: settings.pinnedRows,
+      numberFrom: settings.numberFrom,
+      openApps: settings.openApps,
       restyleAgent: settings.restyle.agent,
       restyleModel: settings.restyle.model,
       restyleCodexModel: settings.restyle.codexModel,
@@ -519,7 +521,7 @@ function setActionKey(id: ActionId, shortcut: string): string | null {
 // ---------- keyboard shortcuts inside the panel ----------
 
 function openThread(n: number) {
-  const thread = numberedThreads(threadsInView())[n - 1]
+  const thread = numberedThreads(threadsInView(), { from: settings.numberFrom, openApps: settings.openApps })[n - 1]
   if (thread) tabs.activate(thread.last.id)
 }
 
@@ -799,6 +801,8 @@ function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.restyleCodexModel !== undefined) settings.restyle = { ...settings.restyle, codexModel: prefs.restyleCodexModel.trim() }
   if (prefs.earlierAfterHours !== undefined) settings.earlierAfterHours = Math.max(1, prefs.earlierAfterHours)
   if (Number.isFinite(prefs.pinnedRows)) settings.pinnedRows = Math.max(1, Math.round(prefs.pinnedRows!))
+  if (prefs.numberFrom === 'pinned' || prefs.numberFrom === 'kept' || prefs.numberFrom === 'today') settings.numberFrom = prefs.numberFrom
+  if (Array.isArray(prefs.openApps)) settings.openApps = prefs.openApps.filter((k) => typeof k === 'string')
   if (prefs.miniPlayer) {
     const mp = { ...settings.miniPlayer, ...prefs.miniPlayer }
     const clean = (list: string[]) => list.map((p) => p.trim()).filter(Boolean)

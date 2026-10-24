@@ -356,7 +356,9 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .frow .fav svg.i, .set-row .fav svg.i { width: 15px; height: 15px; }
 .frow .t { font-weight: 600; }
 .folder-body { display: flex; flex-direction: column; gap: 1px; padding-left: 14px; }
-.earlier-sec { margin-top: auto; display: flex; flex-direction: column; gap: 1px; }
+/* Earlier, the way to Archived and the apps' sections, at the bottom of the sidebar. */
+.bottom-sec { margin-top: auto; display: flex; flex-direction: column; gap: 1px; }
+.earlier-sec { display: flex; flex-direction: column; gap: 1px; }
 .earlier .row { opacity: 0.55; }
 .earlier .row:hover, .earlier .row.cur { opacity: 1; }
 /* An asleep thread's pages are unloaded; the line under its name says what it held. */
@@ -385,7 +387,14 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 
 /* App sections: the heading shows the apps' icons, overlapping for linked apps. */
 .app-head { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
-.app-head > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.app-head { cursor: default; border-radius: 6px; padding-left: 4px; padding-right: 8px; }
+.app-head:hover { color: var(--ink); }
+.app-head .app-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.app-head .meta { font-weight: 400; }
+.app-head[aria-expanded="true"] .meta { visibility: hidden; }
+.app-head .chev { flex: none; display: inline-grid; place-items: center; transition: transform 0.12s; }
+.app-head .chev svg.i { width: 10px; height: 10px; }
+.app-head[aria-expanded="true"] .chev { transform: rotate(90deg); }
 .app-icons { flex: none; display: inline-flex; }
 .app-icons img, .app-icons .no-icon { width: 14px; height: 14px; }
 .app-icons > * + * { margin-left: -4px; }

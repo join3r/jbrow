@@ -168,6 +168,10 @@ export interface Prefs {
   pinnedExtensions: string[]
   /** Rows the pinned tabs' icons share at the top of the sidebar; drag the line under them to change it. */
   pinnedRows: number
+  /** Where ⌘1 starts: the pinned icons, the Kept rows, or Today, skipping the sections above. */
+  numberFrom: NumberFrom
+  /** App sections at the bottom of the sidebar that are open, by scope key. The rest are collapsed. */
+  openApps: string[]
   /** Claude model alias for restyling sites. */
   restyleAgent: RestyleAgent
   restyleModel: string
@@ -182,6 +186,9 @@ export interface Prefs {
   /** Ask the search engine for suggestions while you type in the address bar. */
   searchSuggestions: boolean
 }
+
+/** The first sidebar section ⌘1–9 count from. */
+export type NumberFrom = 'pinned' | 'kept' | 'today'
 
 /** Which kept threads keep their pages loaded. Pinned threads are kept too, but have their own switch. */
 export interface KeepLoaded {

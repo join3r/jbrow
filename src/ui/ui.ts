@@ -511,7 +511,7 @@ function renderThreads() {
 
   const appNames = Object.fromEntries(Object.entries(S.apps).map(([k, l]) => [k, l.name]))
   const s = sections(S.tabs, { filter: S.filter, scope: S.scope?.key ?? null, activeId: S.activeId, now: S.now, folders: S.folders, appNames, earlierAfterMs: S.prefs.earlierAfterHours * HOUR_MS })
-  const numbered = new Map(numberedThreads(s).map((v, i) => [v.root.id, i + 1]))
+  const numbered = new Map(numberedThreads(s, { from: S.prefs.numberFrom, openApps: S.prefs.openApps }).map((v, i) => [v.root.id, i + 1]))
   // As in Arc, a split view is one row, where the first of its tabs comes in the sidebar; its
   // other tabs don't show again further down. Pinned tabs stay icons.
   const listed = new Map([...keptThreads(s), ...s.today, ...s.apps.flatMap((a) => [...a.threads, ...a.earlier]), ...s.earlier].map((v) => [v.root.id, v]))
@@ -543,13 +543,14 @@ function renderThreads() {
   html += `<div id="kept" class="kept">${kept}</div><div class="keep-zone"></div>`
   html += `<div class="head" data-head="today">${recentLabel(S.prefs.earlierAfterHours)}</div>`
   html += s.today.map(block).join('') || `<div class="empty">Nothing here yet</div>`
-  html += s.apps.map((a) => appSection(a, appBlock)).join('')
-  // Earlier sits at the bottom of the sidebar, away from what's current, and the way to archived threads under it.
+  // Earlier sits at the bottom of the sidebar, away from what's current, with the way to archived
+  // threads under it. Apps' sections come last, collapsed until opened.
   const archivedLink = archivedList.length
     ? `<button class="archived-link" data-show-archived title="Archived tabs">${icon('archive')}${archivedList.length.toLocaleString()} archived</button>`
     : ''
-  if (s.earlier.length) html += `<div class="earlier-sec"><div class="head" data-head="today">Earlier</div><div class="earlier">${s.earlier.map(block).join('')}</div>${archivedLink}</div>`
-  else html += archivedLink
+  let bottom = s.earlier.length ? `<div class="earlier-sec"><div class="head" data-head="today">Earlier</div><div class="earlier">${s.earlier.map(block).join('')}</div>${archivedLink}</div>` : archivedLink
+  bottom += s.apps.map((a) => appSection(a, appBlock)).join('')
+  if (bottom) html += `<div class="bottom-sec">${bottom}</div>`
   threadsEl.innerHTML = html
 
   const input = document.getElementById('ren') as HTMLInputElement | null
@@ -729,12 +730,27 @@ function recentLabel(hours: number): string {
   return 'This week'
 }
 
+/** An app's section: its heading toggles it, and collapsed it still shows the thread you're on. */
 function appSection(a: AppView<UiTab>, block: (v: ThreadView<UiTab>) => string): string {
+  const open = !!S?.prefs.openApps.includes(a.scope)
+  const count = a.threads.length + a.earlier.length
   const icons = (S?.apps[a.scope]?.icons ?? []).map((src) => `<img src="${esc(src)}" alt="">`).join('')
-  let html = `<div class="head app-head" title="${esc(a.name)}">${icons ? `<span class="app-icons">${icons}</span>` : ''}<span>${esc(a.name)}</span></div>`
-  html += a.threads.map(block).join('')
-  if (a.earlier.length) html += `<div class="earlier">${a.earlier.map(block).join('')}</div>`
+  let html = `<div class="head app-head" role="button" tabindex="0" aria-expanded="${open}" data-app-head="${esc(a.scope)}" title="${esc(a.name)}">
+    <span class="chev">${icon('forward')}</span>${icons ? `<span class="app-icons">${icons}</span>` : ''}<span class="app-name">${esc(a.name)}</span><span class="meta">${count}</span>
+  </div>`
+  const shown = (v: ThreadView<UiTab>) => open || holdsActive(v)
+  html += a.threads.filter(shown).map(block).join('')
+  const earlier = a.earlier.filter(shown)
+  if (earlier.length) html += `<div class="earlier">${earlier.map(block).join('')}</div>`
   return html
+}
+
+function toggleApp(scope: string) {
+  if (!S) return
+  const open = S.prefs.openApps
+  S.prefs.openApps = open.includes(scope) ? open.filter((k) => k !== scope) : [...open, scope]
+  sendPrefs({ openApps: S.prefs.openApps })
+  renderThreads()
 }
 
 /** A folder's row and, when open, the folders and threads inside it. */
@@ -1102,6 +1118,8 @@ threadsEl.addEventListener('click', (e) => {
   if (el.closest('[data-settings]')) return showSettings(true)
   const folder = el.closest<HTMLElement>('.frow')
   if (folder) return void (!renaming && toggleFolder(folder.dataset.folder!))
+  const appHead = el.closest<HTMLElement>('[data-app-head]')
+  if (appHead) return toggleApp(appHead.dataset.appHead!)
   const r = el.closest<HTMLElement>('.row')
   if (r && !renaming) {
     showSettings(false)
@@ -1130,6 +1148,10 @@ threadsEl.addEventListener('keydown', (e) => {
       renderThreads()
     }
     return
+  }
+  if ((e.key === 'Enter' || e.key === ' ') && el.dataset.appHead) {
+    e.preventDefault()
+    return toggleApp(el.dataset.appHead)
   }
   if ((e.key === 'Enter' || e.key === ' ') && el.classList.contains('row')) {
     e.preventDefault()
@@ -1739,6 +1761,7 @@ function renderSettings(all = false) {
   seg('summarizeAfter', String(S.prefs.summarizeAfterDays))
   seg('archiveAfter', String(S.prefs.archiveAfterDays))
   seg('earlierAfter', String(S.prefs.earlierAfterHours))
+  seg('numberFrom', S.prefs.numberFrom)
   seg('restyleAgent', S.prefs.restyleAgent)
   seg('restyleModel', S.prefs.restyleModel)
   const codex = S.prefs.restyleAgent === 'codex'
@@ -1870,6 +1893,10 @@ $('profileStyle').addEventListener('click', (e) => {
 $('appearance').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ appearance: b.dataset.value as Prefs['appearance'] })
+})
+$('numberFrom').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b) sendPrefs({ numberFrom: b.dataset.value as Prefs['numberFrom'] })
 })
 $('earlierAfter').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')

@@ -217,9 +217,19 @@ export function keptThreads<T extends TabRecord>(s: Sections<T>, { skipCollapsed
   return shown(s.top)
 }
 
-/** Thread roots in the order ⌘1–9 address them, as the sidebar lists them: pinned first. Threads in collapsed folders don't count. */
-export function numberedThreads<T extends TabRecord>(s: Sections<T>): ThreadView<T>[] {
-  return [...s.pinned, ...keptThreads(s, { skipCollapsed: true }), ...s.today, ...s.apps.flatMap((a) => a.threads)].slice(0, 9)
+/**
+ * Thread roots in the order ⌘1–9 address them, as the sidebar lists them, starting at the section
+ * `from` names: the pinned icons, Kept, or Today. Threads in collapsed folders don't count, nor
+ * those of app sections not in `openApps`, as apps start collapsed.
+ */
+export function numberedThreads<T extends TabRecord>(
+  s: Sections<T>,
+  { from = 'pinned', openApps = [] }: { from?: 'pinned' | 'kept' | 'today'; openApps?: string[] } = {},
+): ThreadView<T>[] {
+  const pinned = from === 'pinned' ? s.pinned : []
+  const kept = from === 'today' ? [] : keptThreads(s, { skipCollapsed: true })
+  const apps = s.apps.filter((a) => openApps.includes(a.scope)).flatMap((a) => a.threads)
+  return [...pinned, ...kept, ...s.today, ...apps].slice(0, 9)
 }
 
 /**

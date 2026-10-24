@@ -2,7 +2,7 @@ import { app, type Rectangle } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ActionId } from '../shared/shortcuts'
-import { THEMES, type Appearance, type KeepLoaded, type MiniPlayerPrefs, type Profile, type ProfileStyle, type RestyleAgent, type ThemeId } from '../shared/types'
+import { THEMES, type Appearance, type KeepLoaded, type MiniPlayerPrefs, type NumberFrom, type Profile, type ProfileStyle, type RestyleAgent, type ThemeId } from '../shared/types'
 
 export type AnimationStyle = 'materialize' | 'slide' | 'scale' | 'fade' | 'off'
 export type AnimationEase = 'spring' | 'snappy' | 'smooth'
@@ -72,6 +72,10 @@ export interface Settings {
   pinnedExtensions: string[]
   /** Rows the pinned tabs' icons share at the top of the sidebar. */
   pinnedRows: number
+  /** Where ⌘1 starts: pinned, Kept or Today. */
+  numberFrom: NumberFrom
+  /** App sections open at the bottom of the sidebar, by scope key. They start collapsed. */
+  openApps: string[]
   /** Your extension shortcuts, per profile, extension ID and command: Electron accelerators, '' for none. Unlisted commands use the extension's suggestion. */
   extensionShortcuts: Record<string, Record<string, Record<string, string>>>
   /** Restyling sites with Claude Code or Codex. */
@@ -118,6 +122,8 @@ const DEFAULTS: Settings = {
   earlierAfterHours: 12,
   pinnedExtensions: [],
   pinnedRows: 1,
+  numberFrom: 'today',
+  openApps: [],
   extensionShortcuts: {},
   restyle: { agent: 'claude', model: 'sonnet', codexModel: '', claudePath: '', codexPath: '' },
   miniPlayer: { onHide: true, onTabSwitch: false, mutedToo: false, sites: 'all', onlySites: [], exceptSites: [] },
@@ -155,6 +161,8 @@ export function loadSettings(): Settings {
     if (!isRect(panel.pinned)) panel.pinned = null
     settings.panel = panel
     if (!Number.isInteger(settings.pinnedRows) || settings.pinnedRows < 1) settings.pinnedRows = DEFAULTS.pinnedRows
+    if (!['pinned', 'kept', 'today'].includes(settings.numberFrom)) settings.numberFrom = DEFAULTS.numberFrom
+    if (!Array.isArray(settings.openApps)) settings.openApps = DEFAULTS.openApps
     if (!Number.isFinite(settings.sidePanelWidth)) settings.sidePanelWidth = DEFAULTS.sidePanelWidth
     if (!['system', 'light', 'dark'].includes(settings.appearance)) settings.appearance = DEFAULTS.appearance
     if (!THEMES.some((t) => t.id === settings.theme)) settings.theme = DEFAULTS.theme
