@@ -81,4 +81,5 @@ await Promise.all([
 await cp('src/ui/index.html', 'dist/ui/index.html')
 await cp('src/ui/signin.html', 'dist/ui/signin.html')
 await cp('src/ui/ui.css', 'dist/ui/ui.css')
+await cp('src/ui/welcome.css', 'dist/ui/welcome.css')
 

@@ -734,6 +734,22 @@ function onWindowKey(wc: Electron.WebContents, input: Electron.Input): boolean {
 
 // ---------- settings screen, extensions, thread menu ----------
 
+/** Brings jbrow up with the welcome over it, to go through again what it asked at first launch. */
+async function showWelcome() {
+  await summon()
+  panel.ui.send('welcome', { first: false })
+}
+
+/** The welcome is done or skipped: it doesn't show at launch again, and the window is pinned or not as chosen. */
+function finishWelcome(pinned: boolean) {
+  if (!settings.welcomed) {
+    settings.welcomed = true
+    saveSettings(settings)
+  }
+  if (pinned !== panel.pinned) setPinned(pinned)
+  if (!pinned) toast(`jbrow now hides when you click another app. ${shortcutLabel(actionKeys(settings.shortcuts).show)} brings it back.`)
+}
+
 /** Pins or unpins the window and remembers it for next launch. */
 function setPinned(on: boolean) {
   panel.setPinned(on)
@@ -1461,7 +1477,8 @@ function attachProfile(rt: ProfileRuntime) {
 }
 
 let addingProfile = false
-async function addProfile() {
+/** Adds a profile; `rename` opens settings with its name ready to type over. */
+async function addProfile(rename = true) {
   if (addingProfile) return
   addingProfile = true
   try {
@@ -1481,7 +1498,7 @@ async function addProfile() {
     attachProfile(rt)
     commands.watchProfile(rt)
     sendProfiles()
-    panel.ui.send('rename-profile', profile.id)
+    if (rename) panel.ui.send('rename-profile', profile.id)
   } catch (error) {
     console.error('[profiles] could not add a profile:', error)
     toast(`Couldn't add a profile: ${error instanceof Error ? error.message : String(error)}`)
@@ -1762,7 +1779,9 @@ function wireIpc() {
   on('ready', () => {
     pushState()
     sendDownloads()
+    if (!settings.welcomed) panel.ui.send('welcome', { first: true })
   })
+  on<{ pinned: boolean }>('welcome-done', ({ pinned }) => finishWelcome(pinned))
   on<{ id: string; action: DownloadAction }>('download', ({ id, action }) => downloads.act(id, action))
   on<{ id: string }>('activate', ({ id }) => tabs.activate(id))
   on<{ site: string }>('zoom-reset', ({ site }) => {
@@ -1890,7 +1909,8 @@ function wireIpc() {
   on<{ key: string; profile: string }>('app-profile', ({ key, profile }) => setAppProfile(key, profile))
   on<{ key: string }>('app-menu', ({ key }) => appMenu(key))
   on('add-app', () => void addApp())
-  on('add-profile', () => void addProfile())
+  on<{ rename?: boolean } | undefined>('add-profile', (data) => void addProfile(data?.rename !== false))
+  on<{ id: string }>('delete-profile', ({ id }) => void deleteProfile(id))
   on<{ id: string; name?: string; color?: string }>('profile', ({ id, ...change }) => updateProfile(id, change))
   on<{ id: string }>('profile-menu', ({ id }) => profileMenu(id))
   on<{ id: string }>('default-profile', ({ id }) => setDefaultProfile(id))
@@ -1968,6 +1988,7 @@ function buildTray() {
           panel.ui.send('settings', { open: true })
         },
       },
+      { label: 'Welcome to jbrow', click: () => void showWelcome() },
       { label: 'Open settings.json', click: () => void shell.openPath(settingsPath()) },
       { label: 'Show log file', click: () => { const f = logPath(); if (f) shell.showItemInFolder(f) } },
       { label: 'Open UI DevTools', click: () => panel.ui.openDevTools({ mode: 'detach' }) },
@@ -2083,6 +2104,8 @@ function buildAppMenu() {
       {
         role: 'help',
         submenu: [
+          { label: 'Welcome to jbrow', click: () => void showWelcome() },
+          { type: 'separator' },
           { label: 'Open settings.json', click: () => void shell.openPath(settingsPath()) },
           { label: 'Show Log File', click: () => { const f = logPath(); if (f) shell.showItemInFolder(f) } },
         ],

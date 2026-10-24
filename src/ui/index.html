@@ -8,6 +8,7 @@
     />
     <title>jbrow</title>
     <link rel="stylesheet" href="ui.css" />
+    <link rel="stylesheet" href="welcome.css" />
   </head>
   <body>
     <div id="root" class="panel" data-style="materialize">
@@ -241,6 +242,12 @@
                 <p class="help">Drag the window's edges to resize it and the toolbar to move it. jbrow keeps both. Unpinned,
                   it keeps them separately for each display and comes up on the one the pointer is on.</p>
                 <button id="resetWindow" class="chip">Reset size and position</button>
+              </div>
+              <div class="set-item" data-keywords="welcome tour introduction start setup first launch onboarding">
+                <h3>Welcome</h3>
+                <p class="help">The tour from jbrow's first launch, with its choices for the window, keys, look, profiles and
+                  privacy. It's also under Help → Welcome to jbrow.</p>
+                <button id="showWelcome" class="chip">Show the welcome</button>
               </div>
               <div class="set-item" data-keywords="search engine google duckduckgo bing brave kagi ecosia custom address bar omnibox suggestions autocomplete queries">
                 <h3>Search</h3>
@@ -656,6 +663,7 @@
         <div class="side-body"></div>
       </aside>
     </div>
+    <section id="welcome" class="welcome" hidden tabindex="-1" aria-label="Welcome to jbrow"></section>
     <script src="ui.js"></script>
   </body>
 </html>

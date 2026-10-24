@@ -319,6 +319,20 @@ network), and jbrow checks and inserts Chromium's own serialization of it, so es
 endings can't hide a reference from the check. Pick the model under **Restyling** in settings;
 Sonnet takes about 10 seconds. Styles are kept in `styles.json` next to `settings.json`.
 
+## Welcome
+
+The first launch opens with a welcome over the whole window. It shows what jbrow does and asks what
+matters most from the start: whether jbrow stays **pinned** (a regular window, as it starts) or turns
+**ethereal** (no window until its key, gone on click-away), the two keys and the animation, the look,
+profiles and which profile apps' links open in, sleeping and archiving tabs, quiet links, the search
+engine and privacy switches. A little Mac on the first steps acts out pinned and ethereal. Each choice
+applies right away, except pinning, which waits for **Start browsing** so the window doesn't start
+hiding halfway through. **Skip and keep the defaults** leaves everything as it is.
+
+It shows until it's been through or skipped once (`welcomed` in `settings.json`; a settings file from
+before the welcome counts as done). Bring it back any time with **Help → Welcome to jbrow**, the menu bar
+item's **Welcome to jbrow** or **Show the welcome** under **General** in settings. Then Esc closes it.
+
 ## Settings
 
 The settings screen (⌘, or the sliders icon) has a sidebar of sections: **General** (pinning and the window's size, search engine and

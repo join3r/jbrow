@@ -82,6 +82,8 @@ export interface Settings {
   zoom: { defaultPercent: number; remember: boolean; sites: Record<string, number> }
   /** Width of the extension side panel (chrome.sidePanel), in pixels. Drag its edge to change it. */
   sidePanelWidth: number
+  /** The welcome has been through or skipped. Until then it shows at launch. */
+  welcomed: boolean
 }
 
 const DEFAULTS: Settings = {
@@ -121,6 +123,7 @@ const DEFAULTS: Settings = {
   miniPlayer: { onHide: true, onTabSwitch: false, mutedToo: false, sites: 'all', onlySites: [], exceptSites: [] },
   zoom: { defaultPercent: 100, remember: true, sites: {} },
   sidePanelWidth: 360,
+  welcomed: false,
 }
 
 export const settingsPath = () => path.join(app.getPath('userData'), 'settings.json')
@@ -137,6 +140,8 @@ export function loadSettings(): Settings {
     // Older settings kept the two summon keys under "hotkeys".
     const { hotkeys, ...rest } = parsed
     const settings = { ...structuredClone(DEFAULTS), ...rest }
+    // Settings from before the welcome belong to someone who already knows jbrow.
+    if (typeof rest.welcomed !== 'boolean') settings.welcomed = true
     // Older settings have fewer restyle keys.
     settings.restyle = { ...DEFAULTS.restyle, ...rest.restyle }
     settings.miniPlayer = { ...DEFAULTS.miniPlayer, ...rest.miniPlayer }

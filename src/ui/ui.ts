@@ -4,6 +4,7 @@ import { urlMatcher } from '../shared/patterns'
 import { awayFromHome, displayName, folderThreads, isAsleep, isFolder, isPinned, keptThreads, numberedThreads, samePage, sections, threadsOf, type AppView, type FolderView, type KeptItem, type ThreadView } from '../shared/threads'
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { dragDivider, PANE_GAP, paneSpans, splitOf } from '../shared/split'
+import { initWelcome } from './welcome'
 import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type VisitView } from '../shared/types'
 
 declare global {
@@ -89,6 +90,7 @@ const folderRules = $<HTMLTextAreaElement>('folderRules')
 const certPop = $('certPop')
 const devicePop = $('devicePop')
 const send = window.jbrow.send
+const welcome = initWelcome($('welcome'), send, () => syncOverlay())
 
 let S: UiState | null = null
 let renaming: string | null = null
@@ -985,7 +987,7 @@ function forgetVisit(s: Suggestion | undefined) {
 /** The page hides while anything of jbrow's own covers it; see Panel.setOverlay. */
 let overlaySent = false
 function syncOverlay() {
-  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !certPop.hidden || !devicePop.hidden || !settingsEl.hidden
+  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !certPop.hidden || !devicePop.hidden || !settingsEl.hidden || welcome.isOpen
   if (on !== overlaySent) {
     overlaySent = on
     send('overlay', { on })
@@ -2259,6 +2261,7 @@ $('dismissNotice').addEventListener('click', () => send('dismiss-archive-notice'
 hideCapture.addEventListener('change', () => sendPrefs({ hideFromScreenCapture: hideCapture.checked }))
 pinWindow.addEventListener('change', () => send('pin', { on: pinWindow.checked }))
 $('resetWindow').addEventListener('click', () => send('window-reset'))
+$('showWelcome').addEventListener('click', () => welcome.open(false))
 quietLinks.addEventListener('change', () => sendPrefs({ quietLinks: quietLinks.checked }))
 keepLoadedPinned.addEventListener('change', () => sendPrefs({ keepLoaded: { ...S!.prefs.keepLoaded, pinned: keepLoadedPinned.checked } }))
 keepLoadedKept.addEventListener('change', () => sendPrefs({ keepLoaded: { ...S!.prefs.keepLoaded, kept: keepLoadedKept.checked } }))
