@@ -599,6 +599,12 @@ function runAction(id: ActionId) {
       return tabs.focusPane(id === 'paneLeft' ? -1 : 1)
     case 'address':
       return focusAddressBar()
+    case 'copyUrl': {
+      const url = tabs.active()?.url
+      if (!url) return
+      clipboard.writeText(url)
+      return toast('Copied URL')
+    }
     case 'find':
       return openFind()
     case 'reload':
@@ -2046,6 +2052,7 @@ function buildAppMenu() {
           item('paneRight', 'Focus Right Pane'),
           { type: 'separator' },
           item('address', 'Address Bar'),
+          item('copyUrl', 'Copy URL'),
           item('devTools', 'Developer Tools'),
         ],
       },

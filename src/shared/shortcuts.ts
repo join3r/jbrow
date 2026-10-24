@@ -74,6 +74,7 @@ export const ACTIONS = [
   { id: 'paneLeft', label: 'Focus the pane on the left', key: 'Command+Control+Left' },
   { id: 'paneRight', label: 'Focus the pane on the right', key: 'Command+Control+Right' },
   { id: 'address', label: 'Address bar', key: 'Command+L' },
+  { id: 'copyUrl', label: "Copy the page's URL", key: 'Command+Shift+C' },
   { id: 'find', label: 'Find in page', key: 'Command+F' },
   { id: 'reload', label: 'Reload', key: 'Command+R' },
   { id: 'hardReload', label: 'Reload without the cache', key: 'Command+Shift+R' },
