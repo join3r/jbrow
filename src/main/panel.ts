@@ -35,8 +35,11 @@ const EASE_IN: [number, number, number, number] = [0.4, 0, 1, 1]
 export interface PanelHooks {
   /** Show or hide the active page's native view. */
   setPageVisible: (visible: boolean) => void
-  /** The page on screen, if any. The show animation waits for its first frame, and materialize blurs it. */
-  page: () => WebContents | null
+  /**
+   * The pages on screen: the active tab's, and the rest of its split. The show animation waits for
+   * their first frames, and materialize blurs them.
+   */
+  pages: () => WebContents[]
   /** You moved or resized the window, or reset it: settings.panel changed and needs saving. */
   onPlaced: () => void
   /** The panel starts to hide, with the page still on screen. */
@@ -103,10 +106,10 @@ export class Panel {
   /** Moves jbrow makes itself, which aren't yours to remember. */
   private placing = 0
   private saveTimer: NodeJS.Timeout | null = null
-  /** The stylesheet that blurs the page for materialize. */
-  private pageBlur: { wc: WebContents; key: Promise<string | null> } | null = null
-  /** The page kept awake while the window comes in, and whether it was throttled in the background before. */
-  private woken: { wc: WebContents; throttled: boolean } | null = null
+  /** The stylesheets that blur the pages for materialize. */
+  private pageBlur: { wc: WebContents; key: Promise<string | null> }[] = []
+  /** The pages kept awake while the window comes in, and whether each was throttled in the background before. */
+  private woken: { wc: WebContents; throttled: boolean }[] = []
   private sleepTimer: NodeJS.Timeout | null = null
   /** A page is fullscreen (a video, usually): the window covers its display and the page all of it. */
   pageFullscreen = false
@@ -298,6 +301,11 @@ export class Panel {
    * covers the page area. The UI moves above the page, which stays live beneath it: a video keeps
    * playing, and nothing waits on a screenshot. Re-adding a view only reorders it; focus stays.
    */
+  /** Whether the UI covers the page area; see setOverlay. */
+  get covered() {
+    return this.overlay
+  }
+
   setOverlay(on: boolean) {
     if (on === this.overlay || this.win.isDestroyed()) return
     this.overlay = on
@@ -510,14 +518,16 @@ export class Panel {
     })
   }
 
-  /** Resolves once the page on screen has drawn a fresh frame, or after `ms`, so no old frame shows. */
+  /** Resolves once the pages on screen have drawn a fresh frame, or after `ms`, so no old frame shows. */
   private pageFrame(ms: number): Promise<void> {
-    const wc = this.hooks.page()
-    if (!wc) return Promise.resolve()
-    const drawn = wc
-      .executeJavaScriptInIsolatedWorld(1997, [{ code: 'new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(0))))' }])
-      .then(() => {}, () => {})
-    return Promise.race([drawn, new Promise<void>((resolve) => setTimeout(resolve, ms))])
+    const pages = this.hooks.pages()
+    if (!pages.length) return Promise.resolve()
+    const drawn = pages.map((wc) =>
+      wc
+        .executeJavaScriptInIsolatedWorld(1997, [{ code: 'new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(0))))' }])
+        .then(() => {}, () => {}),
+    )
+    return Promise.race([Promise.all(drawn).then(() => {}), new Promise<void>((resolve) => setTimeout(resolve, ms))])
   }
 
   /**
@@ -526,22 +536,20 @@ export class Panel {
    */
   private blurPage(msg: AnimMessage, blur: number) {
     this.unblurPage()
-    const wc = this.hooks.page()
-    if (!wc) return
     const [from, to] = msg.phase === 'in' ? [blur, 0] : [0, blur]
     const ease = msg.phase === 'in' ? cssEase(msg.ease) : `cubic-bezier(${EASE_IN.join(',')})`
     const name = `jbrow-materialize-${msg.phase}`
     const css = `@keyframes ${name} { from { filter: blur(${from}px) } to { filter: blur(${to}px) } } html { animation: ${name} ${msg.durationMs}ms ${ease} both !important }`
     // An author sheet: Electron 44 can't remove the user sheets it inserts.
-    this.pageBlur = { wc, key: wc.insertCSS(css).catch(() => null) }
+    this.pageBlur = this.hooks.pages().map((wc) => ({ wc, key: wc.insertCSS(css).catch(() => null) }))
   }
 
   private unblurPage() {
-    const blur = this.pageBlur
-    this.pageBlur = null
-    void blur?.key.then((key) => {
-      if (key && !blur.wc.isDestroyed()) void blur.wc.removeInsertedCSS(key).catch(() => {})
-    })
+    for (const blur of this.pageBlur.splice(0)) {
+      void blur.key.then((key) => {
+        if (key && !blur.wc.isDestroyed()) void blur.wc.removeInsertedCSS(key).catch(() => {})
+      })
+    }
   }
 
   /**
@@ -554,18 +562,14 @@ export class Panel {
    */
   private wakePage() {
     this.letPageSleep()
-    const wc = this.hooks.page()
-    if (!wc) return
-    this.woken = { wc, throttled: wc.getBackgroundThrottling() }
-    wc.setBackgroundThrottling(false)
+    this.woken = this.hooks.pages().map((wc) => ({ wc, throttled: wc.getBackgroundThrottling() }))
+    for (const { wc } of this.woken) wc.setBackgroundThrottling(false)
   }
 
   private letPageSleep() {
     if (this.sleepTimer) clearTimeout(this.sleepTimer)
     this.sleepTimer = null
-    const woken = this.woken
-    this.woken = null
-    if (woken && !woken.wc.isDestroyed()) woken.wc.setBackgroundThrottling(woken.throttled)
+    for (const { wc, throttled } of this.woken.splice(0)) if (!wc.isDestroyed()) wc.setBackgroundThrottling(throttled)
   }
 
   /** Tells the UI the window is coming in, and puts the window where the animation starts. */

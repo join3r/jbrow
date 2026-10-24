@@ -31,11 +31,52 @@ export function isRoot(tabs: TabRecord[], tab: TabRecord): boolean {
   return !tab.parent || !tabs.some((t) => t.id === tab.parent)
 }
 
+/**
+ * Every thread in `tabs`, each with its tabs root first and depth-first as `subtree` gives them.
+ * One pass over the list, for lists too long to search once per thread (thousands of archived tabs).
+ */
+export function threadsOf<T extends TabRecord>(tabs: T[]): { root: T; all: T[] }[] {
+  const ids = new Set(tabs.map((t) => t.id))
+  const kids = new Map<string, T[]>()
+  for (const t of tabs) {
+    if (!t.parent || !ids.has(t.parent)) continue
+    const list = kids.get(t.parent)
+    if (list) list.push(t)
+    else kids.set(t.parent, [t])
+  }
+  const walk = (t: T): T[] => [t, ...(kids.get(t.id) ?? []).sort((a, b) => a.createdAt - b.createdAt).flatMap(walk)]
+  return tabs.filter((t) => !t.parent || !ids.has(t.parent)).map((root) => ({ root, all: walk(root) }))
+}
+
 export interface FolderView<T extends TabRecord> {
   folder: Folder
   threads: ThreadView<T>[]
-  /** Folders inside this one, oldest first. */
+  /** Folders inside this one. */
   folders: FolderView<T>[]
+  /** Its folders and threads together, in the order they were arranged. */
+  items: KeptItem<T>[]
+}
+
+/** A folder or thread in Kept. */
+export type KeptItem<T extends TabRecord> = FolderView<T> | ThreadView<T>
+
+export const isFolder = <T extends TabRecord>(item: KeptItem<T>): item is FolderView<T> => 'folder' in item
+
+/** Sorts Kept items by their place. Items without one yet go last, in the order they came. */
+export const byOrder = (a: { order?: number }, b: { order?: number }) => (a.order ?? Number.MAX_VALUE) - (b.order ?? Number.MAX_VALUE)
+
+const placeOf = <T extends TabRecord>(item: KeptItem<T>) => (isFolder(item) ? item.folder : item.root)
+
+/** Folders and threads in the order they were arranged; folders first where neither has a place yet. */
+const arranged = <T extends TabRecord>(folders: FolderView<T>[], threads: ThreadView<T>[]): KeptItem<T>[] =>
+  [...folders, ...threads].sort((a, b) => byOrder(placeOf(a), placeOf(b)))
+
+/**
+ * The folder a folder sits in, or undefined at the top of Kept. A folder whose parent is gone, or
+ * that would end up inside itself, sits at the top.
+ */
+export function parentFolder(folders: Folder[], f: Folder): string | undefined {
+  return f.parent && folders.some((x) => x.id === f.parent) && !isInFolder(folders, f.parent, f.id) ? f.parent : undefined
 }
 
 /** A folder and every folder inside it, parents before children. */
@@ -68,10 +109,12 @@ export interface AppView<T extends TabRecord> {
 }
 
 export interface Sections<T extends TabRecord> {
-  /** Top-level folders in the Kept section, oldest first. */
+  /** Top-level folders in the Kept section. */
   folders: FolderView<T>[]
   /** Kept threads outside any folder. */
   kept: ThreadView<T>[]
+  /** The top of Kept: its folders and threads together, in the order they were arranged. */
+  top: KeptItem<T>[]
   today: ThreadView<T>[]
   /** One section per app, by name, for threads that aren't kept. Empty while showing one app. */
   apps: AppView<T>[]
@@ -121,29 +164,34 @@ export function sections<T extends TabRecord>(
     if (!app) apps.set(key, (app = { scope: key, name: opts.appNames?.[key] || v.root.scopeName || key, threads: [], earlier: [] }))
     ;(old(v) ? app.earlier : app.threads).push(v)
   }
-  // A folder whose parent is gone, or that would end up inside itself, sits at the top.
-  const parentOf = (f: Folder) =>
-    f.parent && folderIds.has(f.parent) && !isInFolder(opts.folders, f.parent, f.id) ? f.parent : undefined
   const byAge = [...opts.folders].sort((a, b) => a.createdAt - b.createdAt)
-  const folderView = (folder: Folder): FolderView<T> => ({
-    folder,
-    threads: views.filter((v) => v.root.kept && v.root.folder === folder.id),
-    folders: byAge.filter((f) => parentOf(f) === folder.id).map(folderView),
-  })
+  const folderView = (folder: Folder): FolderView<T> => {
+    const threads = views.filter((v) => v.root.kept && v.root.folder === folder.id).sort((a, b) => byOrder(a.root, b.root))
+    const folders = byAge.filter((f) => parentFolder(opts.folders, f) === folder.id).sort(byOrder).map(folderView)
+    return { folder, threads, folders, items: arranged(folders, threads) }
+  }
+  const folders = byAge.filter((f) => !parentFolder(opts.folders, f)).sort(byOrder).map(folderView)
+  const kept = views.filter((v) => v.root.kept && !inFolder(v)).sort((a, b) => byOrder(a.root, b.root))
   return {
-    folders: byAge.filter((f) => !parentOf(f)).map(folderView),
-    kept: views.filter((v) => v.root.kept && !inFolder(v)),
+    folders,
+    kept,
+    top: arranged(folders, kept),
     today: loose.filter((v) => !old(v)),
     apps: [...apps.values()].sort((a, b) => a.name.localeCompare(b.name) || a.scope.localeCompare(b.scope)),
     earlier: loose.filter((v) => old(v)),
   }
 }
 
+/** Kept threads in sidebar order, those in folders included. With `skipCollapsed`, not those in collapsed folders. */
+export function keptThreads<T extends TabRecord>(s: Sections<T>, { skipCollapsed = false } = {}): ThreadView<T>[] {
+  const shown = (items: KeptItem<T>[]): ThreadView<T>[] =>
+    items.flatMap((i) => (!isFolder(i) ? [i] : skipCollapsed && i.folder.collapsed ? [] : shown(i.items)))
+  return shown(s.top)
+}
+
 /** Thread roots in the order ⌘1–9 address them, as the sidebar lists them. Threads in collapsed folders don't count. */
 export function numberedThreads<T extends TabRecord>(s: Sections<T>): ThreadView<T>[] {
-  const shown = (v: FolderView<T>): ThreadView<T>[] => (v.folder.collapsed ? [] : [...v.folders.flatMap(shown), ...v.threads])
-  const foldered = s.folders.flatMap(shown)
-  return [...foldered, ...s.kept, ...s.today, ...s.apps.flatMap((a) => a.threads)].slice(0, 9)
+  return [...keptThreads(s, { skipCollapsed: true }), ...s.today, ...s.apps.flatMap((a) => a.threads)].slice(0, 9)
 }
 
 /**

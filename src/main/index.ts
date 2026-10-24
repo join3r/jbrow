@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, M
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { urlMatcher } from '../shared/patterns'
-import { flatFolders, isInFolder, numberedThreads, rootOf, sections, type FolderView } from '../shared/threads'
+import { isInFolder, keptThreads, numberedThreads, rootOf, sections, type FolderView } from '../shared/threads'
 import { isSearchUrl, looksLikeAddress, suggestUrlFor } from '../shared/engines'
 import { THEMES, type AppEntry, type AppLabel, type Folder, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
@@ -66,6 +66,8 @@ let userScripts: UserScripts
 const visits = new BrowsingHistory()
 /** The settings screen is recording a shortcut: key presses go to it, not to jbrow or extensions. */
 let recordingShortcut = false
+/** The settings tab is the one showing, so closing a tab closes it. */
+let settingsShown = false
 
 let filter = 'all'
 let scope: { key: string; name: string } | null = null
@@ -139,7 +141,7 @@ function state(): UiState {
     tabs: tabs.uiTabs(),
     activeId: tabs.activeId,
     folders: tabs.folders,
-    archived: tabs.archived,
+    splits: tabs.splits,
     archiveNotice: noticeRoots(),
     activeWebContentsId: tabs.activeWebContents()?.id ?? null,
     activePartition: active ? partitionFor(active.profile) : null,
@@ -209,12 +211,20 @@ function togglePinnedExtension(id: string) {
 }
 
 let pushQueued = false
+/** The `tabs.archivedRev` the UI has. Archived tabs can run to thousands, so they go only when they change. */
+let archivedSent = -1
 function pushState() {
   if (pushQueued) return
   pushQueued = true
   queueMicrotask(() => {
     pushQueued = false
-    if (!panel.win.isDestroyed()) panel.ui.send('state', state())
+    if (!panel.win.isDestroyed()) {
+      if (archivedSent !== tabs.archivedRev) {
+        archivedSent = tabs.archivedRev
+        panel.ui.send('archived', tabs.archived)
+      }
+      panel.ui.send('state', state())
+    }
     updateTray()
   })
 }
@@ -268,9 +278,12 @@ const finder = new FindInPage((update) => {
   if (!panel.win.isDestroyed()) panel.ui.send('find', update)
 })
 
-/** Opens the find bar, or selects its query if it's open. Only for a tab with a page. */
+/**
+ * Opens the find bar, or selects its query if it's open. Only for a tab with a page, unless
+ * settings covers it: the UI then focuses the settings search, or the Archived list's.
+ */
 function openFind() {
-  if (!tabs.activeWebContents() || !tabs.active()?.url || panel.win.isDestroyed()) return
+  if (panel.win.isDestroyed() || (!panel.covered && (!tabs.activeWebContents() || !tabs.active()?.url))) return
   panel.ui.focus()
   panel.ui.send('find', { open: true })
 }
@@ -327,6 +340,41 @@ function noticeRoots(): string[] | null {
 }
 
 /** Puts the threads the notice names back where they were. */
+/** Restoring more threads than this at once asks first, since each takes a place in the sidebar. */
+const RESTORE_ASK = 10
+
+/** Brings archived threads (root IDs) back into the sidebar as seen now, from the Archived list. */
+async function unarchiveThreads(ids: string[]) {
+  if (ids.length > RESTORE_ASK) {
+    const { response } = await dialog.showMessageBox(panel.win, {
+      type: 'question',
+      message: `Restore ${ids.length} threads?`,
+      detail: "They go back into the sidebar as seen now, and archive again if you don't open them.",
+      buttons: ['Cancel', 'Restore'],
+      defaultId: 1,
+      cancelId: 0,
+    })
+    if (response !== 1) return
+  }
+  tabs.unarchive(ids)
+}
+
+/** Drops archived threads (root IDs) for good. More than one asks first; there's no Undo. */
+async function forgetArchived(ids: string[]) {
+  if (ids.length > 1) {
+    const { response } = await dialog.showMessageBox(panel.win, {
+      type: 'warning',
+      message: `Forget ${ids.length} archived threads?`,
+      detail: 'Their tabs and back and forward history are gone for good. This cannot be undone.',
+      buttons: ['Cancel', 'Forget'],
+      defaultId: 0,
+      cancelId: 0,
+    })
+    if (response !== 1) return
+  }
+  tabs.forget(ids)
+}
+
 function undoArchive() {
   const roots = noticeRoots()
   archiveNotice = null
@@ -337,7 +385,7 @@ function undoArchive() {
 /** Most recently seen tab among the threads the sidebar currently shows. */
 function mostRecentInView(): string | undefined {
   const s = threadsInView()
-  const all = [...flatFolders(s.folders).flatMap((f) => f.threads), ...s.kept, ...s.today, ...s.apps.flatMap((a) => [...a.threads, ...a.earlier]), ...s.earlier]
+  const all = [...keptThreads(s), ...s.today, ...s.apps.flatMap((a) => [...a.threads, ...a.earlier]), ...s.earlier]
   return all.sort((a, b) => b.lastSeen - a.lastSeen)[0]?.last.id
 }
 
@@ -462,6 +510,7 @@ function setActionKey(id: ActionId, shortcut: string): string | null {
   else settings.shortcuts[id] = shortcut
   saveSettings(settings)
   commands.refresh()
+  buildAppMenu()
   if (!recordingShortcut) {
     registerHotkeys()
     commands.registerGlobal()
@@ -522,7 +571,8 @@ function runAction(id: ActionId) {
       return focusAddressBar()
     }
     case 'closeTab':
-      if (tabs.activeId) void closeTab(tabs.activeId)
+      if (settingsShown) panel.ui.send('settings', { open: false })
+      else if (tabs.activeId) void closeTab(tabs.activeId)
       else tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
       return
     case 'reopenTab':
@@ -532,6 +582,13 @@ function runAction(id: ActionId) {
       if (prev) tabs.activate(prev)
       return
     }
+    case 'splitView': {
+      const error = tabs.splitNew()
+      return error ? toast(error) : undefined
+    }
+    case 'paneLeft':
+    case 'paneRight':
+      return tabs.focusPane(id === 'paneLeft' ? -1 : 1)
     case 'address':
       return focusAddressBar()
     case 'find':
@@ -565,6 +622,14 @@ function zoomDirection(input: Electron.Input): -1 | 0 | 1 | null {
     : null
 }
 
+function zoomActive(direction: -1 | 0 | 1) {
+  const wc = tabs.activeWebContents()
+  if (!wc) return
+  const percent = zoom.step(wc, direction)
+  toast(`Zoom ${percent}%`)
+  pushState()
+}
+
 function onKey(input: Electron.Input): boolean {
   if (input.type !== 'keyDown' || recordingShortcut) return false
   if (commands?.handleKey(tabs.active()?.profile, input)) return true
@@ -587,12 +652,7 @@ function onKey(input: Electron.Input): boolean {
   const key = input.key.toLowerCase()
   const zoomKey = zoomDirection(input)
   if (zoomKey !== null) {
-    const wc = tabs.activeWebContents()
-    if (wc) {
-      const percent = zoom.step(wc, zoomKey)
-      toast(`Zoom ${percent}%`)
-      pushState()
-    }
+    zoomActive(zoomKey)
     return true
   }
   if (!input.alt && !input.shift && /^[1-9]$/.test(key)) {
@@ -667,6 +727,7 @@ function setPinned(on: boolean) {
   if (settings.pinned !== on) {
     settings.pinned = on
     saveSettings(settings)
+    buildAppMenu()
   }
   pushState()
 }
@@ -682,13 +743,18 @@ function toMiniPlayer(wc: Electron.WebContents | null) {
   void miniPlayer.enter(wc, mutedToo)
 }
 
-/** On switching tabs, the old tab's video goes into the mini player and the new tab's comes back. */
+/**
+ * On switching tabs, the old tab's video goes into the mini player and the new tab's comes back.
+ * Moving between the panes of a split keeps both on screen, so nothing moves then.
+ */
 function tabSwitched() {
   const wc = tabs.activeWebContents()
   const prev = shownPage
   shownPage = wc
   if (prev === wc) return
   if (wc && miniPlayer.webContents === wc) miniPlayer.exit()
+  const prevId = prev && !prev.isDestroyed() ? tabs.idForWebContents(prev) : undefined
+  if (prevId && tabs.shown().includes(prevId)) return
   if (settings.miniPlayer.onTabSwitch && panel.visible) toMiniPlayer(prev)
 }
 
@@ -905,9 +971,10 @@ function threadMenu(id: string) {
   for (const p of settings.profiles) {
     if (p.id !== rec.profile) items.push({ label: `Open in ${p.name}`, click: () => switchProfile(id, p.id) })
   }
+  items.push(...splitItems(id))
   if (rec.parent) items.push({ label: 'Move out of thread', click: () => tabs.move(id, null) })
   else items.push({ label: rec.kept ? 'Stop keeping' : 'Keep', click: () => tabs.move(id, null, !rec.kept) })
-  if (!rec.parent && tabs.folders.length) {
+  if (!rec.parent) {
     items.push({
       label: 'Move to folder',
       submenu: [
@@ -917,12 +984,32 @@ function threadMenu(id: string) {
           checked: rec.kept && rec.folder === folder.id,
           click: () => tabs.move(id, null, true, folder.id),
         })),
-        ...(rec.kept && rec.folder ? [{ type: 'separator' as const }, { label: 'Out of folder', click: () => tabs.move(id, null, true) }] : []),
+        ...(rec.kept && rec.folder ? [{ label: 'Out of folder', click: () => tabs.move(id, null, true) }] : []),
+        ...(tabs.folders.length ? [{ type: 'separator' as const }] : []),
+        { label: 'New folder', click: () => newFolder(rec.kept ? rec.folder : undefined, id) },
       ],
     })
   }
   items.push({ type: 'separator' }, { label: 'Close', accelerator: id === tabs.activeId ? 'Cmd+W' : undefined, click: () => void closeTab(id) })
   Menu.buildFromTemplate(items).popup({ window: panel.win })
+}
+
+/** The thread menu's split view items for a tab: split it or open it beside the active tab, or separate its split. */
+function splitItems(id: string): Electron.MenuItemConstructorOptions[] {
+  const split = tabs.splitOf(id)
+  const report = (error: string | null) => error && toast(error)
+  if (split) {
+    return [
+      { label: 'Separate tabs', click: () => tabs.unsplit(id) },
+      ...(split.tabs.length > 2 ? [{ label: 'Take out of split view', click: () => tabs.leaveSplit(id) }] : []),
+    ]
+  }
+  if (!tabs.active()?.url) return []
+  if (id === tabs.activeId) {
+    const key = actionKeys(settings.shortcuts).splitView
+    return [{ label: 'Split view', accelerator: key || undefined, click: () => report(tabs.splitNew()) }]
+  }
+  return [{ label: 'Open in split view', click: () => report(tabs.splitWith(id)) }]
 }
 
 function newTabMenu() {
@@ -945,9 +1032,11 @@ function newTabMenu() {
   ]).popup({ window: panel.win })
 }
 
-function newFolder(parent?: string) {
+/** Makes a folder at the bottom of `parent` (or of Kept), with the thread `withThread` in it, and starts naming it. */
+function newFolder(parent?: string, withThread?: string) {
   const folder = tabs.createFolder('New folder', parent)
   if (parent) tabs.updateFolder(parent, { collapsed: false })
+  if (withThread) tabs.move(withThread, null, true, folder.id)
   panel.ui.send('rename-tab', folder.id)
 }
 
@@ -957,6 +1046,11 @@ function folderChoices(): { folder: Folder; label: string }[] {
     views.flatMap((v) => [{ folder: v.folder, label: prefix + v.folder.name }, ...walk(v.folders, `${prefix}${v.folder.name} › `)])
   const s = sections(tabs.records, { filter: 'all', scope: null, activeId: null, now: Date.now(), folders: tabs.folders })
   return walk(s.folders, '')
+}
+
+/** Right-click on the sidebar away from any row. */
+function sidebarMenu() {
+  Menu.buildFromTemplate([{ label: 'New folder', click: () => newFolder() }]).popup({ window: panel.win })
 }
 
 function folderMenu(id: string) {
@@ -1658,6 +1752,7 @@ function wireIpc() {
   on<{ profile?: string; url: string }>('forget-visit', ({ profile, url }) => visits.forget(profile ?? tabs.active()?.profile ?? settings.defaultProfile, url))
   on<{ id: string }>('close', ({ id }) => void closeTab(id))
   on<{ id: string }>('thread-menu', ({ id }) => threadMenu(id))
+  on<{ id: string; sizes: number[]; done?: boolean }>('split-sizes', ({ id, sizes, done }) => tabs.resizeSplit(id, sizes, !!done))
   on('add-extension', () => void addExtensionFromFolder())
   on('open-store', () => {
     tabs.create({ profile: tabs.active()?.profile ?? settings.defaultProfile, url: 'https://chromewebstore.google.com/' })
@@ -1666,20 +1761,23 @@ function wireIpc() {
   on('open-settings-file', () => void shell.openPath(settingsPath()))
   on<{ id: string; name: string }>('rename', ({ id, name }) => tabs.rename(id, name))
   on<{ id: string }>('restore', ({ id }) => tabs.restore(id))
-  on<{ id: string }>('unarchive', ({ id }) => tabs.unarchive([id]))
-  on<{ id: string }>('forget-archived', ({ id }) => tabs.forget([id]))
+  on<{ ids: string[] }>('unarchive', ({ ids }) => void unarchiveThreads(ids))
+  on<{ ids: string[] }>('forget-archived', ({ ids }) => void forgetArchived(ids))
   on('undo-archive', () => undoArchive())
   on('dismiss-archive-notice', () => {
     archiveNotice = null
     pushState()
   })
   on('new-folder', () => newFolder())
+  on('sidebar-menu', () => sidebarMenu())
   on<{ id: string }>('folder-menu', ({ id }) => folderMenu(id))
   on<{ id: string; name?: string; rules?: string[]; collapsed?: boolean }>('folder', ({ id, ...change }) => tabs.updateFolder(id, change))
   on<{ id: string; parent: string | null; kept?: boolean; folder?: string }>('move', ({ id, parent, kept, folder }) => {
     const error = tabs.move(id, parent, kept, folder)
     if (error) toast(error)
   })
+  on<{ id: string; target: string | null; after?: boolean }>('place', ({ id, target, after }) => tabs.place(id, target, after))
+  on<{ id: string; parent: string | null }>('move-folder', ({ id, parent }) => tabs.moveFolder(id, parent))
   on<{ filter: string }>('filter', ({ filter: f }) => {
     filter = f
     if (!activeInView()) {
@@ -1742,6 +1840,7 @@ function wireIpc() {
   on('window-reset', () => panel.resetPlace())
   on('focus-ui', () => panel.ui.focus())
   on('focus-page', () => focusActive())
+  on<{ on: boolean }>('settings-shown', ({ on: shown }) => (settingsShown = shown))
   on<{ text: string; forward?: boolean }>('find', ({ text, forward }) => {
     const wc = tabs.activeWebContents()
     if (wc) finder.find(wc, text, forward !== false)
@@ -1841,14 +1940,30 @@ function buildTray() {
   tray.on('right-click', () => tray?.popUpContextMenu(menu()))
 }
 
-// ---------- startup ----------
+// ---------- app menu ----------
 
-app.whenReady().then(async () => {
-  app.dock?.hide()
-  // Without this, macOS quits jbrow a few seconds after it hides: no windows, not frontmost.
-  settings = loadSettings()
-  nativeTheme.themeSource = settings.appearance
-  // Key equivalents for copy, paste and undo come from the app menu, even when it's never shown.
+/**
+ * The menu bar while jbrow's window is in front. Its key equivalents for copy, paste and undo work
+ * even when it's never shown. jbrow's own commands show your keys, but the keys themselves are
+ * handled where they're pressed (onKey, onWindowKey), which already knows about recording a shortcut
+ * and about popups; a key that gets past those to the menu does nothing, as before there was one.
+ */
+function buildAppMenu() {
+  const keys = actionKeys(settings.shortcuts)
+  const item = (id: ActionId, label: string): Electron.MenuItemConstructorOptions => ({
+    label,
+    accelerator: keys[id] || undefined,
+    click: (_item, _win, event) => {
+      if (!event.triggeredByAccelerator) runAction(id)
+    },
+  })
+  const zoomItem = (direction: -1 | 0 | 1, label: string, accelerator: string): Electron.MenuItemConstructorOptions => ({
+    label,
+    accelerator,
+    click: (_item, _win, event) => {
+      if (!event.triggeredByAccelerator) zoomActive(direction)
+    },
+  })
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       {
@@ -1857,6 +1972,8 @@ app.whenReady().then(async () => {
         submenu: [
           { role: 'about' },
           { type: 'separator' },
+          item('settings', 'Settings…'),
+          { type: 'separator' },
           { role: 'hide' },
           { role: 'hideOthers' },
           { role: 'unhide' },
@@ -1864,9 +1981,84 @@ app.whenReady().then(async () => {
           { label: `Quit ${app.name}`, accelerator: 'Command+Q', click: () => void requestQuit() },
         ],
       },
-      { role: 'editMenu' },
+      {
+        label: 'File',
+        submenu: [
+          item('newTab', 'New Tab'),
+          item('newTabNextProfile', 'New Tab in Next Profile'),
+          { label: 'New Folder', click: () => newFolder() },
+          item('reopenTab', 'Reopen Closed Tab'),
+          { type: 'separator' },
+          item('closeTab', 'Close Tab'),
+          { type: 'separator' },
+          item('print', 'Print…'),
+        ],
+      },
+      {
+        label: 'Edit',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'pasteAndMatchStyle' },
+          { role: 'delete' },
+          { role: 'selectAll' },
+          { type: 'separator' },
+          item('find', 'Find…'),
+        ],
+      },
+      {
+        label: 'View',
+        submenu: [
+          item('reload', 'Reload'),
+          item('hardReload', 'Reload Without Cache'),
+          { type: 'separator' },
+          zoomItem(0, 'Actual Size', 'Command+0'),
+          zoomItem(1, 'Zoom In', 'Command+='),
+          zoomItem(-1, 'Zoom Out', 'Command+-'),
+          { type: 'separator' },
+          item('splitView', 'Split View'),
+          item('paneLeft', 'Focus Left Pane'),
+          item('paneRight', 'Focus Right Pane'),
+          { type: 'separator' },
+          item('address', 'Address Bar'),
+          item('devTools', 'Developer Tools'),
+        ],
+      },
+      {
+        label: 'History',
+        submenu: [item('back', 'Back'), item('forward', 'Forward')],
+      },
+      {
+        role: 'windowMenu',
+        submenu: [
+          { ...item('pin', 'Pin the Window'), type: 'checkbox', checked: settings.pinned },
+          { type: 'separator' },
+          { role: 'front' },
+        ],
+      },
+      {
+        role: 'help',
+        submenu: [
+          { label: 'Open settings.json', click: () => void shell.openPath(settingsPath()) },
+          { label: 'Show Log File', click: () => { const f = logPath(); if (f) shell.showItemInFolder(f) } },
+        ],
+      },
     ]),
   )
+}
+
+// ---------- startup ----------
+
+app.whenReady().then(async () => {
+  app.dock?.hide()
+  // Without this, macOS quits jbrow a few seconds after it hides: no windows, not frontmost.
+  settings = loadSettings()
+  nativeTheme.themeSource = settings.appearance
+  buildAppMenu()
   // <browser-action-list> lives in the UI page, which uses the default session.
   ElectronChromeExtensions.handleCRXProtocol(session.defaultSession)
 
@@ -1876,10 +2068,11 @@ app.whenReady().then(async () => {
       sidePanels?.layout()
     },
     sideWidth: () => sidePanels?.width() ?? 0,
-    page: () => {
-      const wc = tabs?.activeWebContents()
-      return wc && tabs.activeId && !tabs.covered(tabs.activeId) ? wc : null
-    },
+    pages: () =>
+      (tabs?.shown() ?? []).flatMap((id) => {
+        const wc = tabs.webContentsFor(id)
+        return wc && !tabs.covered(id) ? [wc] : []
+      }),
     onPlaced: () => {
       saveSettings(settings)
       pushState()
@@ -1903,6 +2096,11 @@ app.whenReady().then(async () => {
   })
   panel.setPinned(settings.pinned)
   panel.ui.on('render-process-gone', (_e, details) => console.error('[jbrow] UI renderer gone:', details))
+  // A UI that (re)loads has no archived list yet, and one sent while it was loading went nowhere.
+  panel.ui.on('did-finish-load', () => {
+    archivedSent = -1
+    pushState()
+  })
   panel.ui.on('before-input-event', (event, input) => {
     if (onKey(input)) event.preventDefault()
   })

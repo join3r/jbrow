@@ -4,8 +4,9 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { urlMatcher } from '../shared/patterns'
-import { childrenOf, isAsleep, isInFolder, isRoot, rootOf, subtree } from '../shared/threads'
-import type { CrashView, Folder, Profile, TabRecord, UiTab } from '../shared/types'
+import { MAX_PANES, paneSpans, splitOf } from '../shared/split'
+import { byOrder, childrenOf, isAsleep, isInFolder, isRoot, parentFolder, rootOf, subtree, threadsOf } from '../shared/threads'
+import type { CrashView, Folder, Profile, Split, TabRecord, UiTab } from '../shared/types'
 import type { Certificates } from './certs'
 import type { DangerousSites } from './dangerous'
 import type { DeviceChooser } from './devices'
@@ -131,10 +132,16 @@ interface Closing {
 export class Tabs {
   records: TabRecord[] = []
   folders: Folder[] = []
+  /** Tabs shown side by side. A tab is in one split at most; closing it down to one tab ends the split. */
+  splits: Split[] = []
   /** Tabs of archived threads, with their parent links intact. They have no views. */
   archived: TabRecord[] = []
+  /** Bumped whenever `archived` changes, so the UI gets the list (which can be long) only then. */
+  archivedRev = 0
   activeId: string | null = null
   private live = new Map<string, LiveTab>()
+  /** The tabs layout() last put on screen, so it only has to hide those. */
+  private placed: string[] = []
   private saveTimer: NodeJS.Timeout | null = null
   /** Most recently used first, for ⌃Tab. */
   private mru: string[] = []
@@ -172,15 +179,20 @@ export class Tabs {
         tabs: TabRecord[]
         activeId: string | null
         folders?: Folder[]
+        splits?: Split[]
         archived?: TabRecord[]
       }
       // Empty new tabs aren't worth restoring.
       this.records = data.tabs.filter((t) => t.url)
       this.folders = data.folders ?? []
+      this.splits = data.splits ?? []
+      this.prune()
       const cutoff = Date.now() - ARCHIVE_KEEP_MS
       this.archived = (data.archived ?? []).filter((t) => (t.archivedAt ?? 0) > cutoff)
+      this.archivedRev++
       this.activeId = this.records.some((t) => t.id === data.activeId) ? data.activeId : null
       this.mru = [...this.records].sort((a, b) => b.lastSeen - a.lastSeen).map((t) => t.id)
+      this.renumber()
     } catch (error) {
       console.error('[tabs] could not read tabs.json, starting empty:', error)
     }
@@ -201,7 +213,7 @@ export class Tabs {
   flush() {
     if (this.saveTimer) clearTimeout(this.saveTimer)
     this.saveTimer = null
-    const data = { tabs: this.records, activeId: this.activeId, folders: this.folders, archived: this.archived }
+    const data = { tabs: this.records, activeId: this.activeId, folders: this.folders, splits: this.splits, archived: this.archived }
     writeFileSync(storePath(), JSON.stringify(data, null, 2))
     this.flushHistory()
   }
@@ -240,8 +252,34 @@ export class Tabs {
   }
 
   private changed() {
+    this.renumber()
+    // A tab that went (closed, archived, dropped) leaves its split; one left alone fills the page area.
+    if (this.prune()) this.layout()
     this.save()
     this.deps.onChange()
+  }
+
+  /**
+   * Numbers the items in Kept 0, 1, 2… wherever they sit: the top of Kept and each folder, each
+   * holding folders and threads. Items without a place yet go to the bottom, which lays out a
+   * tabs.json from before ordering as folders first, then threads, oldest first.
+   */
+  private renumber() {
+    const kept = this.records.filter((t) => t.kept && isRoot(this.records, t)).sort((a, b) => a.createdAt - b.createdAt)
+    const folders = [...this.folders].sort((a, b) => a.createdAt - b.createdAt)
+    for (const container of [undefined, ...folders.map((f) => f.id)]) {
+      const items = [
+        ...folders.filter((f) => parentFolder(this.folders, f) === container),
+        ...kept.filter((t) => this.containerOf(t) === container),
+      ]
+      items.sort(byOrder).forEach((item, i) => (item.order = i))
+    }
+  }
+
+  /** The folder a kept item sits in, or undefined at the top of Kept. */
+  private containerOf(item: Folder | TabRecord): string | undefined {
+    if ('rules' in item) return parentFolder(this.folders, item)
+    return item.folder && this.folder(item.folder) ? item.folder : undefined
   }
 
   // ---------- lookups ----------
@@ -263,6 +301,17 @@ export class Tabs {
   /** Every page that's loaded. */
   pages(): WebContents[] {
     return [...this.live.values()].map((l) => l.wc).filter((wc) => !wc.isDestroyed())
+  }
+  splitOf(id: string | null | undefined): Split | undefined {
+    return splitOf(this.splits, id)
+  }
+  /** The tabs a tab shows with: its split, left to right, or just itself. */
+  private panesOf(id: string): string[] {
+    return this.splitOf(id)?.tabs ?? [id]
+  }
+  /** The tabs on screen: the active tab and the rest of its split. */
+  shown(): string[] {
+    return this.activeId ? this.panesOf(this.activeId) : []
   }
   idForWebContents(wc: WebContents): string | undefined {
     for (const [id, live] of this.live) if (live.wc === wc) return id
@@ -469,6 +518,10 @@ export class Tabs {
       if (this.deps.onKey(input)) event.preventDefault()
     })
     wc.on('context-menu', (_e, params) => void this.contextMenu(id, wc, params, rt))
+    // Clicking into another pane of the split focuses it, toolbar and keys and all.
+    wc.on('focus', () => {
+      if (id !== this.activeId && this.shown().includes(id)) this.activate(id)
+    })
     this.deps.devices.watch(wc, rt.profile.id)
     wc.on('enter-html-full-screen', () => {
       // Only the page in front can have the screen; one in the background stays in its place.
@@ -684,23 +737,29 @@ export class Tabs {
   }
 
   activate(id: string) {
-    const rec = this.get(id)
-    if (!rec) return
-    // Drop empty new tabs you've moved away from.
-    const prev = this.active()
-    if (prev && prev.id !== id && !prev.url && !this.live.has(prev.id)) {
+    if (!this.get(id)) return
+    const panes = this.panesOf(id)
+    // Drop empty new tabs you've moved away from, panes of a split you left included. An empty
+    // pane of the split you stay in stays.
+    for (const prev of this.shown().map((p) => this.get(p))) {
+      if (!prev || panes.includes(prev.id) || prev.url || this.live.has(prev.id)) continue
       this.records = this.records.filter((t) => t.id !== prev.id)
       this.mru = this.mru.filter((m) => m !== prev.id)
     }
     if (this.fullscreenId && this.fullscreenId !== id) this.leaveFullscreen()
-    for (const [tid, live] of this.live) if (tid !== id) live.view.setVisible(false)
     this.activeId = id
-    rec.lastSeen = Date.now()
-    rec.unread = false
+    // Every pane of a split is on screen, so each counts as seen and has its page.
+    const now = Date.now()
+    for (const pane of panes.map((p) => this.get(p))) {
+      if (!pane) continue
+      pane.lastSeen = now
+      pane.unread = false
+      if (pane.url) this.ensureView(pane)
+    }
     this.mru = [id, ...this.mru.filter((m) => m !== id)]
-    const live = rec.url ? this.ensureView(rec) : this.live.get(id)
+    const live = this.live.get(id)
     if (live) {
-      this.deps.runtime(rec.profile)?.extensions.selectTab(live.wc)
+      this.deps.runtime(this.get(id)!.profile)?.extensions.selectTab(live.wc)
     }
     this.layout()
     this.changed()
@@ -708,15 +767,25 @@ export class Tabs {
   }
 
   /**
-   * Positions the active view and shows it if the panel allows. A page a certificate or the
-   * phishing and malware lists stopped, a site asking for a password, or a crashed page stays
-   * hidden, so jbrow's screen beneath it shows.
+   * Positions the active view, and the other panes of its split beside it, and shows them if the
+   * panel allows. A page a certificate or the phishing and malware lists stopped, a site asking
+   * for a password, or a crashed page stays hidden, so jbrow's screen beneath it shows. A
+   * fullscreen page has the screen to itself.
    */
   layout() {
-    const live = this.activeId ? this.live.get(this.activeId) : undefined
-    if (!live) return
-    live.view.setBounds(this.deps.contentBounds())
-    live.view.setVisible(this.deps.contentVisible() && !this.covered(this.activeId!))
+    const shown = this.shown()
+    for (const id of this.placed) if (!shown.includes(id)) this.live.get(id)?.view.setVisible(false)
+    this.placed = shown
+    const area = this.deps.contentBounds()
+    const split = this.fullscreenId ? undefined : this.splitOf(this.activeId)
+    const spans = split ? paneSpans(area.width, split.sizes) : null
+    shown.forEach((id, i) => {
+      const live = this.live.get(id)
+      if (!live) return
+      const on = !this.fullscreenId || id === this.fullscreenId
+      if (on) live.view.setBounds(spans ? { ...area, x: area.x + spans[i].x, width: spans[i].width } : area)
+      live.view.setVisible(on && this.deps.contentVisible() && !this.covered(id))
+    })
   }
 
   /** jbrow shows its own screen in place of the tab's page. */
@@ -766,6 +835,7 @@ export class Tabs {
     if (!rec) return
     if (remember && rec.url) this.remember(rec, history)
     const thread = new Set(subtree(this.records, rootOf(this.records, rec)).map((t) => t.id))
+    const panes = this.panesOf(id)
     // Children move up to the closed tab's parent so a thread doesn't fall apart.
     for (const child of childrenOf(this.records, id)) {
       child.parent = rec.parent
@@ -775,15 +845,20 @@ export class Tabs {
         child.app = rec.app
         child.kept = rec.kept
         child.folder = rec.folder
+        child.order = rec.order
       }
     }
     this.dropView(rec)
     this.records = this.records.filter((t) => t.id !== id)
     this.mru = this.mru.filter((m) => m !== id)
+    this.prune()
     if (this.activeId === id) {
       this.activeId = null
-      // The next tab comes from the same thread or from outside Kept; a kept thread only comes up when asked for.
-      const next = this.mru.find((m) => {
+      // In a split, the pane to its left (or right) takes over. Otherwise the next tab comes from
+      // the same thread or from outside Kept; a kept thread only comes up when asked for.
+      const i = panes.indexOf(id)
+      const beside = [panes[i - 1], panes[i + 1]].find((p) => p && this.get(p))
+      const next = beside ?? this.mru.find((m) => {
         const t = this.get(m)
         return t && (thread.has(m) || !rootOf(this.records, t).kept)
       })
@@ -827,7 +902,7 @@ export class Tabs {
       if (!child || child.profile !== rec.profile || child.parent !== rec.parent) continue
       if (!rec.parent && (child.kept !== rec.kept || child.folder !== rec.folder)) continue
       child.parent = rec.id
-      child.kept = child.folder = child.scope = child.scopeName = child.app = undefined
+      child.kept = child.folder = child.order = child.scope = child.scopeName = child.app = undefined
     }
     if (c.history) this.histories.set(rec.id, c.history)
     this.records.splice(Math.min(c.index, this.records.length), 0, rec)
@@ -882,22 +957,54 @@ export class Tabs {
       rec.parent = target.id
       rec.kept = undefined
       rec.folder = undefined
+      rec.order = undefined
       rec.scope = undefined
       rec.scopeName = undefined
       rec.app = undefined
-    } else {
-      if (rec.parent) {
-        const root = rootOf(this.records, rec)
-        rec.scope = root.scope
-        rec.scopeName = root.scopeName
-        rec.app = root.app
-      }
-      rec.parent = undefined
-      rec.kept = kept || undefined
-      rec.folder = kept && folder && this.folders.some((f) => f.id === folder) ? folder : undefined
-    }
+    } else this.toThread(rec, !!kept, folder)
     this.changed()
     return null
+  }
+
+  /** Makes a tab a thread of its own, kept (in `folder`, if there is one) or not. */
+  private toThread(rec: TabRecord, kept: boolean, folder?: string) {
+    if (rec.parent) {
+      const root = rootOf(this.records, rec)
+      rec.scope = root.scope
+      rec.scopeName = root.scopeName
+      rec.app = root.app
+    }
+    const into = kept && folder && this.folder(folder) ? folder : undefined
+    // Somewhere new in Kept, it goes to the bottom.
+    if (rec.parent || !kept || !rec.kept || rec.folder !== into) rec.order = undefined
+    rec.parent = undefined
+    rec.kept = kept || undefined
+    rec.folder = into
+  }
+
+  /**
+   * Puts a folder or thread in Kept just before or after another item there, in the same folder,
+   * or at the bottom of the top of Kept without a `target`. A folder doesn't go inside itself.
+   */
+  place(id: string, target: string | null, after = false) {
+    const at = target ? (this.folder(target) ?? this.get(target)) : undefined
+    if (target && (!at || id === target)) return
+    if (at && !('rules' in at) && !(at.kept && isRoot(this.records, at))) return
+    const into = at && this.containerOf(at)
+    const folder = this.folder(id)
+    let item: Folder | TabRecord
+    if (folder) {
+      if (into && isInFolder(this.folders, into, id)) return
+      folder.parent = into
+      item = folder
+    } else {
+      const rec = this.get(id)
+      if (!rec) return
+      this.toThread(rec, true, into)
+      item = rec
+    }
+    item.order = at ? (at.order ?? 0) + (after ? 0.5 : -0.5) : undefined
+    this.changed()
   }
 
   /**
@@ -914,7 +1021,108 @@ export class Tabs {
       rec.scopeName = next.scopeName
       changed = true
     }
-    if (changed) this.changed()
+    if (changed) {
+      this.archivedRev++
+      this.changed()
+    }
+  }
+
+  // ---------- split view ----------
+
+  /**
+   * ⌘D: a new pane right of the active tab, in its profile, waiting for an address. It's a tab
+   * opened from the active one, so it sits under it in the sidebar. Returns why it can't, if it can't.
+   */
+  splitNew(): string | null {
+    const cur = this.active()
+    if (!cur?.url) return null
+    if (this.panesOf(cur.id).length >= MAX_PANES) return `Split view holds up to ${MAX_PANES} tabs.`
+    const rec = this.create({ profile: cur.profile, parent: cur.id, activate: false })
+    this.join(cur.id, rec.id)
+    this.activate(rec.id)
+    return null
+  }
+
+  /** Shows a tab next to the active one, focused, wherever it sits in the sidebar. Returns why it can't, if it can't. */
+  splitWith(id: string): string | null {
+    const cur = this.active()
+    if (!cur?.url || !this.get(id) || this.panesOf(cur.id).includes(id)) return null
+    if (this.panesOf(cur.id).length >= MAX_PANES) return `Split view holds up to ${MAX_PANES} tabs.`
+    this.join(cur.id, id)
+    this.activate(id)
+    return null
+  }
+
+  /** Puts tab `id` right of `to` in its split, out of any other. The panes share the width evenly. */
+  private join(to: string, id: string) {
+    const from = this.splitOf(id)
+    if (from) {
+      from.sizes.splice(from.tabs.indexOf(id), 1)
+      from.tabs = from.tabs.filter((t) => t !== id)
+    }
+    let split = this.splitOf(to)
+    if (!split) this.splits.push((split = { id: randomUUID(), tabs: [to], sizes: [1] }))
+    split.tabs.splice(split.tabs.indexOf(to) + 1, 0, id)
+    split.sizes = split.tabs.map(() => 1)
+    this.prune()
+  }
+
+  /** Separates a split's tabs: each is a tab of its own again, and the one you're on fills the page area. */
+  unsplit(id: string) {
+    this.splits = this.splits.filter((s) => !s.tabs.includes(id))
+    this.layout()
+    this.changed()
+  }
+
+  /** Takes one tab out of its split; the rest stay together. */
+  leaveSplit(id: string) {
+    const split = this.splitOf(id)
+    if (!split) return
+    split.sizes.splice(split.tabs.indexOf(id), 1)
+    split.tabs = split.tabs.filter((t) => t !== id)
+    this.prune()
+    this.layout()
+    this.changed()
+  }
+
+  /** Dragging a divider. Saved once you let go. */
+  resizeSplit(id: string, sizes: number[], done: boolean) {
+    const split = this.splits.find((s) => s.id === id)
+    if (!split || sizes.length !== split.tabs.length || !sizes.every((x) => Number.isFinite(x) && x > 0)) return
+    split.sizes = sizes
+    this.layout()
+    if (done) this.changed()
+  }
+
+  /** Moves focus to the pane left (-1) or right (1) of the focused one. */
+  focusPane(step: -1 | 1) {
+    const shown = this.shown()
+    const next = shown[shown.indexOf(this.activeId ?? '') + step]
+    if (next) this.activate(next)
+  }
+
+  /** Drops tabs that are gone from their splits; a split down to one tab ends. Returns whether any changed. */
+  private prune(): boolean {
+    const ids = new Set(this.records.map((t) => t.id))
+    const taken = new Set<string>()
+    let changed = false
+    this.splits = this.splits.filter((s) => {
+      const keep: [string, number][] = []
+      s.tabs.forEach((id, i) => {
+        if (!ids.has(id) || taken.has(id)) return
+        taken.add(id)
+        keep.push([id, s.sizes[i] || 1])
+      })
+      if (keep.length !== s.tabs.length) {
+        changed = true
+        s.tabs = keep.map(([id]) => id)
+        s.sizes = keep.map(([, size]) => size)
+      }
+      if (keep.length > 1) return true
+      changed = true
+      return false
+    })
+    return changed
   }
 
   // ---------- folders ----------
@@ -940,19 +1148,25 @@ export class Tabs {
     this.changed()
   }
 
-  /** Moves a folder into another, or to the top of Kept with none. Not into itself or a folder inside it. */
+  /** Moves a folder into another, at its bottom, or to the top of Kept with none. Not into itself or a folder inside it. */
   moveFolder(id: string, parent: string | null) {
     const folder = this.folder(id)
     if (!folder || (parent && (!this.folder(parent) || isInFolder(this.folders, parent, id)))) return
+    if (parentFolder(this.folders, folder) !== (parent || undefined)) folder.order = undefined
     folder.parent = parent || undefined
     this.changed()
   }
 
-  /** Removes a folder. Its threads and folders move up to its parent, or stay kept outside any folder. */
+  /** Removes a folder. Its threads and folders move up to its parent, or stay kept outside any folder, where it was. */
   deleteFolder(id: string) {
-    const parent = this.folder(id)?.parent
-    for (const t of this.records) if (t.folder === id) t.folder = parent
-    for (const f of this.folders) if (f.parent === id) f.parent = parent
+    const folder = this.folder(id)
+    const parent = folder?.parent
+    const inside = [...this.records.filter((t) => t.folder === id), ...this.folders.filter((f) => f.parent === id)]
+    for (const item of inside) {
+      if ('rules' in item) item.parent = parent
+      else item.folder = parent
+      item.order = (folder?.order ?? 0) + ((item.order ?? 0) + 1) / (inside.length + 1)
+    }
     this.folders = this.folders.filter((f) => f.id !== id)
     this.changed()
   }
@@ -974,9 +1188,10 @@ export class Tabs {
       .map((f) => ({ id: f.id, matches: urlMatcher(f.rules) }))
     let changed = false
     const archived: string[] = []
+    const shown = this.shown()
     for (const root of this.records.filter((t) => isRoot(this.records, t) && !t.kept)) {
       const all = subtree(this.records, root)
-      if (all.some((t) => t.id === this.activeId)) continue
+      if (all.some((t) => shown.includes(t.id))) continue
       if (afterMs <= 0 || now - Math.max(...all.map((t) => Math.max(t.lastSeen, t.restoredAt ?? 0))) < afterMs) {
         if (isAsleep(all, { now, afterMs: sleepAfterMs, activeId: this.activeId }) && this.unload(all)) changed = true
         continue
@@ -995,6 +1210,7 @@ export class Tabs {
         this.records = this.records.filter((t) => !ids.has(t.id))
         this.mru = this.mru.filter((m) => !ids.has(m))
         this.archived.push(...all)
+        this.archivedRev++
         archived.push(root.id)
       }
       changed = true
@@ -1002,6 +1218,7 @@ export class Tabs {
     const cutoff = now - ARCHIVE_KEEP_MS
     if (this.archived.some((t) => (t.archivedAt ?? 0) <= cutoff)) {
       this.archived = this.archived.filter((t) => (t.archivedAt ?? 0) > cutoff)
+      this.archivedRev++
       changed = true
     }
     if (changed) this.changed()
@@ -1023,14 +1240,17 @@ export class Tabs {
   /** Drops a deleted profile's archived threads. Its open tabs are closed first. */
   forgetProfile(profileId: string) {
     this.archived = this.archived.filter((t) => t.profile !== profileId)
+    this.archivedRev++
     this.closed = this.closed.filter((c) => c.rec.profile !== profileId)
     this.changed()
   }
 
   /** Every tab of the archived threads that `ids` (any tab of each) belong to, each thread once. */
   private archivedThreads(ids: string[]): TabRecord[] {
-    const roots = new Set(ids.flatMap((id) => this.archived.filter((t) => t.id === id).map((t) => rootOf(this.archived, t))))
-    return [...roots].flatMap((r) => subtree(this.archived, r))
+    const want = new Set(ids)
+    return threadsOf(this.archived)
+      .filter((th) => th.all.some((t) => want.has(t.id)))
+      .flatMap((th) => th.all)
   }
 
   /**
@@ -1044,6 +1264,7 @@ export class Tabs {
     if (!all.length) return
     const back = new Set(all.map((t) => t.id))
     this.archived = this.archived.filter((t) => !back.has(t.id))
+    this.archivedRev++
     const now = Date.now()
     for (const t of all) {
       t.archivedAt = undefined
@@ -1066,6 +1287,7 @@ export class Tabs {
     const gone = new Set(this.archivedThreads(ids).map((t) => t.id))
     if (!gone.size) return
     this.archived = this.archived.filter((t) => !gone.has(t.id))
+    this.archivedRev++
     this.changed()
   }
 

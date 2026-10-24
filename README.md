@@ -65,6 +65,9 @@ progress and will be cancelled.**), bringing jbrow up if it's hidden. Quits from
 ask, since nobody may be there to answer: Ctrl+C or `kill`, the install script, macOS logging out
 or shutting down, the Dock icon's Quit, or a utility that quits idle apps.
 
+While jbrow's window is in front, the macOS menu bar has jbrow's menus (File, Edit, View, History,
+Window, Help) with its commands and your keys for them.
+
 These are the defaults; change any of them under **Shortcuts** in settings. ⌘1–9 and zoom stay fixed.
 
 | Key | Does |
@@ -75,7 +78,9 @@ These are the defaults; change any of them under **Shortcuts** in settings. ⌘1
 | Tab | In the address bar: switch the profile what you type opens in |
 | ⌘1–9 | Jump to a thread |
 | ⌃Tab | Previous tab |
-| ⌘W | Close tab |
+| ⌘W | Close tab, or settings while it's showing |
+| ⌘D | Split view: a new tab beside this one (again for up to 4) |
+| ⌃⌘← / ⌃⌘→ | Focus the pane on the left / right of a split |
 | ⌘R / ⇧⌘R | Reload / reload without the cache (or ⇧-click the reload button) |
 | ⇧⌘T | Reopen the last closed tab (again for the one before) |
 | ⌘F | Find in page (Return / ⌘G next, ⇧Return / ⇧⌘G previous, Esc closes) |
@@ -113,7 +118,7 @@ on its tabs. A new tab says which profile it opens in and lets you switch; right
 new tab in a specific profile.
 
 While you type in the address bar, Tab (⇧Tab goes back) switches the profile the address opens in; the
-profile in the address bar changes to match. On a new tab the tab itself moves over. On a tab with a page,
+profile in the address bar changes to match, and the foot of the suggestions says which profile Tab goes to next. On a new tab the tab itself moves over. On a tab with a page,
 the page stays where it is and what you typed opens in a new tab in the chosen profile.
 
 The address bar suggests, as you type, matching open tabs, pages from your history, archived threads
@@ -142,6 +147,17 @@ link or close it. Its close
 button shows on hover. ⇧⌘T, or right-click **+** → **Reopen closed tab**, brings back the last 25
 closed tabs one by one, in their old place with their back/forward history and any threads that were
 under them. The list is kept only until jbrow quits.
+
+**Split view** shows up to 4 tabs side by side, as in Arc. ⌘D opens a new tab to the right of the one
+you're on, in its profile and under it in its thread, and puts you in the address bar. To split with a
+tab you already have, right-click it and choose **Open in split view**. Drag the gap between two
+panes to resize them. The focused pane has a thin ring, and the address bar and your keys (reload,
+find, zoom, ⌘L, DevTools) act on it; click a pane or use ⌃⌘←/→ to focus another. In the sidebar, tabs
+in a split have a split icon (hover it to see the other tabs), and the panes on screen besides the
+focused one are lightly highlighted. Opening any of them shows the whole split with that one focused.
+⌘W closes the focused pane, and the tab left alone fills the page area again. Right-click a tab in a
+split for **Separate tabs**, or **Take out of split view** with 3 or more. Splits are saved with your
+tabs; archiving or closing a tab takes it out of its split.
 
 A page with unsaved changes asks before it goes, as in Chrome: closing its tab (⌘W, the close
 button, the tab's menu) or going elsewhere asks **Leave site?**, and reloading asks **Reload site?**.
@@ -210,8 +226,11 @@ sites left out), downloaded every 12 hours into `blocklists/` next to `settings.
 you visit never leave your Mac. Downloads and pages inside frames aren't checked. Turn it off under
 **Privacy** in settings, which also shows how big the lists are and when they last updated.
 
-Kept can hold folders: hover the Kept heading and click the folder icon. Drag threads onto a folder,
-click it to fold it away, and right-click it to rename, delete (its threads stay kept) or set its
+Kept is the top of the sidebar, above Today. Drag a thread there (or onto the line under it) to
+keep it. Drag kept threads and folders up and down to arrange them: a line shows where they'll go,
+and threads can sit above folders. Kept can hold folders: right-click the sidebar away from a
+thread for **New folder**, or use **Move to folder → New folder** on a thread. Drag threads or other
+folders onto the middle of a folder to put them inside it, click it to fold it away, and right-click it to rename, delete (its threads stay kept) or set its
 **auto-file rules**. A thread about to be archived moves into the first folder whose rules match one of
 its addresses instead of being archived. Rules are patterns like the private addresses ones.
 
@@ -226,10 +245,17 @@ section, sub-threads and back and forward included) and gives them the full time
 while jbrow is hidden shows the notice the next time you open it; it goes away when you hide jbrow after
 it's been on screen for a few seconds at a time, or with its ×.
 
-The **N archived** line at the very bottom of the sidebar opens the list under **Threads** in
-settings: each archived thread with its sites and when it was archived, and on hover **Restore**
-(back into the sidebar as seen now) and **Forget**. Typing in the address bar finds archived threads
-too and brings the whole thread back. Archived threads are forgotten after 90 days.
+The **N archived** line at the very bottom of the sidebar opens **Archived** in settings: every
+archived thread with its sites and when it was archived, newest first under Today, Yesterday, This
+week and then by month, and on hover **Restore** (back into the sidebar as seen now) and **Forget**.
+The search above it finds threads by name, title or address (every word has to match), and next to
+it you can narrow the list by site, by when it was archived (today, the last 7 or 30 days, older, or
+between two dates) and by profile. Just type, or press ⌘F, to search; ↑↓ move through the list and
+Return (or a double-click) opens a thread. Select threads with the box by each one, ⌘-click, Space or
+⇧↑↓ (⇧-click selects a run, the box at the top everything that matches, ⌘A too) to **Restore** or
+**Forget** them together. Forgetting more than one asks first, and so does restoring more than 10.
+Long lists show more as you scroll. Typing in the address bar finds archived threads too and brings
+the whole thread back. Archived threads are forgotten after 90 days.
 
 Downloads go straight into ~/Downloads, renamed `name (1).ext` if the name is taken. Each one shows
 as a small pie in the toolbar while it runs. Click it for the name, size, speed, time left, folder and
@@ -266,7 +292,7 @@ Sonnet takes about 10 seconds. Styles are kept in `styles.json` next to `setting
 ## Settings
 
 The settings screen (⌘, or the sliders icon) has a sidebar of sections: **General** (pinning and the window's size, search engine and
-search suggestions, quiet links, the default browser), **Profiles**, **Threads** (archiving), **Apps**, **Animation**, **Restyling**,
+search suggestions, quiet links, the default browser), **Profiles**, **Threads** (archiving), **Archived**, **Apps**, **Animation**, **Restyling**,
 **Privacy** (private addresses, dangerous sites, clearing browsing data, screen sharing) and **Shortcuts** (jbrow's own and extensions').
 The search above the sections finds any setting or shortcut, and **Shortcuts** has its own search.
 Changes apply right away. Private addresses: any address that contains

@@ -17,6 +17,8 @@ export interface TabRecord {
   kept?: boolean
   /** Folder in the Kept section. Only meaningful on a kept thread. */
   folder?: string
+  /** Place among the items next to it in Kept (see Folder.order). Only meaningful on a kept thread. */
+  order?: number
   /** App scope key (bundle ID, or a linked group) this thread belongs to. */
   scope?: string
   scopeName?: string
@@ -45,6 +47,16 @@ export interface Folder {
   rules: string[]
   collapsed?: boolean
   createdAt: number
+  /** Place in Kept, among folders and the kept threads outside any folder. Lower comes first. */
+  order?: number
+}
+
+/** Tabs shown side by side, left to right. The active tab's split is on screen, with it focused. */
+export interface Split {
+  id: string
+  tabs: string[]
+  /** Each pane's share of the width, in the order of `tabs`. */
+  sizes: number[]
 }
 
 export interface UiTab extends TabRecord {
@@ -57,8 +69,7 @@ export interface UiState {
   tabs: UiTab[]
   activeId: string | null
   folders: Folder[]
-  /** Tabs of archived threads, for finding them from the address bar and the Archived list. */
-  archived: TabRecord[]
+  splits: Split[]
   /** Threads (root IDs) archived since you last looked, for the sidebar's Undo. */
   archiveNotice: string[] | null
   /** WebContents ID of the active tab, for <browser-action-list>. Null for a new tab with no page yet. */

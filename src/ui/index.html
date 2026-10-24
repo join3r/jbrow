@@ -139,6 +139,7 @@
         <div id="toast" class="toast" hidden></div>
       </aside>
       <main id="content">
+        <div id="paneBgs" class="pane-bgs"></div>
         <section id="blank" class="blank" hidden>
           <h1>Where to?</h1>
           <p>Type in the address bar to search, open a site, or find any open tab.</p>
@@ -207,7 +208,8 @@
               <button class="set-nav-item" data-section="general"><span data-icon="settings"></span>General</button>
               <button class="set-nav-item" data-section="appearance"><span data-icon="palette"></span>Appearance</button>
               <button class="set-nav-item" data-section="profiles"><span data-icon="user"></span>Profiles</button>
-              <button class="set-nav-item" data-section="threads"><span data-icon="archive"></span>Threads</button>
+              <button class="set-nav-item" data-section="threads"><span data-icon="listTree"></span>Threads</button>
+              <button class="set-nav-item" data-section="archived"><span data-icon="archive"></span>Archived</button>
               <button class="set-nav-item" data-section="apps"><span data-icon="grid"></span>Apps</button>
               <button class="set-nav-item" data-section="miniPlayer"><span data-icon="pip"></span>Mini player</button>
               <button class="set-nav-item" data-section="animation"><span data-icon="sparkles"></span>Animation</button>
@@ -375,14 +377,49 @@
                 <p class="help">
                   Threads you haven't opened for a while first unload their pages and shrink to one line: how many tabs, which
                   sites, how long ago. Opening one loads it again. Later they close and leave the sidebar, which offers
-                  <b>Undo</b> until you've seen it and hide jbrow. Find them below or by typing in the address bar. Kept threads never archive, and a folder in Kept can catch threads by address before they do:
+                  <b>Undo</b> until you've seen it and hide jbrow. Find them under <b>Archived</b> or by typing in the address bar. Kept threads never archive, and a folder in Kept can catch threads by address before they do:
                   right-click the folder and choose <b>Auto-file rules</b>.
                 </p>
               </div>
-              <div id="archivedItem" class="set-item" data-keywords="archived archive restore forget undo threads closed">
-                <h3>Archived</h3>
-                <p class="help">Restore puts a thread back in the sidebar with its back and forward history. Archived threads are forgotten after 90 days.</p>
-                <div id="archivedList" class="archived-list"></div>
+            </section>
+
+            <section class="set-section" data-section="archived">
+              <h2 class="set-section-title">Archived</h2>
+              <div id="archivedItem" class="set-item" data-keywords="archived archive restore forget undo threads closed search find history">
+                <p class="help">Return or a double-click opens a thread, Restore puts it back in the sidebar, both with its back and forward history.
+                  ⌘-click, Space or the box by a thread selects it. Archived threads are forgotten after 90 days.</p>
+                <div id="archBar" class="arch-bar">
+                  <div class="arch-filters">
+                    <label class="set-search arch-search">
+                      <span data-icon="search"></span>
+                      <input id="archSearch" type="search" spellcheck="false" placeholder="Search names, titles and addresses" aria-label="Search archived threads" />
+                    </label>
+                    <select id="archSite" class="arch-site" aria-label="Site"></select>
+                  </div>
+                  <div class="arch-filters">
+                    <div id="archWhen" class="seg" role="group" aria-label="Archived">
+                      <button data-value="any">Any time</button>
+                      <button data-value="today">Today</button>
+                      <button data-value="week">7 days</button>
+                      <button data-value="month">30 days</button>
+                      <button data-value="older">Older</button>
+                      <button data-value="range">Dates</button>
+                    </div>
+                    <div id="archProfile" class="seg arch-profile" role="group" aria-label="Profile"></div>
+                  </div>
+                  <div id="archRange" class="arch-filters arch-range" hidden>
+                    <input id="archFrom" type="date" aria-label="Archived from" /><span>to</span><input id="archTo" type="date" aria-label="Archived until" />
+                  </div>
+                  <div class="arch-count">
+                    <input id="archAll" type="checkbox" title="Select all that match" aria-label="Select all that match" />
+                    <span id="archCount"></span>
+                    <span id="archSelActs" class="arch-sel-acts" hidden>
+                      <button id="archRestoreSel" class="chip">Restore</button>
+                      <button id="archForgetSel" class="chip">Forget</button>
+                    </span>
+                  </div>
+                </div>
+                <div id="archivedList" class="archived-list" tabindex="0" aria-label="Archived threads"></div>
               </div>
             </section>
 
@@ -585,6 +622,7 @@
           </div>
         </section>
       </main>
+      <div id="panes" class="panes" hidden></div>
       <aside id="sidePanel" class="side-panel" hidden>
         <div id="sideSplit" class="side-split" title="Drag to resize"></div>
         <header id="sideHead" class="side-head" title="Right-click for more">

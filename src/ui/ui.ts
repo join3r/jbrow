@@ -1,8 +1,9 @@
 import { cssEase } from '../shared/ease'
 import { engineOf, isSearchUrl, SEARCH_ENGINES, suggestUrlFor } from '../shared/engines'
 import { urlMatcher } from '../shared/patterns'
-import { childrenOf, displayName, folderThreads, isAsleep, isRoot, numberedThreads, sections, subtree, type AppView, type FolderView, type ThreadView } from '../shared/threads'
+import { childrenOf, displayName, folderThreads, isAsleep, isFolder, isRoot, numberedThreads, sections, subtree, threadsOf, type AppView, type FolderView, type KeptItem, type ThreadView } from '../shared/threads'
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
+import { dragDivider, PANE_GAP, paneSpans, splitOf } from '../shared/split'
 import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type VisitView } from '../shared/types'
 
 declare global {
@@ -14,7 +15,7 @@ declare global {
   }
 }
 
-/** 24×24 stroke icons. The puzzle, pin, eye, eye-off, folder, store, open, copy, wand, undo, trash, lock, warn, search, user, archive, grid, sparkles, shield, keyboard and palette paths are from Lucide (ISC). */
+/** 24×24 stroke icons. The puzzle, pin, eye, eye-off, folder, store, open, copy, wand, undo, trash, lock, warn, search, user, archive, list-tree, grid, sparkles, shield, keyboard, palette and columns paths are from Lucide (ISC). */
 const ICONS: Record<string, string> = {
   back: '<path d="m15 18-6-6 6-6"/>',
   forward: '<path d="m9 18 6-6-6-6"/>',
@@ -50,6 +51,7 @@ const ICONS: Record<string, string> = {
   clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
   archive: '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+  listTree: '<path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/>',
   grid: '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
   sparkles:
     '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>',
@@ -63,6 +65,7 @@ const ICONS: Record<string, string> = {
   down: '<path d="m6 9 6 6 6-6"/>',
   usb: '<circle cx="10" cy="7" r="1"/><circle cx="4" cy="20" r="1"/><path d="M4.7 19.3 19 5"/><path d="m21 3-3 1 2 2Z"/><path d="M9.26 7.68 5 12l2 5"/><path d="m10 14 5 2 3.5-3.5"/><path d="m18 12 1-1 1 1-1 1Z"/>',
   bluetooth: '<path d="m7 7 10 10-5 5V2l5 5L7 17"/>',
+  columns: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/>',
 }
 const icon = (name: string) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`
 document.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => (el.innerHTML = icon(el.dataset.icon!)))
@@ -87,6 +90,7 @@ const send = window.jbrow.send
 let S: UiState | null = null
 let renaming: string | null = null
 let dragId: string | null = null
+let dragFolder = false
 let highlighted = 0
 let isPrivate: (url: string) => boolean = () => false
 let privateKey = ''
@@ -127,14 +131,21 @@ function sleepSummary(v: ThreadView<UiTab>, now: number): string {
   return [threadSummary(v.all), `${Math.floor((now - v.lastSeen) / DAY_MS)} d`].filter(Boolean).join(' · ')
 }
 
+/** A page's site without www, '' for an address that isn't a web page. */
+function hostOf(url: string): string {
+  try {
+    return /^https?:/i.test(url) ? new URL(url).hostname.replace(/^www\./, '') : ''
+  } catch {
+    return ''
+  }
+}
+
 /** How many tabs and which sites a thread holds, e.g. "4 tabs · github.com, mozilla.org +1". */
 function threadSummary(all: TabRecord[]): string {
   const hosts = new Map<string, number>()
   for (const t of all) {
-    let host = ''
-    try {
-      if (/^https?:/i.test(t.url)) host = isPrivate(t.url) ? 'Private' : new URL(t.url).hostname.replace(/^www\./, '')
-    } catch {}
+    const site = hostOf(t.url)
+    const host = site && isPrivate(t.url) ? 'Private' : site
     if (host) hosts.set(host, (hosts.get(host) ?? 0) + 1)
   }
   const top = [...hosts].sort((a, b) => b[1] - a[1]).map(([h]) => h)
@@ -143,13 +154,39 @@ function threadSummary(all: TabRecord[]): string {
   return [tabs, sites].filter(Boolean).join(' · ')
 }
 
-/** Archived threads, most recently archived first. */
-function archivedThreads(): { root: TabRecord; all: TabRecord[] }[] {
-  const a = S?.archived ?? []
-  return a
-    .filter((t) => isRoot(a, t))
-    .sort((x, y) => (y.archivedAt ?? 0) - (x.archivedAt ?? 0) || y.lastSeen - x.lastSeen)
-    .map((root) => ({ root, all: subtree(a, root) }))
+/** An archived thread as the Archived list shows and searches it. */
+interface ArchivedThread {
+  root: TabRecord
+  all: TabRecord[]
+  /** When it was archived. */
+  at: number
+  /** Sites of its tabs, without www. */
+  hosts: string[]
+  /** Names, titles and addresses of its tabs in lower case, for the search. */
+  text: string
+}
+
+/** Tabs of archived threads. Main sends them on their own, only when they change: there can be thousands. */
+let archived: TabRecord[] = []
+let archivedById = new Map<string, TabRecord>()
+/** The same as threads, most recently archived first. */
+let archivedList: ArchivedThread[] = []
+/** Bumped with each new list, so the Archived list knows to render again. */
+let archivedRev = 0
+
+function setArchived(tabs: TabRecord[]) {
+  archived = tabs
+  archivedById = new Map(tabs.map((t) => [t.id, t]))
+  archivedList = threadsOf(tabs)
+    .map(({ root, all }) => ({
+      root,
+      all,
+      at: root.archivedAt ?? 0,
+      hosts: [...new Set(all.map((t) => hostOf(t.url)).filter(Boolean))],
+      text: all.map((t) => `${displayName(t)} ${t.title} ${t.url}`).join(' ').toLowerCase(),
+    }))
+    .sort((a, b) => b.at - a.at || b.root.lastSeen - a.root.lastSeen)
+  archivedRev++
 }
 
 // ---------- render ----------
@@ -225,6 +262,7 @@ function render() {
       ['Tab', 'Switch the profile a typed address opens in'],
       ['⌘1–9', 'Jump to a thread'],
       [keyLabel('previousTab'), 'Previous tab'],
+      [keyLabel('splitView'), 'Split view'],
       [keyLabel('closeTab'), 'Close tab'],
       [keyLabel('reopenTab'), 'Reopen closed tab'],
       [keyLabel('pin'), 'Pin the window'],
@@ -236,6 +274,7 @@ function render() {
   }
   syncCovering()
   renderSidePanel()
+  renderPanes()
 }
 
 /** The header and the space for an extension's side panel; its page is a native view main lays over it. */
@@ -291,6 +330,89 @@ $('sideSplit').addEventListener('mousedown', (e) => {
     window.removeEventListener('mousemove', move)
     window.removeEventListener('mouseup', up)
     send('side-panel-width', { width, done: true })
+  }
+  window.addEventListener('mousemove', move)
+  window.addEventListener('mouseup', up)
+})
+
+// ---------- split view ----------
+
+const contentEl = $('content')
+const paneBgs = $('paneBgs')
+const panesEl = $('panes')
+/** The divider you're dragging and the sizes so far, ahead of what main has. */
+let paneDrag: { id: string; i: number; sizes: number[] } | null = null
+
+const activeSplit = () => (S ? splitOf(S.splits, S.activeId) : undefined)
+/** The tabs on screen: the active tab and the rest of its split. */
+const shownPanes = () => activeSplit()?.tabs ?? (S?.activeId ? [S.activeId] : [])
+
+/**
+ * Around the pages main lays side by side: the room for each pane (a new tab has no page there
+ * yet), the dividers in the gaps and the ring around the focused pane. The active tab's own
+ * screens (new tab, certificate, crash) move into its pane through --fx and --fw.
+ */
+function renderPanes() {
+  const split = activeSplit()
+  contentEl.classList.toggle('split', !!split)
+  panesEl.hidden = !split || !settingsEl.hidden
+  if (!split || !S) {
+    paneBgs.innerHTML = ''
+    contentEl.style.removeProperty('--fx')
+    contentEl.style.removeProperty('--fw')
+    return
+  }
+  const sizes = paneDrag?.id === split.id ? paneDrag.sizes : split.sizes
+  const spans = paneSpans(contentEl.clientWidth, sizes)
+  const focused = Math.max(0, split.tabs.indexOf(S.activeId!))
+  const f = spans[focused]
+  contentEl.style.setProperty('--fx', `${f.x}px`)
+  contentEl.style.setProperty('--fw', `${f.width}px`)
+  paneBgs.innerHTML = split.tabs
+    .map((id, i) => {
+      const empty = i !== focused && !S!.tabs.find((t) => t.id === id)?.url
+      return `<div class="pane" data-pane="${esc(id)}" style="left:${spans[i].x}px;width:${spans[i].width}px">${empty ? '<span>New tab</span>' : ''}</div>`
+    })
+    .join('')
+  panesEl.innerHTML =
+    `<div class="pane-ring" style="left:${f.x}px;width:${f.width}px"></div>` +
+    spans
+      .slice(1)
+      .map((s, i) => `<div class="pane-split${paneDrag?.i === i ? ' drag' : ''}" data-divider="${i}" style="left:${s.x - PANE_GAP}px" title="Drag to resize"></div>`)
+      .join('')
+}
+new ResizeObserver(() => renderPanes()).observe(contentEl)
+// A pane without a page is jbrow's; clicking it focuses its tab. Panes with a page focus themselves.
+paneBgs.addEventListener('mousedown', (e) => {
+  const id = (e.target as HTMLElement).closest<HTMLElement>('[data-pane]')?.dataset.pane
+  if (id && id !== S?.activeId) send('activate', { id })
+})
+// Drag a gap between panes to resize them, as with the side panel.
+panesEl.addEventListener('mousedown', (e) => {
+  const divider = (e.target as HTMLElement).closest<HTMLElement>('[data-divider]')
+  const split = activeSplit()
+  if (!divider || !split || e.button !== 0) return
+  e.preventDefault()
+  const drag = (paneDrag = { id: split.id, i: Number(divider.dataset.divider), sizes: split.sizes })
+  document.body.classList.add('resizing')
+  let queued = false
+  const move = (ev: MouseEvent) => {
+    drag.sizes = dragDivider(contentEl.clientWidth, drag.sizes, drag.i, ev.clientX - contentEl.getBoundingClientRect().left)
+    renderPanes()
+    if (queued) return
+    queued = true
+    requestAnimationFrame(() => {
+      queued = false
+      send('split-sizes', { id: drag.id, sizes: drag.sizes })
+    })
+  }
+  const up = () => {
+    paneDrag = null
+    document.body.classList.remove('resizing')
+    window.removeEventListener('mousemove', move)
+    window.removeEventListener('mouseup', up)
+    // The new sizes come back with the state main sends once it has saved them.
+    send('split-sizes', { id: drag.id, sizes: drag.sizes, done: true })
   }
   window.addEventListener('mousemove', move)
   window.addEventListener('mouseup', up)
@@ -369,7 +491,8 @@ function showAddress() {
 }
 
 function renderThreads() {
-  if (!S) return
+  // Not while dragging: the dragged row has to stay in the page for its dragend to arrive.
+  if (!S || dragId) return
   // Keep a rename in progress across re-renders (titles and loading states update often).
   const renameInput = document.getElementById('ren') as HTMLInputElement | null
   const draft = renameInput ? { value: renameInput.value, start: renameInput.selectionStart, end: renameInput.selectionEnd } : null
@@ -382,24 +505,21 @@ function renderThreads() {
   const appBlock = (v: ThreadView<UiTab>) => row(v.root, 0, v, numbered.get(v.root.id), false)
   // While filtered to a profile or an app, folders with nothing to show stay out of the way.
   const narrowed = S.filter !== 'all' || !!S.scope
-  const folders = s.folders.filter((f) => folderThreads(f).length || !narrowed)
   let html = settingsTab
     ? `<div class="row set-row ${settingsEl.hidden ? '' : 'cur'}" role="button" tabindex="0" data-settings>
         <span class="fav">${icon('settings')}</span><span class="t">Settings</span>
         <span class="end"><button class="act" data-close-settings title="Close" aria-label="Close settings">${icon('close')}</button></span>
       </div>`
     : ''
-  // The top section is Kept; its place says so without a label.
-  html += `<div class="head" data-head="kept" title="Kept"><span></span><button class="head-act" data-new-folder title="New folder" aria-label="New folder">${icon('folderPlus')}</button></div>`
-  html += folders.map((f) => folderRow(f, block, narrowed)).join('') + s.kept.map(block).join('')
-  if (!folders.length && !s.kept.length) html += `<div class="empty">Drag a thread here to keep it</div>`
+  // Kept has no heading: it's the top section. The strip under it takes drops to keep a thread at its bottom.
+  const kept = s.top.filter((i) => !isFolder(i) || keptFolderShown(i, narrowed)).map((i) => (isFolder(i) ? folderRow(i, block, narrowed) : block(i))).join('')
+  html += `<div id="kept" class="kept">${kept}</div><div class="keep-zone"></div>`
   html += `<div class="head" data-head="today">${recentLabel(S.prefs.earlierAfterHours)}</div>`
   html += s.today.length ? s.today.map(block).join('') : `<div class="empty">Nothing here yet</div>`
   html += s.apps.map((a) => appSection(a, appBlock)).join('')
   // Earlier sits at the bottom of the sidebar, away from what's current, and the way to archived threads under it.
-  const archived = S.archived.filter((t) => isRoot(S!.archived, t)).length
-  const archivedLink = archived
-    ? `<button class="archived-link" data-show-archived title="Archived threads">${icon('archive')}${archived} archived</button>`
+  const archivedLink = archivedList.length
+    ? `<button class="archived-link" data-show-archived title="Archived threads">${icon('archive')}${archivedList.length.toLocaleString()} archived</button>`
     : ''
   if (s.earlier.length) html += `<div class="earlier-sec"><div class="head" data-head="today">Earlier</div><div class="earlier">${s.earlier.map(block).join('')}</div>${archivedLink}</div>`
   else html += archivedLink
@@ -422,7 +542,7 @@ function renderArchiveNotice() {
   el.hidden = !roots
   if (!roots || !S) return
   $('archiveNoticeText').textContent = `Archived ${roots.length} ${roots.length === 1 ? 'thread' : 'threads'}`
-  el.title = roots.flatMap((id) => S!.archived.filter((t) => t.id === id).map(displayName)).join('\n')
+  el.title = roots.flatMap((id) => archivedById.get(id) ?? []).map(displayName).join('\n')
 }
 
 /** Heading for threads seen within the Earlier cutoff. */
@@ -444,24 +564,29 @@ function appSection(a: AppView<UiTab>, block: (v: ThreadView<UiTab>) => string):
 function folderRow(v: FolderView<UiTab>, block: (v: ThreadView<UiTab>) => string, narrowed: boolean): string {
   const f = v.folder
   const count = folderThreads(v).length
-  const inner = v.folders.filter((c) => folderThreads(c).length || !narrowed)
   const open = !f.collapsed
   const name =
     renaming === f.id
       ? `<input class="ren" id="ren" value="${esc(f.name)}" aria-label="Folder name">`
       : `<span class="t">${esc(f.name)}</span>`
-  const html = `<div class="row frow" role="button" tabindex="0" aria-expanded="${open}" data-folder="${f.id}">
+  const html = `<div class="row frow" role="button" tabindex="0" draggable="true" aria-expanded="${open}" data-folder="${f.id}">
     <span class="fav">${icon(open ? 'folderOpen' : 'folder')}</span>${name}<span class="end"><span class="meta">${count || ''}</span></span>
   </div>`
   // A collapsed folder still shows the thread you're on, and the folders down to it.
-  const shown = (t: ThreadView<UiTab>) => open || holdsActive(t)
-  const body =
-    inner.filter((c) => open || folderThreads(c).some(holdsActive)).map((c) => folderRow(c, block, narrowed)).join('') +
-    v.threads.filter(shown).map(block).join('')
+  const shown = (i: KeptItem<UiTab>) =>
+    isFolder(i) ? keptFolderShown(i, narrowed) && (open || folderThreads(i).some(holdsActive)) : open || holdsActive(i)
+  const body = v.items.filter(shown).map((i) => (isFolder(i) ? folderRow(i, block, narrowed) : block(i))).join('')
   return body ? `${html}<div class="folder-body">${body}</div>` : html
 }
 
-const holdsActive = (t: ThreadView<UiTab>) => t.all.some((x) => x.id === S?.activeId)
+/** The thread holds the active tab, or another pane of its split. */
+const holdsActive = (t: ThreadView<UiTab>) => {
+  const shown = shownPanes()
+  return t.all.some((x) => shown.includes(x.id))
+}
+
+/** Whether a folder shows: while narrowed to a profile or an app, only with threads to show. */
+const keptFolderShown = (v: FolderView<UiTab>, narrowed: boolean) => !narrowed || folderThreads(v).length > 0
 
 const toggleFolder = (id: string) => {
   const f = S?.folders.find((x) => x.id === id)
@@ -471,9 +596,9 @@ const toggleFolder = (id: string) => {
 function row(t: UiTab, depth: number, thread: ThreadView<UiTab> | null, number?: number, showApp = true): string {
   if (!S) return ''
   const kids = childrenOf(S.tabs, t.id)
-  const open = thread ? thread.all.some((x) => x.id === S!.activeId) : true
+  const open = thread ? holdsActive(thread) : true
   const target = thread && !open ? thread.last.id : t.id
-  const asleep = !!thread && isAsleep(thread.all, { now: S.now, afterMs: S.prefs.summarizeAfterDays * DAY_MS, activeId: S.activeId })
+  const asleep = !!thread && !open && isAsleep(thread.all, { now: S.now, afterMs: S.prefs.summarizeAfterDays * DAY_MS, activeId: S.activeId })
   const count = thread && !open && !asleep && thread.all.length > 1 ? String(thread.all.length) : ''
   const app = showApp && depth === 0 && t.scope && !S.scope ? (S.apps[t.scope]?.name ?? t.scopeName ?? '') : ''
   const meta = [app, count].filter(Boolean).join(' · ')
@@ -487,6 +612,7 @@ function row(t: UiTab, depth: number, thread: ThreadView<UiTab> | null, number?:
     'row',
     depth > 0 ? 'sub' : '',
     t.id === S.activeId && settingsEl.hidden ? 'cur' : '',
+    t.id !== S.activeId && settingsEl.hidden && shownPanes().includes(t.id) ? 'beside' : '',
     thread && open ? 'open' : '',
     t.loading ? 'loading' : '',
     t.unread ? 'unread' : '',
@@ -494,8 +620,12 @@ function row(t: UiTab, depth: number, thread: ThreadView<UiTab> | null, number?:
     asleep ? 'asleep' : '',
   ].join(' ')
   const color = profile(t.profile)?.color ?? ''
+  // Tabs in a split view say so, and who they share it with.
+  const split = splitOf(S.splits, t.id)
+  const partners = split?.tabs.filter((id) => id !== t.id).map((id) => S!.tabs.find((x) => x.id === id)).filter((x) => !!x) ?? []
+  const mark = split ? `<span class="split-mark" title="${esc(`Split view with ${partners.map(displayName).join(', ')}`)}">${icon('columns')}</span>` : ''
   let html = `<div class="${classes}" role="button" tabindex="0" draggable="true" data-id="${t.id}" data-target="${target}" style="--d:${depth};--pc:${esc(color)}">
-    ${fav}${name}<span class="end"><span class="meta">${esc(meta || key)}</span><button class="act" data-close="${t.id}" title="Close" aria-label="Close">${icon('close')}</button></span>
+    ${fav}${name}<span class="end">${mark}<span class="meta">${esc(meta || key)}</span><button class="act" data-close="${t.id}" title="Close" aria-label="Close">${icon('close')}</button></span>
     ${asleep ? `<span class="sum">${esc(sleepSummary(thread!, S.now))}</span>` : ''}
   </div>`
   if (open) html += kids.map((k) => row(k, depth + 1, null)).join('')
@@ -561,8 +691,8 @@ function suggestions(): Suggestion[] {
       favicon: t.favicon,
     }))
   // Archived threads only turn up when searched for.
-  const archivedTabs = !q ? [] : S.archived.filter((t) => t.url && tabMatches(t, q)).sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0))
-  const archived = archivedTabs
+  const archivedTabs = !q ? [] : archived.filter((t) => t.url && tabMatches(t, q)).sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0))
+  const archivedRows = archivedTabs
     .slice(0, 3)
     .map<Suggestion>((t) => ({ kind: 'archived', id: t.id, title: displayName(t), sub: shownUrl(t.url), tag: 'archived', favicon: t.favicon }))
   // History leaves out pages already open or archived: their own rows bring them back as they were.
@@ -598,7 +728,7 @@ function suggestions(): Suggestion[] {
       ? [{ kind: 'go', title: looksLikeUrl(q) ? `Go to ${text}` : `Search for "${text}"`, sub: '', tag: 'web' }]
       : []
   // A typed or completed address goes first; a typed word goes after matching tabs and history.
-  return comp || looksLikeUrl(q) ? [...go, ...tabs, ...visits, ...archived, ...searches] : [...tabs, ...visits, ...archived, ...go, ...searches]
+  return comp || looksLikeUrl(q) ? [...go, ...tabs, ...visits, ...archivedRows, ...searches] : [...tabs, ...visits, ...archivedRows, ...go, ...searches]
 }
 
 const looksLikeUrl = (q: string) => /^[a-z][a-z0-9+.-]*:\/\//i.test(q) || (/^[\w-]+(\.[\w-]+)+(:\d+)?(\/\S*)?$/i.test(q) && !q.includes(' '))
@@ -630,9 +760,19 @@ function showSuggestions(keep = false) {
         ${fav}<span class="sg-t">${esc(s.title)}</span>${s.sub ? `<span class="sg-s">${esc(s.sub)}</span>` : ''}<span class="sg-tag">${esc(s.tag)}</span>${forget}
       </button>`
       })
-      .join('')
+      .join('') + switchHint()
   suggest.hidden = false
   syncOverlay()
+}
+/** Under the suggestions, with more than one profile: Tab sends what's typed to the next one. */
+function switchHint(): string {
+  const ids = S?.profiles.map((p) => p.id) ?? []
+  const from = typedIn()
+  if (ids.length < 2 || !from) return ''
+  const next = profile(ids[(ids.indexOf(from) + 1) % ids.length])
+  if (!next) return ''
+  const dot = next.color ? `<span class="dot" style="background:${esc(next.color)}"></span>` : ''
+  return `<div class="sg-hint"><kbd>Tab</kbd>to open in ${dot}${esc(next.name)}</div>`
 }
 function hideSuggestions() {
   suggest.hidden = true
@@ -759,6 +899,7 @@ omnibox.addEventListener('keydown', (e) => {
       mayComplete ||= !!completion()
       requestSuggestions()
     }
+    if (!suggest.hidden) showSuggestions(true)
   }
 })
 suggest.addEventListener('mousedown', (e) => e.preventDefault())
@@ -776,7 +917,6 @@ threadsEl.addEventListener('click', (e) => {
   if (el.closest('#ren')) return
   const closeBtn = el.closest<HTMLElement>('[data-close]')
   if (closeBtn) return send('close', { id: closeBtn.dataset.close })
-  if (el.closest('[data-new-folder]')) return send('new-folder')
   if (el.closest('[data-show-archived]')) return showArchived()
   if (el.closest('[data-close-settings]')) return setSettings(false)
   if (el.closest('[data-settings]')) return showSettings(true)
@@ -793,10 +933,12 @@ threadsEl.addEventListener('dblclick', (e) => {
   if (r && !(e.target as HTMLElement).closest('#ren')) startRename(r.dataset.id ?? r.dataset.folder!)
 })
 threadsEl.addEventListener('contextmenu', (e) => {
-  const r = (e.target as HTMLElement).closest<HTMLElement>('.row:not([data-settings])')
-  if (!r || (e.target as HTMLElement).closest('#ren')) return
+  const r = (e.target as HTMLElement).closest<HTMLElement>('.row')
+  if ((e.target as HTMLElement).closest('#ren')) return
+  if (r?.hasAttribute('data-settings')) return
   e.preventDefault()
-  if (r.dataset.folder) send('folder-menu', { id: r.dataset.folder })
+  if (!r) send('sidebar-menu')
+  else if (r.dataset.folder) send('folder-menu', { id: r.dataset.folder })
   else send('thread-menu', { id: r.dataset.id })
 })
 threadsEl.addEventListener('keydown', (e) => {
@@ -853,36 +995,74 @@ function commitRename() {
 threadsEl.addEventListener('dragstart', (e) => {
   const r = (e.target as HTMLElement).closest<HTMLElement>('.row')
   if (!r) return
-  dragId = r.dataset.id!
+  dragId = r.dataset.id ?? r.dataset.folder!
+  dragFolder = !!r.dataset.folder
+  threadsEl.classList.add('dragging')
   e.dataTransfer!.effectAllowed = 'move'
   e.dataTransfer!.setData('text/plain', dragId)
 })
+
+/**
+ * Where a drag over the sidebar would land. In Kept, the top or bottom of a row places the item
+ * before or after it, and the middle files it into a folder or, for a thread as elsewhere, merges
+ * it into a thread. Folders only move within Kept, and never into themselves.
+ */
+function dropTarget(e: DragEvent): { el: HTMLElement; where: 'before' | 'after' | 'into' | 'keep' } | null {
+  const el = (e.target as HTMLElement).closest<HTMLElement>('.row:not([data-settings]), .head:not(.app-head), .keep-zone, #kept')
+  if (!el || el.dataset.id === dragId || el.dataset.folder === dragId) return null
+  const dragged = dragFolder ? threadsEl.querySelector(`[data-folder="${dragId}"]`)?.nextElementSibling : null
+  if (dragged?.classList.contains('folder-body') && dragged.contains(el)) return null
+  if (el.matches('.keep-zone, #kept')) return { el: threadsEl.querySelector<HTMLElement>('.keep-zone')!, where: 'keep' }
+  if (!el.matches('#kept .row:not(.sub)')) return dragFolder ? null : { el, where: 'into' }
+  const box = el.getBoundingClientRect()
+  const y = (e.clientY - box.top) / box.height
+  // An open folder's bottom edge is its first item's top, so a drop there goes into the folder.
+  const openFolder = !!el.dataset.folder && !!el.nextElementSibling?.classList.contains('folder-body')
+  // A folder doesn't merge into a thread: it goes above or below.
+  const edge = dragFolder && !el.dataset.folder ? 0.5 : 0.25
+  if (y < edge) return { el, where: 'before' }
+  if (y > 1 - edge && !openFolder) return { el, where: 'after' }
+  return { el, where: dragFolder && !el.dataset.folder ? 'after' : 'into' }
+}
+
+const clearDrop = () => threadsEl.querySelectorAll('.dz, .ins-before, .ins-after').forEach((x) => x.classList.remove('dz', 'ins-before', 'ins-after'))
+
+function endDrag() {
+  dragId = null
+  dragFolder = false
+  threadsEl.classList.remove('dragging')
+  clearDrop()
+  renderThreads()
+}
+
 threadsEl.addEventListener('dragover', (e) => {
   if (!dragId) return
-  const t = (e.target as HTMLElement).closest<HTMLElement>('.row:not([data-settings]), .head:not(.app-head)')
-  if (!t) return
+  const at = dropTarget(e)
+  if (!at) return clearDrop()
   e.preventDefault()
-  if (!t.classList.contains('dz')) {
-    threadsEl.querySelectorAll('.dz').forEach((x) => x.classList.remove('dz'))
-    t.classList.add('dz')
+  const mark = at.where === 'before' ? 'ins-before' : at.where === 'after' ? 'ins-after' : 'dz'
+  if (!at.el.classList.contains(mark)) {
+    clearDrop()
+    at.el.classList.add(mark)
   }
 })
 threadsEl.addEventListener('drop', (e) => {
   if (!dragId) return
   e.preventDefault()
-  const t = (e.target as HTMLElement).closest<HTMLElement>('.row:not([data-settings]), .head:not(.app-head)')
+  const at = dropTarget(e)
   const id = dragId
-  dragId = null
-  threadsEl.querySelectorAll('.dz').forEach((x) => x.classList.remove('dz'))
-  if (!t) return
-  if (t.classList.contains('head')) send('move', { id, parent: null, kept: t.dataset.head === 'kept' })
-  else if (t.dataset.folder) send('move', { id, parent: null, kept: true, folder: t.dataset.folder })
-  else if (t.dataset.id !== id) send('move', { id, parent: t.dataset.id })
+  const movingFolder = dragFolder
+  endDrag()
+  if (!at) return
+  const { el, where } = at
+  if (where === 'keep') send('place', { id, target: null })
+  else if (where !== 'into') send('place', { id, target: el.dataset.id ?? el.dataset.folder, after: where === 'after' })
+  else if (movingFolder) send('move-folder', { id, parent: el.dataset.folder })
+  else if (el.classList.contains('head')) send('move', { id, parent: null, kept: false })
+  else if (el.dataset.folder) send('move', { id, parent: null, kept: true, folder: el.dataset.folder })
+  else send('move', { id, parent: el.dataset.id })
 })
-threadsEl.addEventListener('dragend', () => {
-  dragId = null
-  threadsEl.querySelectorAll('.dz').forEach((x) => x.classList.remove('dz'))
-})
+threadsEl.addEventListener('dragend', () => endDrag())
 
 // ---------- folder rules popover ----------
 
@@ -1225,6 +1405,7 @@ const SECTION_NAMES: Record<string, string> = {
   appearance: 'Appearance',
   profiles: 'Profiles',
   threads: 'Threads',
+  archived: 'Archived',
   apps: 'Apps',
   miniPlayer: 'Mini player',
   animation: 'Animation',
@@ -1247,7 +1428,10 @@ function showSettings(show: boolean) {
   if (show === !settingsEl.hidden || (show && !settingsTab)) return
   settingsEl.hidden = !show
   $('settingsButton').setAttribute('aria-pressed', String(show))
+  // So your key for closing a tab closes settings while it's the one showing.
+  send('settings-shown', { on: show })
   renderThreads()
+  renderPanes()
   if (show) {
     setExtensions(false)
     focusUi()
@@ -1548,33 +1732,331 @@ zoomSitesEl.addEventListener('click', (e) => {
   if (b) send('zoom-reset', { site: b.dataset.zoomSite })
 })
 
+// ---------- archived ----------
+
 const archivedListEl = $('archivedList')
-/** Archived threads in settings: name, sites, when, and Restore and Forget on hover. */
+const archSearch = $<HTMLInputElement>('archSearch')
+const archSite = $<HTMLSelectElement>('archSite')
+const archFrom = $<HTMLInputElement>('archFrom')
+const archTo = $<HTMLInputElement>('archTo')
+const archAll = $<HTMLInputElement>('archAll')
+/** Rows added at a time, at first and as you scroll near the end. */
+const ARCH_CHUNK = 150
+
+type ArchWhen = 'any' | 'today' | 'week' | 'month' | 'older' | 'range'
+/** What the Archived list shows: words that must all match, when it was archived, profile and site. */
+const archFilter = { q: '', when: 'any' as ArchWhen, from: '', to: '', profile: 'all', site: '' }
+/** Threads that match, newest first, and the date heading each one goes under. */
+let archMatches: ArchivedThread[] = []
+let archGroups: string[] = []
+let archGroupCounts = new Map<string, number>()
+/** Root IDs of the selected threads, all of them among the matches. */
+const archSel = new Set<string>()
+/** The row the arrows are on, and the one a ⇧-click selects from. Root IDs. */
+let archCursor: string | null = null
+let archAnchor: string | null = null
+/** How many matches have rows so far. */
+let archShown = 0
+/** What the list was last rendered from, so state pushes that change none of it cost nothing. */
+let archKey = ''
+let archFilterKey = ''
+let archSearchTimer: number | undefined
+
+/** Local midnight of a `<input type=date>` value, `days` later. */
+function dayStart(value: string, days = 0): number {
+  const [y, m, d] = value.split('-').map(Number)
+  return new Date(y, m - 1, d + days).getTime()
+}
+
+/** When a thread must have been archived to show, [from, until). */
+function archRange(): [number, number] {
+  const today = new Date().setHours(0, 0, 0, 0)
+  const daysAgo = (n: number) => new Date(today).setDate(new Date(today).getDate() - n)
+  switch (archFilter.when) {
+    case 'today':
+      return [today, Infinity]
+    case 'week':
+      return [daysAgo(6), Infinity]
+    case 'month':
+      return [daysAgo(29), Infinity]
+    case 'older':
+      return [0, daysAgo(29)]
+    case 'range':
+      return [archFilter.from ? dayStart(archFilter.from) : 0, archFilter.to ? dayStart(archFilter.to, 1) : Infinity]
+    default:
+      return [0, Infinity]
+  }
+}
+
+/** The heading a thread archived at `at` goes under: Today, Yesterday, This week, then by month. */
+function archGroup(at: number, today: Date): string {
+  const midnight = new Date(today).setHours(0, 0, 0, 0)
+  const back = (n: number) => new Date(midnight).setDate(new Date(midnight).getDate() - n)
+  if (at >= midnight) return 'Today'
+  if (at >= back(1)) return 'Yesterday'
+  if (at >= back(6)) return 'This week'
+  const d = new Date(at)
+  return d.toLocaleDateString(undefined, { month: 'long', ...(d.getFullYear() !== today.getFullYear() && { year: 'numeric' }) })
+}
+
+/** "14:32" for today and yesterday, "Mon 14:32" this week, "12 Oct" before. */
+function archTime(at: number): string {
+  const d = new Date(at)
+  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  const ago = Date.now() - at
+  if (ago < 2 * DAY_MS) return time
+  if (ago < 7 * DAY_MS) return `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${time}`
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(d.getFullYear() !== new Date().getFullYear() && { year: 'numeric' }) })
+}
+
+function archRow({ root, all, at }: ArchivedThread): string {
+  const fav = root.favicon ? `<img class="fav" src="${esc(root.favicon)}" alt="">` : `<span class="fav none"></span>`
+  const urls = all.map((t) => shownUrl(t.url)).join('\n')
+  const color = profile(root.profile)?.color ?? ''
+  return `<div class="arch-row" data-arch="${esc(root.id)}" style="--pc:${esc(color)}"><span class="arch-pick" data-pick role="checkbox" aria-checked="false" aria-label="Select" title="Select">${fav}${icon('check')}</span><span class="arch-t" title="${esc(urls)}">${esc(displayName(root))}<small>${esc(threadSummary(all))}</small></span><span class="arch-when" title="Archived ${esc(new Date(at).toLocaleString())}">${esc(archTime(at))}</span><span class="arch-acts"><button class="icon sm" data-unarchive title="Restore" aria-label="Restore">${icon('undo')}</button><button class="icon sm" data-forget title="Forget" aria-label="Forget">${icon('trash')}</button></span></div>`
+}
+
+/** Rows for matches `start` up to `end`, each date's heading before its first row. */
+function archRows(start: number, end: number): string {
+  let html = ''
+  for (let i = start; i < Math.min(end, archMatches.length); i++) {
+    const g = archGroups[i]
+    if (i === 0 || archGroups[i - 1] !== g) html += `<div class="arch-head"><span>${esc(g)}</span><em>${archGroupCounts.get(g)!.toLocaleString()}</em></div>`
+    html += archRow(archMatches[i])
+  }
+  return html
+}
+
+/**
+ * The Archived list in settings: what matches the search and filters, under date headings, with
+ * rows added as you scroll. Renders again only when the archived threads or the filters change.
+ */
 function renderArchived() {
   if (!S) return
-  const html = archivedThreads()
-    .map(({ root, all }) => {
-      const fav = root.favicon ? `<img class="fav" src="${esc(root.favicon)}" alt="">` : `<span class="fav none"></span>`
-      const urls = all.map((t) => shownUrl(t.url)).join('\n')
-      const color = profile(root.profile)?.color ?? ''
-      return `<div class="arch-row" data-arch="${esc(root.id)}" style="--pc:${esc(color)}">${fav}<span class="arch-t" title="${esc(urls)}">${esc(displayName(root))}<small>${esc(threadSummary(all))}</small></span><span class="arch-when">${esc(since(root.archivedAt ?? Date.now()))}</span><span class="arch-acts"><button class="icon sm" data-unarchive title="Restore" aria-label="Restore">${icon('undo')}</button><button class="icon sm" data-forget title="Forget" aria-label="Forget">${icon('trash')}</button></span></div>`
+  if (archFilter.profile !== 'all' && !profile(archFilter.profile)) archFilter.profile = 'all'
+  const today = new Date()
+  const filterKey = JSON.stringify(archFilter)
+  const key = [archivedRev, filterKey, privateKey, today.toDateString(), S.profiles.map((p) => `${p.id}:${p.name}:${p.color}`).join()].join('|')
+  if (key === archKey) return
+  archKey = key
+  const refiltered = filterKey !== archFilterKey
+  archFilterKey = filterKey
+
+  const cursorAt = archMatches.findIndex((a) => a.root.id === archCursor)
+  const words = archFilter.q.toLowerCase().split(/\s+/).filter(Boolean)
+  const [from, until] = archRange()
+  const base = archivedList.filter(
+    (a) => a.at >= from && a.at < until && (archFilter.profile === 'all' || a.root.profile === archFilter.profile) && words.every((w) => a.text.includes(w)),
+  )
+  archMatches = archFilter.site ? base.filter((a) => a.hosts.includes(archFilter.site)) : base
+  archGroups = archMatches.map((a) => archGroup(a.at, today))
+  archGroupCounts = new Map()
+  for (const g of archGroups) archGroupCounts.set(g, (archGroupCounts.get(g) ?? 0) + 1)
+  const ids = new Set(archMatches.map((a) => a.root.id))
+  for (const id of archSel) if (!ids.has(id)) archSel.delete(id)
+  // A row restored or forgotten from under the cursor hands it to the one that took its place.
+  if (archCursor && !ids.has(archCursor)) archCursor = refiltered || cursorAt < 0 ? null : (archMatches[Math.min(cursorAt, archMatches.length - 1)]?.root.id ?? null)
+
+  // The sites in what the other filters leave, most threads first; private ones stay out.
+  const sites = new Map<string, number>()
+  for (const a of base) for (const h of a.hosts) sites.set(h, (sites.get(h) ?? 0) + 1)
+  const top = [...sites].filter(([h]) => !isPrivate(`https://${h}/`)).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 40)
+  if (archFilter.site && !sites.has(archFilter.site)) top.unshift([archFilter.site, 0])
+  archSite.innerHTML =
+    `<option value="">All sites</option>` +
+    top.map(([h, n]) => `<option value="${esc(h)}"${h === archFilter.site ? ' selected' : ''}>${esc(h)} (${n.toLocaleString()})</option>`).join('')
+
+  const profiles = $('archProfile')
+  profiles.hidden = S.profiles.length < 2
+  profiles.innerHTML = [{ id: 'all', name: 'All', color: '' }, ...S.profiles]
+    .map((x) => {
+      const dot = x.color ? `<span class="dot" style="background:${esc(x.color)}"></span>` : ''
+      return `<button data-value="${esc(x.id)}" aria-pressed="${x.id === archFilter.profile}">${dot}${esc(x.name)}</button>`
     })
     .join('')
-  const next = html || `<p class="help">Nothing archived.</p>`
-  if (archivedListEl.innerHTML !== next) archivedListEl.innerHTML = next
+  $('archWhen').querySelectorAll<HTMLElement>('[data-value]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === archFilter.when)))
+  $('archRange').hidden = archFilter.when !== 'range'
+
+  // A new search starts at the top; a thread restored or forgotten leaves the rest where they were.
+  archShown = refiltered ? ARCH_CHUNK : Math.max(ARCH_CHUNK, archShown)
+  archivedListEl.innerHTML = archMatches.length
+    ? archRows(0, archShown)
+    : `<p class="help">${archivedList.length ? 'No archived thread matches.' : 'Nothing archived.'}</p>`
+  if (refiltered && settingsEl.querySelector('.set-section.cur[data-section="archived"]')) $('setBody').scrollTop = 0
+  syncArchSelection()
+  moreArchived()
 }
+
+/** Adds rows while the end of the list is near the bottom of the screen. */
+function moreArchived() {
+  const body = $('setBody')
+  if (!archivedListEl.offsetParent) return
+  while (archShown < archMatches.length && archivedListEl.getBoundingClientRect().bottom - body.getBoundingClientRect().bottom < 1000) {
+    archivedListEl.insertAdjacentHTML('beforeend', archRows(archShown, archShown + ARCH_CHUNK))
+    archShown += ARCH_CHUNK
+    syncArchSelection()
+  }
+}
+$('setBody').addEventListener('scroll', moreArchived, { passive: true })
+
+/** Marks the selected rows and the cursor's, and updates the count and what acts on the selection. */
+function syncArchSelection() {
+  for (const el of archivedListEl.querySelectorAll<HTMLElement>('.arch-row')) {
+    const on = archSel.has(el.dataset.arch!)
+    el.classList.toggle('sel', on)
+    el.classList.toggle('cur', el.dataset.arch === archCursor)
+    el.firstElementChild!.setAttribute('aria-checked', String(on))
+  }
+  archivedListEl.classList.toggle('picking', archSel.size > 0)
+  const n = archMatches.length
+  const total = archivedList.length
+  const threads = (k: number) => `${k.toLocaleString()} ${k === 1 ? 'thread' : 'threads'}`
+  $('archCount').textContent = archSel.size
+    ? `${archSel.size.toLocaleString()} of ${threads(n)} selected`
+    : n === total
+      ? threads(total)
+      : `${n.toLocaleString()} of ${threads(total)}`
+  $('archSelActs').hidden = !archSel.size
+  archAll.hidden = !n
+  archAll.checked = !!n && archSel.size === n
+  archAll.indeterminate = archSel.size > 0 && archSel.size < n
+}
+
+/** Replaces the selection (root IDs). */
+function selectArchived(ids: string[]) {
+  archSel.clear()
+  for (const id of ids) archSel.add(id)
+  syncArchSelection()
+}
+
+/** Adds the matches from one row to another, both included. */
+function selectArchRange(from: string, to: string) {
+  const a = archMatches.findIndex((m) => m.root.id === from)
+  const b = archMatches.findIndex((m) => m.root.id === to)
+  if (a < 0 || b < 0) return
+  for (const m of archMatches.slice(Math.min(a, b), Math.max(a, b) + 1)) archSel.add(m.root.id)
+}
+
+/** Moves the cursor by `delta` rows; with ⇧ the rows it passes get selected. */
+function moveArchCursor(delta: number, extend: boolean) {
+  if (!archMatches.length) return
+  const at = archMatches.findIndex((m) => m.root.id === archCursor)
+  const next = at < 0 ? (delta > 0 ? 0 : archMatches.length - 1) : Math.max(0, Math.min(archMatches.length - 1, at + delta))
+  archCursor = archMatches[next].root.id
+  if (extend) selectArchRange(archAnchor ?? archCursor, archCursor)
+  else archAnchor = archCursor
+  if (next >= archShown) {
+    archivedListEl.insertAdjacentHTML('beforeend', archRows(archShown, next + ARCH_CHUNK))
+    archShown = next + ARCH_CHUNK
+  }
+  syncArchSelection()
+  const row = archivedListEl.querySelector<HTMLElement>(`[data-arch="${CSS.escape(archCursor)}"]`)
+  // Clear of the filters, which stay at the top as the list scrolls.
+  if (row) row.style.scrollMarginTop = `${$('archBar').offsetHeight + 8}px`
+  row?.scrollIntoView({ block: 'nearest' })
+}
+
+/** The search box, after a pause in typing: there can be thousands of threads to look through. */
+function searchArchived(now = true) {
+  clearTimeout(archSearchTimer)
+  const run = () => {
+    archFilter.q = archSearch.value.trim()
+    renderArchived()
+  }
+  if (now) run()
+  else archSearchTimer = window.setTimeout(run, 150)
+}
+
+/** ↑↓ move, ⇧ selects as it goes, Return opens. The list itself also has Space, ⌘A and Delete. */
+function archivedKey(e: KeyboardEvent, inList: boolean) {
+  const plain = !e.metaKey && !e.ctrlKey && !e.altKey
+  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && plain) moveArchCursor(e.key === 'ArrowDown' ? 1 : -1, e.shiftKey)
+  else if (e.key === 'Enter' && plain && !e.isComposing) {
+    if (archCursor) send('restore', { id: archCursor })
+    else if (archMatches.length) moveArchCursor(1, false)
+  } else if (!inList) return
+  else if (e.key === ' ' && plain && archCursor) {
+    if (!archSel.delete(archCursor)) archSel.add(archCursor)
+    archAnchor = archCursor
+    syncArchSelection()
+  } else if (e.key === 'a' && e.metaKey) selectArchived(archMatches.map((m) => m.root.id))
+  else if ((e.key === 'Backspace' || e.key === 'Delete') && plain) {
+    const ids = archSel.size ? [...archSel] : archCursor ? [archCursor] : []
+    if (ids.length) send('forget-archived', { ids })
+  } else return
+  e.preventDefault()
+}
+
 archivedListEl.addEventListener('click', (e) => {
   const el = e.target as HTMLElement
   const id = el.closest<HTMLElement>('[data-arch]')?.dataset.arch
   if (!id) return
-  if (el.closest('[data-unarchive]')) send('unarchive', { id })
-  else if (el.closest('[data-forget]')) send('forget-archived', { id })
+  if (el.closest('[data-unarchive]')) return send('unarchive', { ids: [id] })
+  if (el.closest('[data-forget]')) return send('forget-archived', { ids: [id] })
+  // The box, ⌘-click, or any click once something is selected, picks a row; ⇧-click picks up to it.
+  if (e.shiftKey && archAnchor) selectArchRange(archAnchor, id)
+  else if (el.closest('[data-pick]') || e.metaKey || archSel.size) {
+    if (!archSel.delete(id)) archSel.add(id)
+    archAnchor = id
+  } else archAnchor = id
+  archCursor = id
+  syncArchSelection()
+})
+archivedListEl.addEventListener('dblclick', (e) => {
+  const el = e.target as HTMLElement
+  const id = el.closest<HTMLElement>('[data-arch]')?.dataset.arch
+  if (id && !el.closest('button, [data-pick]')) send('restore', { id })
+})
+archivedListEl.addEventListener('keydown', (e) => archivedKey(e, true))
+archSearch.addEventListener('keydown', (e) => archivedKey(e, false))
+archSearch.addEventListener('input', () => searchArchived(false))
+archSite.addEventListener('change', () => {
+  archFilter.site = archSite.value
+  renderArchived()
+})
+$('archWhen').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (!b) return
+  archFilter.when = b.dataset.value as ArchWhen
+  renderArchived()
+  if (archFilter.when === 'range' && !archFilter.from && !archFilter.to) archFrom.focus()
+})
+$('archProfile').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (!b) return
+  archFilter.profile = b.dataset.value!
+  renderArchived()
+})
+for (const input of [archFrom, archTo])
+  input.addEventListener('change', () => {
+    archFilter.from = archFrom.value
+    archFilter.to = archTo.value
+    renderArchived()
+  })
+archAll.addEventListener('change', () => selectArchived(archAll.checked ? archMatches.map((m) => m.root.id) : []))
+$('archRestoreSel').addEventListener('click', () => send('unarchive', { ids: [...archSel] }))
+$('archForgetSel').addEventListener('click', () => send('forget-archived', { ids: [...archSel] }))
+// Typing anywhere in the Archived list goes to its search.
+settingsEl.addEventListener('keydown', (e) => {
+  if (section !== 'archived' || settingsSearch.value || e.metaKey || e.ctrlKey || e.altKey || e.key.length !== 1) return
+  const target = e.target as HTMLElement
+  if (target.closest('input, textarea, select') || (e.key === ' ' && target === archivedListEl)) return
+  archSearch.focus()
 })
 
-/** Opens settings at the Archived list. */
+/** ⌘F in settings: the Archived list's search while it's showing, otherwise the settings search. */
+function focusSettingsSearch() {
+  const box = section === 'archived' && !settingsSearch.value ? archSearch : settingsSearch
+  focusUi()
+  box.focus()
+  box.select()
+}
+
+/** Opens settings at the Archived list, ready to search. */
 function showArchived() {
-  setSettings(true, 'threads')
-  $('archivedItem').scrollIntoView({ block: 'start' })
+  setSettings(true, 'archived')
+  archSearch.focus()
+  moreArchived()
 }
 
 $('undoArchive').addEventListener('click', () => send('undo-archive'))
@@ -1903,16 +2385,18 @@ document.addEventListener('mousedown', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || renaming || e.target === omnibox) return
-  const search = e.target === settingsSearch || e.target === shortcutSearch ? (e.target as HTMLInputElement) : null
+  const search = e.target === settingsSearch || e.target === shortcutSearch || e.target === archSearch ? (e.target as HTMLInputElement) : null
   if (search?.value) {
     search.value = ''
-    applySearch()
+    if (search === archSearch) searchArchived()
+    else applySearch()
   } else if (!rulesPop.hidden) closeRules()
   else if (!devicePop.hidden) answerDevice(null)
   else if (!certPop.hidden) setCert(false)
   else if (!restylePane.hidden) setRestyle(false)
   else if (!extPop.hidden) setExtensions(false)
   else if (dlOpen) setDownload(null)
+  else if (!settingsEl.hidden && archSel.size) selectArchived([])
   else if (!settingsEl.hidden) setSettings(false)
 })
 
@@ -1968,8 +2452,11 @@ $('findNext').addEventListener('click', () => find(true))
 $('findClose').addEventListener('click', () => closeFind())
 
 window.jbrow.on('find', (m: { open?: boolean; step?: 1 | -1; close?: boolean; matches?: number; active?: number }) => {
-  if (m.open) openFind()
-  else if (m.step && !findBar.hidden) find(m.step === 1)
+  // ⌘F over settings searches settings instead, or the Archived list there.
+  if (m.open) {
+    if (!settingsEl.hidden) focusSettingsSearch()
+    else if (activeTab()?.url) openFind()
+  } else if (m.step && !findBar.hidden) find(m.step === 1)
   else if (m.close) closeFind(false)
   else if (m.matches !== undefined && !findBar.hidden) showFindCount(m.matches, m.active ?? 0)
 })
@@ -2305,6 +2792,7 @@ $('dangerProceed').addEventListener('click', () => send('danger', { action: 'pro
 // ---------- messages from main ----------
 
 let toastTimer: number | undefined
+window.jbrow.on('archived', setArchived)
 window.jbrow.on('state', (state: UiState) => {
   // Another tab coming to the front (a new tab, ⌘1–9, a link) takes over from settings.
   if (S && S.activeId !== state.activeId) showSettings(false)

@@ -1,9 +1,10 @@
-/* Sizes here must match SIDEBAR_WIDTH, TOOLBAR_HEIGHT, GUTTER, SIDE_GAP and SIDE_HEADER in src/main/panel.ts. */
+/* Sizes here must match SIDEBAR_WIDTH, TOOLBAR_HEIGHT, GUTTER, SIDE_GAP and SIDE_HEADER in src/main/panel.ts, and PANE_GAP in src/shared/split.ts. */
 /* Theme colors are set on [data-theme] rather than :root alone, so a theme swatch in settings can show its own. */
 :root {
   --sidebar: 256px;
   --toolbar: 50px;
   --gutter: 8px;
+  --pane-gap: 8px;
   --font: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
   --mono: ui-monospace, 'SF Mono', Menlo, monospace;
   --dur: 180ms;
@@ -270,6 +271,9 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .sg-x svg.i { width: 13px; height: 13px; }
 .sg-visit:is(:hover, .hi) .sg-x { display: inline-grid; }
 .sg-visit:is(:hover, .hi) .sg-tag { visibility: hidden; }
+.sg-hint { display: flex; align-items: center; gap: 5px; margin-top: 4px; padding: 5px 8px 3px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+.sg-hint kbd { font: 10.5px var(--mono); padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; }
+.sg-hint .dot { width: 7px; height: 7px; border-radius: 50%; }
 
 /* ---------- sidebar ---------- */
 #sidebar { position: absolute; z-index: 1; top: var(--toolbar); left: 0; bottom: 0; width: var(--sidebar); display: flex; flex-direction: column; padding: 0 8px var(--gutter); }
@@ -277,18 +281,30 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .scope { display: flex; justify-content: space-between; align-items: center; gap: 6px; background: var(--accent-soft); color: var(--accent); border-radius: 7px; padding: 6px 9px; margin-bottom: 4px; font-size: 12px; font-weight: 600; }
 .scope button { border: 0; background: none; color: inherit; text-decoration: underline; padding: 0; font-size: 12px; }
 .head { font: 600 10.5px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 12px 8px 5px; }
-.head[data-head='kept'] { display: flex; align-items: center; justify-content: space-between; padding-top: 2px; padding-bottom: 1px; }
-/* New folder shows on hover, like a row's close button. */
-.head-act { visibility: hidden; width: 22px; height: 22px; padding: 0; border: 0; background: none; color: var(--muted); border-radius: 5px; display: inline-grid; place-items: center; }
-.head-act svg.i { width: 13px; height: 13px; }
-.head:hover .head-act, .head-act:focus-visible { visibility: visible; }
-.head-act:hover { color: var(--ink); background: var(--hover); }
+/* Kept has no heading; its items come first. While dragging, the strip under them shows where a drop keeps a thread. */
+.kept { display: flex; flex-direction: column; gap: 1px; }
+.keep-zone { position: relative; flex: none; height: 8px; }
+.keep-zone::after { content: ''; position: absolute; left: 8px; right: 8px; top: 3px; height: 2px; border-radius: 1px; }
+#threads.dragging .keep-zone::after { background: var(--line); }
+.keep-zone.dz { outline: none; }
+.keep-zone.dz::after { background: var(--accent); }
+.kept:empty + .keep-zone { height: 0; }
+#threads.dragging .kept:empty + .keep-zone { height: auto; padding: 6px 10px; color: var(--muted); font-size: 12px; border-radius: 7px; outline: 1px dashed var(--line); outline-offset: -1px; }
+#threads.dragging .kept:empty + .keep-zone::before { content: 'Drop here to keep'; }
+#threads.dragging .kept:empty + .keep-zone::after { display: none; }
+#threads.dragging .kept:empty + .keep-zone.dz { color: var(--accent); outline: 2px dashed var(--accent); }
+.keep-zone + .head { padding-top: 6px; }
 .empty { color: var(--muted); font-size: 12px; padding: 2px 10px 4px; }
 .row { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 5px 6px 5px calc(12px + var(--d, 0) * 14px); border-radius: 7px; min-height: 28px; }
 .row::before { content: ''; position: absolute; left: 3px; top: 7px; bottom: 7px; width: 3px; border-radius: 2px; background: var(--pc, var(--muted)); }
 .row.sub::before { display: none; }
 .row:hover { background: var(--hover); }
 .row.cur { background: var(--selected); }
+/* The other panes of the split on screen. */
+.row.beside { background: color-mix(in srgb, var(--selected) 45%, transparent); }
+.row .end { display: inline-flex; align-items: center; gap: 4px; }
+.row .split-mark { display: inline-grid; color: var(--muted); }
+.row .split-mark svg.i { width: 12px; height: 12px; }
 .row.open > .t { font-weight: 600; }
 .row .fav { width: 16px; height: 16px; border-radius: 3px; object-fit: contain; }
 .row .fav.none { background: var(--line); }
@@ -326,6 +342,10 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .notice > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .notice .link { font-weight: 600; text-decoration: none; }
 .notice .icon.sm svg.i { width: 12px; height: 12px; }
+/* Where a dragged item goes in Kept: a line between rows. */
+.row.ins-before::after, .row.ins-after::after { content: ''; position: absolute; left: 6px; right: 6px; height: 2px; border-radius: 1px; background: var(--accent); pointer-events: none; }
+.row.ins-before::after { top: -1.5px; }
+.row.ins-after::after { bottom: -1.5px; }
 .toast { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); font-size: 12px; line-height: 1.45; }
 
 /* App sections: the heading shows the apps' icons, overlapping for linked apps. */
@@ -368,6 +388,21 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
  * popovers turn nearly solid instead.
  */
 .covering #content { background: none; }
+.covering #content.split, .covering .pane { background: none; }
+
+/*
+ * Split view: main lays the pages side by side over .pane, with --pane-gap between them. The
+ * active tab's own screens fill its pane (--fx, --fw); the ring and the dividers sit in .panes
+ * above, which doesn't clip, so the ring can show around the focused page.
+ */
+#content.split { background: var(--tint); }
+.pane-bgs { display: contents; }
+.pane { position: absolute; top: 0; bottom: 0; border-radius: 9px; background: var(--surface); display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+.split > :is(.blank, .cert-warn) { position: absolute; top: 0; bottom: 0; left: var(--fx); width: var(--fw); overflow-y: auto; border-radius: 9px; background: var(--surface); }
+.panes { position: absolute; z-index: 0; left: var(--sidebar); top: var(--toolbar); right: calc(var(--gutter) + var(--side, 0px)); bottom: var(--gutter); pointer-events: none; }
+.pane-ring { position: absolute; top: 0; bottom: 0; border-radius: 9px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); }
+.pane-split { position: absolute; top: 0; bottom: 0; width: var(--pane-gap); cursor: col-resize; pointer-events: auto; }
+.pane-split:hover, .pane-split.drag { background: linear-gradient(var(--accent), var(--accent)) center / 2px 40% no-repeat; }
 .covering :is(.pop, .suggest) { background: color-mix(in srgb, var(--solid) 96%, transparent); }
 
 /* An extension's side panel (chrome.sidePanel). Its page is a native view over .side-body. */
@@ -518,16 +553,39 @@ body.resizing, body.resizing * { cursor: col-resize !important; }
 .styled-sites .check input { margin: 0; }
 .styled-sites .check span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .styled-sites em { font-style: normal; font-size: 11px; color: var(--muted); margin-left: 6px; }
-/* Archived threads in settings. */
-.archived-list { margin-top: 8px; }
+/* Archived threads in settings. The search and filters stay at the top while the list scrolls under them; -22px is .set-body's padding. */
+.arch-bar { position: sticky; top: -22px; z-index: 1; display: grid; gap: 8px; margin: 0 -8px; padding: 8px 8px 6px; background: var(--solid); border-bottom: 1px solid var(--line); }
+.arch-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.arch-search { flex: 1; min-width: 200px; margin: 0; }
+.arch-site { height: 28px; max-width: 200px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink); padding: 0 6px; font: 12px var(--font); }
+.arch-filters .seg button { flex: 1 0 auto; padding: 4px 8px; }
+.arch-profile { margin-left: auto; }
+.arch-range { gap: 6px; color: var(--muted); font-size: 12px; }
+.arch-range input { height: 28px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink); padding: 0 6px; font: 12px var(--font); }
+.arch-count { display: flex; align-items: center; gap: 8px; min-height: 28px; padding-left: 9px; color: var(--muted); font-size: 12px; }
+.arch-count input { margin: 0; accent-color: var(--accent); }
+.arch-sel-acts { display: flex; gap: 6px; margin-left: auto; }
+.archived-list { margin-top: 4px; user-select: none; }
+.archived-list:focus { outline: none; }
+.arch-head { display: flex; align-items: baseline; gap: 8px; padding: 14px 6px 4px 12px; font: 600 10.5px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.arch-head em { font-style: normal; font-weight: 400; }
 .arch-row { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 5px 6px 5px 12px; border-radius: 7px; }
 .arch-row::before { content: ''; position: absolute; left: 3px; top: 8px; bottom: 8px; width: 3px; border-radius: 2px; background: var(--pc, var(--muted)); }
 .arch-row:hover { background: var(--hover); }
+.arch-row.sel { background: var(--accent-soft); }
+.archived-list:focus .arch-row.cur, .arch-bar:has(#archSearch:focus) + .archived-list .arch-row.cur { box-shadow: inset 0 0 0 1.5px var(--accent); }
 .arch-row .fav { width: 16px; height: 16px; border-radius: 3px; object-fit: contain; }
 .arch-row .fav.none { background: var(--line); }
+/* The favicon turns into a box to tick on hover, and stays one for every row while any is selected. */
+.arch-pick { position: relative; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; }
+.arch-pick svg.i { display: none; width: 12px; height: 12px; stroke-width: 3; }
+.arch-row:hover .arch-pick .fav, .picking .arch-pick .fav { visibility: hidden; }
+.arch-row:hover .arch-pick, .picking .arch-pick { box-shadow: inset 0 0 0 1.5px var(--muted); }
+.arch-row.sel .arch-pick { background: var(--accent); box-shadow: none; color: var(--on-accent); }
+.arch-row.sel .arch-pick svg.i { display: block; position: absolute; }
 .arch-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .arch-t small { display: block; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
-.arch-when { font-size: 11px; color: var(--muted); }
+.arch-when { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 /* Restore and Forget show on hover, like a row's close button. */
 .arch-acts { display: flex; visibility: hidden; }
 .arch-row:hover .arch-acts, .arch-acts:focus-within { visibility: visible; }
