@@ -1,8 +1,10 @@
 import { app, globalShortcut, type WebContents } from 'electron'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { canonical, shortcutFromKey } from '../shared/shortcuts'
+import { ACTIONS, actionKeys, canonical, FIXED, shortcutFromKey } from '../shared/shortcuts'
 import type { ExtensionShortcut } from '../shared/types'
+import { BACKGROUND } from './background'
+import { libraryOf } from './library'
 import type { ProfileRuntime } from './profiles'
 import type { Settings } from './settings'
 
@@ -10,20 +12,11 @@ import type { Settings } from './settings'
  * chrome.commands: extension keyboard shortcuts. electron-chrome-extensions reads a manifest's
  * commands but leaves every shortcut empty and never fires onCommand, so jbrow resolves the keys
  * (yours from settings, else the manifest's suggestion), matches them against key presses in the
- * panel, and dispatches the event itself.
+ * panel and in jbrow's other windows (action popups, pop-outs), and dispatches the event itself.
  *
  * Shortcuts are canonical accelerators (see shared/shortcuts.ts), so they double as
  * globalShortcut accelerators for commands marked `global`.
  */
-
-/** jbrow's own shortcuts, plus the edit menu's. Extensions can't take these. */
-const RESERVED = new Set([
-  ...'TWLRQHACVXZ'.split('').map((k) => `Command+${k}`),
-  ...'123456789'.split('').map((k) => `Command+${k}`),
-  'Command+Shift+N', 'Command+Shift+P', 'Command+Shift+Z', 'Command+Alt+I',
-  'Command+[', 'Command+]', 'Command+,', 'Command+=', 'Command+-', 'Command+0', 'Command+Shift+=',
-  'Control+Tab',
-])
 
 const GLOBAL_SUGGESTION = /^Command\+Shift\+[0-9]$/
 
@@ -88,15 +81,18 @@ export class ExtensionCommands {
 
   /** Keeps the shortcuts current as extensions come and go. Call once the profiles exist. */
   watch() {
-    for (const rt of this.runtimes().values()) {
-      const changed = () => {
-        this.cache.clear()
-        this.registerGlobal()
-      }
-      rt.session.extensions.on('extension-loaded', changed)
-      rt.session.extensions.on('extension-unloaded', changed)
-    }
+    for (const rt of this.runtimes().values()) this.watchProfile(rt)
     this.registerGlobal()
+  }
+
+  /** Same, for a profile added while jbrow runs. */
+  watchProfile(rt: ProfileRuntime) {
+    const changed = () => {
+      this.cache.clear()
+      this.registerGlobal()
+    }
+    rt.session.extensions.on('extension-loaded', changed)
+    rt.session.extensions.on('extension-unloaded', changed)
   }
 
   /** Every command of every extension in a profile, with the shortcut each one has now. */
@@ -113,8 +109,7 @@ export class ExtensionCommands {
     const rt = this.runtimes().get(profileId)
     if (!rt) return []
     const overrides = this.settings().extensionShortcuts[profileId] ?? {}
-    const { hotkeys } = this.settings()
-    const taken = new Set([...RESERVED, hotkeys.all, hotkeys.app])
+    const taken = new Set([...FIXED, ...Object.values(actionKeys(this.settings().shortcuts))])
     const list: ExtensionShortcut[] = []
     const exts = rt.session.extensions.getAllExtensions()
     // Your shortcuts claim their keys first; a suggestion only gets a key nobody holds yet.
@@ -148,22 +143,25 @@ export class ExtensionCommands {
     return list
   }
 
-  /** Runs the command a key press in the active tab's profile stands for. True if there was one. */
-  handleKey(profileId: string | undefined, input: Electron.Input): boolean {
+  /**
+   * Runs the command a key press in a profile stands for. True if there was one. It acts on `tab`,
+   * or else on the active tab.
+   */
+  handleKey(profileId: string | undefined, input: Electron.Input, tab?: WebContents): boolean {
     if (!profileId || input.type !== 'keyDown') return false
     const shortcut = shortcutFromKey({ ...input, command: input.meta })
     if (!shortcut) return false
     const cmd = this.list(profileId).find((c) => c.shortcut === shortcut && !c.global)
     if (!cmd) return false
-    this.run(cmd)
+    this.run(cmd, tab)
     return true
   }
 
-  run(cmd: ExtensionShortcut) {
+  run(cmd: ExtensionShortcut, tab = this.hooks.activeTab(cmd.profile)) {
     if (EXECUTE_ACTION.has(cmd.name)) return this.hooks.openPopup(cmd.profile, cmd.extensionId)
-    const ctx = (this.runtimes().get(cmd.profile)?.extensions as unknown as { ctx?: LibraryContext } | undefined)?.ctx
-    if (!ctx) return
-    const tab = this.hooks.activeTab(cmd.profile)
+    const rt = this.runtimes().get(cmd.profile)
+    if (!rt) return
+    const ctx = libraryOf(rt)
     const details = tab && !tab.isDestroyed() ? ctx.store.tabDetailsCache.get(tab.id) : undefined
     console.log(`[commands] ${cmd.profile}: ${cmd.extensionName} → ${cmd.name}`)
     ctx.router.sendEvent(cmd.extensionId, 'commands.onCommand', cmd.name, details)
@@ -174,9 +172,10 @@ export class ExtensionCommands {
    */
   set(profileId: string, extensionId: string, name: string, shortcut: string): string | null {
     if (shortcut) {
-      if (RESERVED.has(shortcut)) return 'jbrow uses that shortcut itself.'
-      const s = this.settings()
-      if (shortcut === s.hotkeys.all || shortcut === s.hotkeys.app) return 'That shortcut summons jbrow.'
+      if (FIXED.has(shortcut)) return 'jbrow uses that shortcut itself.'
+      const keys = actionKeys(this.settings().shortcuts)
+      const own = ACTIONS.find((a) => keys[a.id] === shortcut)
+      if (own) return `jbrow uses that shortcut for "${own.label}".`
       const holder = this.list(profileId).find((c) => c.shortcut === shortcut && !(c.extensionId === extensionId && c.name === name))
       if (holder) return `${holder.extensionName} already uses that shortcut for "${holder.description}".`
     }
@@ -190,8 +189,8 @@ export class ExtensionCommands {
 
   /** Commands marked global work while jbrow is hidden, as in Chrome. */
   registerGlobal() {
-    for (const accel of this.globals) globalShortcut.unregister(accel)
-    this.globals = []
+    this.unregisterGlobal()
+    if (BACKGROUND) return
     for (const profileId of this.runtimes().keys()) {
       for (const cmd of this.list(profileId)) {
         if (!cmd.global || !cmd.shortcut || this.globals.includes(cmd.shortcut)) continue
@@ -200,10 +199,22 @@ export class ExtensionCommands {
       }
     }
   }
-}
 
-/** The parts of electron-chrome-extensions' private context jbrow reaches into. */
-interface LibraryContext {
-  router: { sendEvent(extensionId: string, eventName: string, ...args: unknown[]): void }
-  store: { tabDetailsCache: Map<number, unknown> }
+  unregisterGlobal() {
+    for (const accel of this.globals) globalShortcut.unregister(accel)
+    this.globals = []
+  }
+
+  /** The command that has a shortcut in any profile, if one does. */
+  holder(shortcut: string): ExtensionShortcut | undefined {
+    for (const profileId of this.runtimes().keys()) {
+      const cmd = this.list(profileId).find((c) => c.shortcut === shortcut)
+      if (cmd) return cmd
+    }
+  }
+
+  /** jbrow's own keys changed, so suggestions they now take or free up resolve again. */
+  refresh() {
+    this.cache.clear()
+  }
 }

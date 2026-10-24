@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src * data: crx:"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src * data: crx: jbrow-icon:"
     />
     <title>jbrow</title>
     <link rel="stylesheet" href="ui.css" />
@@ -14,23 +14,76 @@
       <header id="toolbar">
         <div class="side-tools">
           <div id="filter" class="seg" role="group" aria-label="Show profile"></div>
-          <button id="newTab" class="icon" data-icon="plus" title="New tab (⌘T, right-click for a profile)" aria-label="New tab"></button>
+          <button id="newTab" class="icon" data-icon="plus" title="New tab" aria-label="New tab"></button>
         </div>
         <div class="tools">
-          <div class="nav">
-            <button id="back" class="icon sm" data-icon="back" title="Back (⌘[)" aria-label="Back"></button>
-            <button id="forward" class="icon sm" data-icon="forward" title="Forward (⌘])" aria-label="Forward" hidden></button>
-          </div>
           <div class="omni">
-            <span id="profilePill" class="profile-pill" hidden></span>
+            <div id="profileBand" class="profile-band">
+              <div class="nav">
+                <button id="back" class="icon sm" data-icon="back" title="Back" aria-label="Back"></button>
+                <button id="forward" class="icon sm" data-icon="forward" title="Forward" aria-label="Forward" hidden></button>
+                <button id="reload" class="icon sm" title="Reload" aria-label="Reload"></button>
+              </div>
+              <span id="profileName" class="profile-name" hidden></span>
+            </div>
+            <button id="certButton" class="icon sm cert-button" hidden aria-expanded="false"></button>
+            <div id="certPop" class="pop cert-pop" hidden role="dialog" aria-label="Certificate">
+              <div id="certHead" class="pop-head"></div>
+              <p id="certStatus" class="pop-help"></p>
+              <div id="certChain"></div>
+              <div id="certDistrustRow" hidden>
+                <div class="pop-sep"></div>
+                <button id="certDistrust" class="pop-item"><span data-icon="lock"></span>Stop trusting this certificate</button>
+              </div>
+              <div class="pop-sep"></div>
+              <button id="clearSite" class="pop-item"><span data-icon="trash"></span>Clear cookies and site data</button>
+            </div>
+            <div id="devicePop" class="pop device-pop" hidden role="dialog" aria-labelledby="deviceHead">
+              <div class="device-head">
+                <span id="deviceHead"></span>
+                <button id="deviceCancel" class="icon sm" data-icon="close" title="Cancel (Esc)" aria-label="Cancel"></button>
+              </div>
+              <div id="deviceList" class="device-list" role="listbox" aria-labelledby="deviceHead"></div>
+              <p id="deviceHelp" class="pop-help" hidden></p>
+            </div>
             <div class="omni-field">
               <input id="omnibox" autocomplete="off" spellcheck="false" aria-label="Address bar" placeholder="Search or type a tab name" />
               <div id="privateMask" class="private-mask" hidden><span data-icon="eyeOff"></span>Private</div>
             </div>
-            <button id="reload" class="icon sm" title="Reload (⌘R)" aria-label="Reload"></button>
             <div id="suggest" class="suggest" hidden></div>
           </div>
+          <div id="find" class="find" hidden role="search" aria-label="Find in page">
+            <span class="find-icon" data-icon="search"></span>
+            <input id="findInput" autocomplete="off" spellcheck="false" aria-label="Find in page" placeholder="Find in page" />
+            <span id="findCount" class="find-count" aria-live="polite"></span>
+            <button id="findPrev" class="icon sm" data-icon="up" title="Previous match (⇧Return)" aria-label="Previous match"></button>
+            <button id="findNext" class="icon sm" data-icon="down" title="Next match (Return)" aria-label="Next match"></button>
+            <button id="findClose" class="icon sm" data-icon="close" title="Close (Esc)" aria-label="Close find"></button>
+          </div>
+          <div id="downloads" class="downloads" hidden>
+            <div id="dlList" class="dl-list" role="group" aria-label="Downloads"></div>
+            <div id="dlPop" class="pop dl-pop" hidden role="dialog" aria-label="Download">
+              <div id="dlName" class="dl-name"></div>
+              <div class="dl-bar"><span id="dlBar"></span></div>
+              <div class="dl-stats"><span id="dlProgress"></span><span id="dlEta"></span></div>
+              <dl class="dl-meta">
+                <dt>Saved to</dt><dd><button id="dlPath" class="link" title="Show in Finder"></button></dd>
+                <dt>From</dt><dd id="dlFrom"></dd>
+                <dt>Profile</dt><dd id="dlProfile"></dd>
+              </dl>
+              <div class="dl-acts">
+                <button id="dlPause" class="icon sm" data-icon="pause" title="Pause" aria-label="Pause"></button>
+                <button id="dlRetry" class="icon sm" data-icon="reload" title="Try again" aria-label="Try again"></button>
+                <button id="dlOpen" class="icon sm" data-icon="open" title="Open" aria-label="Open"></button>
+                <button id="dlShow" class="icon sm" data-icon="folder" title="Show in Finder" aria-label="Show in Finder"></button>
+                <button id="dlCopy" class="icon sm" data-icon="copy" title="Copy download link" aria-label="Copy download link"></button>
+                <span class="dl-gap"></span>
+                <button id="dlCancel" class="icon sm" data-icon="close" title="Cancel download" aria-label="Cancel download"></button>
+              </div>
+            </div>
+          </div>
           <div id="pinnedActions" class="pinned-actions"></div>
+          <button id="restyleButton" class="icon" data-icon="wand" title="Restyle this site" aria-label="Restyle this site" aria-expanded="false" aria-controls="restylePane"></button>
           <div class="ext">
             <button id="extButton" class="icon" data-icon="puzzle" title="Extensions" aria-label="Extensions" aria-expanded="false"></button>
             <div id="extPop" class="pop" hidden>
@@ -42,25 +95,54 @@
               <button id="openStore" class="pop-item"><span data-icon="store"></span>Chrome Web Store</button>
             </div>
           </div>
-          <button id="pin" class="icon" data-icon="pin" title="Pin: keep as a regular window with a Dock icon (⇧⌘P)" aria-label="Pin" aria-pressed="false"></button>
-          <button id="settingsButton" class="icon" data-icon="settings" title="Settings (⌘,)" aria-label="Settings" aria-pressed="false"></button>
+          <button id="pin" class="icon" data-icon="pin" title="Pin: keep as a regular window with a Dock icon" aria-label="Pin" aria-pressed="false"></button>
+          <button id="settingsButton" class="icon" data-icon="settings" title="Settings" aria-label="Settings" aria-pressed="false"></button>
         </div>
       </header>
       <aside id="sidebar">
+        <div id="pins" class="pins" role="list" aria-label="Pinned tabs"></div>
+        <div id="pinDivider" class="pin-divider" role="separator" aria-orientation="horizontal" hidden
+          title="Drag down for another row of pinned tabs, up for fewer. Double-click for one row."></div>
         <div id="scope" class="scope" hidden></div>
-        <nav id="threads" aria-label="Threads"></nav>
+        <nav id="threads" aria-label="Tabs"></nav>
+        <section id="restylePane" class="restyle-pane" hidden aria-label="Restyle">
+          <div class="restyle-head">
+            <span id="restyleHead"></span>
+            <button id="restyleClose" class="icon sm" data-icon="close" title="Close (Esc)" aria-label="Close restyle"></button>
+          </div>
+          <textarea id="restylePrompt" rows="4" placeholder="Make it dark, hide the sidebar, bigger text…" aria-label="How this site should look"></textarea>
+          <p id="restyleHelp" class="pop-help"></p>
+          <div id="restyleRunning" class="restyle-running" hidden>
+            <span id="restyleRunText"></span>
+            <button id="restyleCancel" class="link">Cancel</button>
+          </div>
+          <div id="restyleHistory" class="restyle-history" hidden>
+            <div class="head">Changes</div>
+            <ol id="restylePrompts" class="restyle-prompts"></ol>
+            <div class="restyle-acts">
+              <button id="restyleUndo" class="icon sm" data-icon="undo" title="Undo last change" aria-label="Undo last change"></button>
+              <button id="restyleToggle" class="icon sm" data-icon="eye" aria-pressed="false"></button>
+              <button id="restyleReset" class="icon sm" data-icon="trash" title="Remove all changes" aria-label="Remove all changes"></button>
+            </div>
+          </div>
+        </section>
         <div id="rulesPop" class="pop rules-pop" hidden>
           <div id="rulesHead" class="pop-head"></div>
           <p class="pop-help">
-            A thread about to be archived moves into this folder instead when one of its addresses contains a pattern.
+            A tab about to be archived moves into this folder instead when its address contains a pattern.
             One per line; <code>*</code> matches anything, as for private addresses.
           </p>
           <textarea id="folderRules" rows="4" spellcheck="false" placeholder="github.com/acme&#10;*.atlassian.net"></textarea>
         </div>
+        <div id="archiveNotice" class="notice" hidden>
+          <span id="archiveNoticeText"></span>
+          <button id="undoArchive" class="link">Undo</button>
+          <button id="dismissNotice" class="icon sm" data-icon="close" title="Dismiss" aria-label="Dismiss"></button>
+        </div>
         <div id="toast" class="toast" hidden></div>
       </aside>
       <main id="content">
-        <img id="snapshot" alt="" hidden />
+        <div id="paneBgs" class="pane-bgs"></div>
         <section id="blank" class="blank" hidden>
           <h1>Where to?</h1>
           <p>Type in the address bar to search, open a site, or find any open tab.</p>
@@ -68,111 +150,511 @@
             <span>Opens in</span>
             <div id="blankProfile" class="seg" role="group" aria-label="Profile for this tab"></div>
           </div>
-          <dl class="keys">
-            <div><dt>⌘T</dt><dd>New tab</dd></div>
-            <div><dt>⇧⌘N</dt><dd>New tab in the other profile</dd></div>
-            <div><dt>⌘1–9</dt><dd>Jump to a thread</dd></div>
-            <div><dt>⌃Tab</dt><dd>Previous tab</dd></div>
-            <div><dt>⌘W</dt><dd>Close tab</dd></div>
-            <div><dt>⇧⌘P</dt><dd>Pin the window</dd></div>
-          </dl>
+          <dl id="blankKeys" class="keys"></dl>
+        </section>
+        <section id="certWarn" class="cert-warn" hidden aria-live="polite">
+          <span class="cert-warn-icon" data-icon="warn"></span>
+          <h1>This connection isn't private</h1>
+          <p id="certWarnText"></p>
+          <div class="cert-acts">
+            <button id="certBack" class="btn primary"></button>
+            <button id="certProceed" class="btn"></button>
+          </div>
+          <details id="certWarnDetails">
+            <summary>Certificate details</summary>
+            <div id="certWarnChain"></div>
+          </details>
+        </section>
+        <section id="dangerWarn" class="cert-warn" hidden aria-live="polite">
+          <span class="cert-warn-icon" data-icon="warn"></span>
+          <h1 id="dangerTitle"></h1>
+          <p id="dangerText"></p>
+          <div class="cert-acts">
+            <button id="dangerBack" class="btn primary"></button>
+          </div>
+          <details id="dangerDetails">
+            <summary>Details</summary>
+            <p id="dangerMore"></p>
+            <button id="dangerProceed" class="btn"></button>
+          </details>
+        </section>
+        <section id="loginWarn" class="cert-warn login-warn" hidden aria-live="polite">
+          <span class="cert-warn-icon" data-icon="lock"></span>
+          <h1>Sign in</h1>
+          <p id="loginText"></p>
+          <form id="loginForm" class="login-form" autocomplete="on">
+            <label>Username <input id="loginUser" name="username" autocomplete="username" spellcheck="false" autocapitalize="off" /></label>
+            <label>Password <input id="loginPass" name="password" type="password" autocomplete="current-password" /></label>
+            <p id="loginError" class="login-error" hidden>Wrong username or password.</p>
+            <div class="cert-acts">
+              <button id="loginSubmit" class="btn primary" type="submit">Sign in</button>
+              <button id="loginCancel" class="btn" type="button">Cancel</button>
+            </div>
+          </form>
+        </section>
+        <section id="crashWarn" class="cert-warn crash-warn" hidden aria-live="polite">
+          <span class="cert-warn-icon" data-icon="alert"></span>
+          <h1 id="crashTitle"></h1>
+          <p id="crashText"></p>
+          <div class="cert-acts">
+            <button id="crashReload" class="btn primary">Reload</button>
+            <button id="crashWait" class="btn">Wait</button>
+          </div>
         </section>
         <section id="settings" class="settings" hidden tabindex="-1" aria-label="Settings">
-          <header class="set-head">
-            <h1>Settings</h1>
-            <button id="closeSettings" class="icon" data-icon="close" title="Close (Esc)" aria-label="Close settings"></button>
-          </header>
-
-          <h2>Summon animation</h2>
-          <div class="field">
-            <span class="label">Style</span>
-            <div id="animStyle" class="seg" role="group" aria-label="Animation style">
-              <button data-value="materialize">Materialize</button>
-              <button data-value="slide">Slide</button>
-              <button data-value="scale">Scale</button>
-              <button data-value="fade">Fade</button>
-              <button data-value="off">Off</button>
+          <nav class="set-nav" aria-label="Settings sections">
+            <label class="set-search">
+              <span data-icon="search"></span>
+              <input id="settingsSearch" type="search" spellcheck="false" placeholder="Search settings" aria-label="Search settings" />
+            </label>
+            <div id="setNav" class="set-nav-list">
+              <button class="set-nav-item" data-section="general"><span data-icon="settings"></span>General</button>
+              <button class="set-nav-item" data-section="appearance"><span data-icon="palette"></span>Appearance</button>
+              <button class="set-nav-item" data-section="profiles"><span data-icon="user"></span>Profiles</button>
+              <button class="set-nav-item" data-section="threads"><span data-icon="listTree"></span>Tabs</button>
+              <button class="set-nav-item" data-section="archived"><span data-icon="archive"></span>Archived</button>
+              <button class="set-nav-item" data-section="apps"><span data-icon="grid"></span>Apps</button>
+              <button class="set-nav-item" data-section="miniPlayer"><span data-icon="pip"></span>Mini player</button>
+              <button class="set-nav-item" data-section="animation"><span data-icon="sparkles"></span>Animation</button>
+              <button class="set-nav-item" data-section="restyling"><span data-icon="wand"></span>Restyling</button>
+              <button class="set-nav-item" data-section="privacy"><span data-icon="shield"></span>Privacy</button>
+              <button class="set-nav-item" data-section="shortcuts"><span data-icon="keyboard"></span>Shortcuts</button>
             </div>
-          </div>
-          <div class="field">
-            <label class="label" for="animSpeed">Duration</label>
-            <input id="animSpeed" type="range" min="80" max="400" step="10" />
-            <output id="animSpeedOut" for="animSpeed"></output>
-          </div>
-          <div class="field">
-            <span class="label">Feel</span>
-            <div id="animEase" class="seg" role="group" aria-label="Animation feel">
-              <button data-value="spring">Spring</button>
-              <button data-value="snappy">Snappy</button>
-              <button data-value="smooth">Smooth</button>
-            </div>
-          </div>
-          <div class="field">
-            <span class="label"></span>
-            <button id="animPreview" class="chip">Preview</button>
-          </div>
+            <p class="set-file">Saved in <button id="openSettingsFile" class="link">settings.json</button></p>
+          </nav>
+          <div id="setBody" class="set-body">
+            <header class="set-head">
+              <h1 id="setTitle">Settings</h1>
+              <button id="closeSettings" class="icon" data-icon="close" title="Close (Esc)" aria-label="Close settings"></button>
+            </header>
 
-          <h2>Archiving</h2>
-          <div class="field">
-            <span class="label">Summarize</span>
-            <div id="summarizeAfter" class="seg" role="group" aria-label="Summarize threads unseen for">
-              <button data-value="1">1 day</button>
-              <button data-value="3">3 days</button>
-              <button data-value="7">1 week</button>
-              <button data-value="0">Never</button>
-            </div>
+            <section class="set-section" data-section="general">
+              <h2 class="set-section-title">General</h2>
+              <div class="set-item" data-keywords="pin pinned dock window regular ghost hide click away launch startup size resize position place display reset default">
+                <h3>Window</h3>
+                <label class="check">
+                  <input id="pinWindow" type="checkbox" />
+                  <span>Keep jbrow as a regular window. It opens when jbrow starts, has a Dock icon and stays when you
+                    click another app. Turn it off and jbrow only shows on <b id="showHotkey">its hotkey</b>, then hides
+                    when you click away. The pin in the toolbar switches it too.</span>
+                </label>
+                <p class="help">Drag the window's edges to resize it and the toolbar to move it. jbrow keeps both. Unpinned,
+                  it keeps them separately for each display and comes up on the one the pointer is on.</p>
+                <button id="resetWindow" class="chip">Reset size and position</button>
+              </div>
+              <div class="set-item" data-keywords="search engine google duckduckgo bing brave kagi ecosia custom address bar omnibox suggestions autocomplete queries">
+                <h3>Search</h3>
+                <div class="field">
+                  <span class="label">Engine</span>
+                  <div id="searchEngine" class="seg seg-wrap" role="group" aria-label="Search engine"></div>
+                </div>
+                <div id="searchCustomField" class="field" hidden>
+                  <label class="label" for="searchCustom">Address</label>
+                  <input id="searchCustom" class="text" spellcheck="false" placeholder="https://example.com/search?q=%s" />
+                </div>
+                <label class="check">
+                  <input id="searchSuggestions" type="checkbox" />
+                  <span>Suggest searches as you type. What you type in the address bar goes to <b id="searchEngineName">the search
+                    engine</b> as you type it, except anything that looks like an address or matches a private address.</span>
+                </label>
+                <p id="searchHelp" class="help"></p>
+              </div>
+              <div class="set-item" data-keywords="default browser links other apps">
+                <h3>Default browser</h3>
+                <p id="defaultBrowser" class="help"></p>
+                <button id="makeDefault" class="chip" hidden>Make jbrow the default browser</button>
+              </div>
+              <div class="set-item" data-keywords="quiet links background menu bar badge scripts notifications other apps focus">
+                <h3>Quiet links</h3>
+                <label class="check">
+                  <input id="quietLinks" type="checkbox" />
+                  <span>Open links you didn't click in the background. When a script or another app opens a link on its
+                    own, jbrow stays hidden, marks the tab with a dot and counts it next to jb in the menu bar.</span>
+                </label>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="appearance">
+              <h2 class="set-section-title">Appearance</h2>
+              <div class="set-item" data-keywords="appearance mode light dark system follow macos night">
+                <h3>Mode</h3>
+                <div class="field">
+                  <span class="label">Look</span>
+                  <div id="appearance" class="seg" role="group" aria-label="Light or dark">
+                    <button data-value="system">System</button>
+                    <button data-value="light">Light</button>
+                    <button data-value="dark">Dark</button>
+                  </div>
+                </div>
+                <p class="help">System follows macOS as it switches between light and dark. Websites that have a dark look get the same choice.</p>
+              </div>
+              <div class="set-item" data-keywords="theme themes color colour accent palette">
+                <h3>Theme</h3>
+                <div id="themes" class="themes" role="group" aria-label="Theme"></div>
+              </div>
+              <div class="set-item" data-keywords="profile color colour address bar url tint edge solid">
+                <h3>Profile color</h3>
+                <div class="field">
+                  <span class="label">Address bar</span>
+                  <div id="profileStyle" class="seg" role="group" aria-label="Profile color in the address bar">
+                    <button data-value="tint">Tint</button>
+                    <button data-value="edge">Edge</button>
+                    <button data-value="solid">Solid</button>
+                  </div>
+                </div>
+                <p class="help">The left end of the address bar, behind back and reload, takes the color of the tab's profile. Edge adds a solid line where the color ends. Shown when you have more than one profile.</p>
+              </div>
+              <div class="set-item" data-keywords="zoom page size bigger smaller text font scale percent default site remember">
+                <h3>Page zoom</h3>
+                <div class="field">
+                  <span class="label">Default</span>
+                  <div id="zoomDefault" class="seg" role="group" aria-label="Default page zoom">
+                    <button data-value="80">80%</button>
+                    <button data-value="90">90%</button>
+                    <button data-value="100">100%</button>
+                    <button data-value="110">110%</button>
+                    <button data-value="125">125%</button>
+                    <button data-value="150">150%</button>
+                  </div>
+                </div>
+                <label class="check">
+                  <input id="zoomRemember" type="checkbox" />
+                  <span>Remember each site's zoom. ⌘+ and ⌘− zoom every tab of a site together; with this off, sites go back
+                    to the default when jbrow quits.</span>
+                </label>
+                <div id="zoomSites" class="styled-sites"></div>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="profiles">
+              <h2 class="set-section-title">Profiles</h2>
+              <div class="set-item" data-keywords="profile profiles color rename delete default work personal logins cookies">
+                <p class="help">
+                  Each profile has its own logins, cookies and extensions. Click a name to rename it and the dot to change its
+                  color. Right-click a profile to make it the default, for links from other apps and for new tabs when nothing
+                  else decides, or to delete it.
+                </p>
+                <div id="profileList" class="profile-list"></div>
+                <button id="addProfile" class="chip">Add profile</button>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="threads">
+              <h2 class="set-section-title">Tabs</h2>
+              <div class="set-item" data-keywords="earlier today recent bottom top sidebar threads tabs">
+                <h3>Recent</h3>
+                <div class="field">
+                  <span class="label">Keep on top</span>
+                  <div id="earlierAfter" class="seg" role="group" aria-label="Keep tabs on top of the sidebar for">
+                    <button data-value="12">12 hours</button>
+                    <button data-value="24">1 day</button>
+                    <button data-value="72">3 days</button>
+                    <button data-value="168">1 week</button>
+                  </div>
+                </div>
+                <p class="help">
+                  Tabs you've opened within this time sit at the top of the sidebar, newest first. Older ones move to Earlier at the bottom.
+                </p>
+              </div>
+              <div class="set-item" data-keywords="archive archiving summarize sleep unload loaded memory threads tabs kept pinned folders">
+                <h3>Archiving</h3>
+                <div class="field">
+                  <span class="label">Summarize</span>
+                  <div id="summarizeAfter" class="seg" role="group" aria-label="Summarize tabs unseen for">
+                    <button data-value="1">1 day</button>
+                    <button data-value="3">3 days</button>
+                    <button data-value="7">1 week</button>
+                    <button data-value="0">Never</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <span class="label">Archive</span>
+                  <div id="archiveAfter" class="seg" role="group" aria-label="Archive tabs unseen for">
+                    <button data-value="1">1 day</button>
+                    <button data-value="3">3 days</button>
+                    <button data-value="7">1 week</button>
+                    <button data-value="30">1 month</button>
+                    <button data-value="0">Never</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <span class="label">Keep loaded</span>
+                  <div class="checks">
+                    <label class="check"><input id="keepLoadedPinned" type="checkbox" /><span>Pinned tabs</span></label>
+                    <label class="check"><input id="keepLoadedKept" type="checkbox" /><span>Kept tabs</span></label>
+                  </div>
+                </div>
+                <p class="help">
+                  Tabs you haven't opened for a while first unload their pages and shrink to one line: which site, how long
+                  ago. Opening one loads it again. Later they close and leave the sidebar, which offers
+                  <b>Undo</b> until you've seen it and hide jbrow. Find them under <b>Archived</b> or by typing in the address bar. Kept and pinned
+                  tabs never archive. Their pages unload too, keeping their full row, unless <b>Keep loaded</b> is on for them; pinned tabs
+                  kept loaded also load when jbrow starts, so they're ready when you click. A folder in Kept can catch tabs by address
+                  before they archive:
+                  right-click the folder and choose <b>Auto-file rules</b>.
+                </p>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="archived">
+              <h2 class="set-section-title">Archived</h2>
+              <div id="archivedItem" class="set-item" data-keywords="archived archive restore forget undo threads closed search find history">
+                <p class="help">Return or a double-click opens a tab, Restore puts it back in the sidebar, both with its back and forward history.
+                  ⌘-click, Space or the box by a tab selects it. Archived tabs are forgotten after 90 days.</p>
+                <div id="archBar" class="arch-bar">
+                  <div class="arch-filters">
+                    <label class="set-search arch-search">
+                      <span data-icon="search"></span>
+                      <input id="archSearch" type="search" spellcheck="false" placeholder="Search names, titles and addresses" aria-label="Search archived tabs" />
+                    </label>
+                    <select id="archSite" class="arch-site" aria-label="Site"></select>
+                  </div>
+                  <div class="arch-filters">
+                    <div id="archWhen" class="seg" role="group" aria-label="Archived">
+                      <button data-value="any">Any time</button>
+                      <button data-value="today">Today</button>
+                      <button data-value="week">7 days</button>
+                      <button data-value="month">30 days</button>
+                      <button data-value="older">Older</button>
+                      <button data-value="range">Dates</button>
+                    </div>
+                    <div id="archProfile" class="seg arch-profile" role="group" aria-label="Profile"></div>
+                  </div>
+                  <div id="archRange" class="arch-filters arch-range" hidden>
+                    <input id="archFrom" type="date" aria-label="Archived from" /><span>to</span><input id="archTo" type="date" aria-label="Archived until" />
+                  </div>
+                  <div class="arch-count">
+                    <input id="archAll" type="checkbox" title="Select all that match" aria-label="Select all that match" />
+                    <span id="archCount"></span>
+                    <span id="archSelActs" class="arch-sel-acts" hidden>
+                      <button id="archRestoreSel" class="chip">Restore</button>
+                      <button id="archForgetSel" class="chip">Forget</button>
+                    </span>
+                  </div>
+                </div>
+                <div id="archivedList" class="archived-list" tabindex="0" aria-label="Archived tabs"></div>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="apps">
+              <h2 class="set-section-title">Apps</h2>
+              <div class="set-item" data-keywords="apps app hotkey link linked profile bundle">
+                <p class="help">
+                  <b id="appHotkey">⌥⇧Space</b> shows only the tabs of the app you were in, and the sidebar groups each app's tabs
+                  under its name. Pick the profile an app's new tabs open in; <b>Auto</b> uses the tab you were on.
+                  Right-click an app to link it with another, so they share one set of tabs.
+                </p>
+                <div id="appList" class="app-list"></div>
+                <button id="addApp" class="chip">Add app…</button>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="miniPlayer">
+              <h2 class="set-section-title">Mini player</h2>
+              <div class="set-item" data-keywords="mini player pip picture in picture video floating tab switch hide">
+                <h3>When</h3>
+                <p class="help">
+                  A playing video moves into a small floating window, and comes back when you return to it. The window's
+                  back-to-tab button brings you to the video's tab.
+                </p>
+                <label class="check">
+                  <input id="pipOnHide" type="checkbox" />
+                  <span>When jbrow hides or you switch to another app.</span>
+                </label>
+                <label class="check">
+                  <input id="pipOnTabSwitch" type="checkbox" />
+                  <span>When you switch to another tab. It stays while you browse other tabs and goes back into the page when you
+                    open the video's tab again.</span>
+                </label>
+                <label class="check">
+                  <input id="pipMutedToo" type="checkbox" />
+                  <span>Muted videos too. Off, only videos playing with sound move.</span>
+                </label>
+              </div>
+              <div class="set-item" data-keywords="mini player pip sites whitelist blacklist allow block only except list">
+                <h3>Sites</h3>
+                <div class="field">
+                  <span class="label">Use on</span>
+                  <div id="pipSites" class="seg" role="group" aria-label="Sites for the mini player">
+                    <button data-value="all">All sites</button>
+                    <button data-value="only">Only these</button>
+                    <button data-value="except">All except these</button>
+                  </div>
+                </div>
+                <p id="pipSitesHelp" class="help">
+                  One address per line; <code>*</code> matches anything, so <code>*.youtube.com</code> covers every
+                  YouTube page.
+                </p>
+                <textarea id="pipOnlySites" rows="5" spellcheck="false" placeholder="youtube.com&#10;*.twitch.tv" aria-label="Only these sites"></textarea>
+                <textarea id="pipExceptSites" rows="5" spellcheck="false" placeholder="meet.google.com&#10;*.zoom.us" aria-label="All sites except these"></textarea>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="animation">
+              <h2 class="set-section-title">Animation</h2>
+              <div class="set-item" data-keywords="summon animation style duration speed feel ease preview">
+                <p class="help">How jbrow appears when you summon it.</p>
+                <div class="field">
+                  <span class="label">Style</span>
+                  <div id="animStyle" class="seg" role="group" aria-label="Animation style">
+                    <button data-value="materialize">Materialize</button>
+                    <button data-value="slide">Slide</button>
+                    <button data-value="scale">Scale</button>
+                    <button data-value="fade">Fade</button>
+                    <button data-value="off">Off</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="label" for="animSpeed">Duration</label>
+                  <input id="animSpeed" type="range" min="80" max="400" step="10" />
+                  <output id="animSpeedOut" for="animSpeed"></output>
+                </div>
+                <div class="field">
+                  <span class="label">Feel</span>
+                  <div id="animEase" class="seg" role="group" aria-label="Animation feel">
+                    <button data-value="spring">Spring</button>
+                    <button data-value="snappy">Snappy</button>
+                    <button data-value="smooth">Smooth</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <span class="label"></span>
+                  <button id="animPreview" class="chip">Preview</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="restyling">
+              <h2 class="set-section-title">Restyling</h2>
+              <div class="set-item" data-keywords="restyle restyling css wand claude codex agent model sonnet opus haiku sites">
+                <p class="help">
+                  The wand in the toolbar opens restyling in the sidebar: describe how the site you're on should look, and
+                  the agent writes a stylesheet that applies to every page of that site. It runs through Claude Code or Codex
+                  with your subscription, so the <code>claude</code> or <code>codex</code> command must be installed and
+                  signed in. Each request sends a screenshot of the page and an outline of its layout and text.
+                </p>
+                <div class="field">
+                  <span class="label">Agent</span>
+                  <div id="restyleAgent" class="seg" role="group" aria-label="Agent for restyling">
+                    <button data-value="claude">Claude Code</button>
+                    <button data-value="codex">Codex</button>
+                  </div>
+                </div>
+                <div id="restyleClaudeModel" class="field">
+                  <span class="label">Model</span>
+                  <div id="restyleModel" class="seg" role="group" aria-label="Claude model for restyling">
+                    <button data-value="sonnet">Sonnet</button>
+                    <button data-value="opus">Opus</button>
+                    <button data-value="haiku">Haiku</button>
+                  </div>
+                </div>
+                <div id="restyleCodexModelField" class="field" hidden>
+                  <label class="label" for="restyleCodexModel">Model</label>
+                  <input id="restyleCodexModel" class="text" spellcheck="false" placeholder="Codex's default" />
+                </div>
+                <div id="styledSites" class="styled-sites"></div>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="privacy">
+              <h2 class="set-section-title">Privacy</h2>
+              <div class="set-item" data-keywords="private addresses urls mask hide">
+                <h3>Private addresses</h3>
+                <p class="help">
+                  Addresses that contain one of these show as <b>Private</b> in the address bar and the tab list until you click
+                  the address bar. One per line; <code>*</code> matches anything, so <code>*.corp.example</code> covers every
+                  site under corp.example.
+                </p>
+                <textarea id="privateUrls" rows="5" spellcheck="false" placeholder="*.corp.example&#10;grafana.internal"></textarea>
+              </div>
+              <div class="set-item" data-keywords="dangerous sites phishing malware safe browsing deceptive warning blocklist">
+                <h3>Dangerous sites</h3>
+                <label class="check">
+                  <input id="dangerousSites" type="checkbox" />
+                  <span>Warn before opening a site known for phishing or malware. jbrow checks addresses against lists it
+                    downloads every 12 hours, so the sites you visit never leave your Mac.</span>
+                </label>
+                <p id="dangerLists" class="help"></p>
+              </div>
+              <div class="set-item" data-keywords="third party cookies tracking trackers cross site embedded sign in block">
+                <h3>Third-party cookies</h3>
+                <label class="check">
+                  <input id="blockThirdPartyCookies" type="checkbox" />
+                  <span>Block cookies from sites embedded in the page you're on, so ads and trackers can't follow you from
+                    site to site. Some sign-in buttons, comment boxes and embedded videos won't know who you are, and
+                    extensions lose their own sites' cookies. Applies to every profile.</span>
+                </label>
+                <p id="cookiesRestart" class="help" hidden>Takes effect when jbrow restarts.</p>
+                <button id="restartJbrow" class="chip" hidden>Restart jbrow</button>
+              </div>
+              <div class="set-item" data-keywords="clear browsing data history visited pages suggestions cookies cache site data delete sign out storage">
+                <h3>Browsing data</h3>
+                <div class="field">
+                  <span class="label">From</span>
+                  <div id="clearProfile" class="seg" role="group" aria-label="Profile to clear"></div>
+                </div>
+                <label class="check">
+                  <input id="clearHistory" type="checkbox" checked />
+                  <span>History. The pages the address bar suggests; to remove one, highlight it there and press ⇧Delete.</span>
+                </label>
+                <label class="check">
+                  <input id="clearCookies" type="checkbox" checked />
+                  <span>Cookies and site data. Signs you out of most sites; extensions keep their data.</span>
+                </label>
+                <label class="check">
+                  <input id="clearCache" type="checkbox" checked />
+                  <span>Cached images and files.</span>
+                </label>
+                <button id="clearData" class="chip">Clear data…</button>
+                <p class="help">To clear one site, click the lock or warning icon next to the address bar.</p>
+              </div>
+              <div class="set-item" data-keywords="screen sharing screenshots capture recording hide">
+                <h3>Screen sharing</h3>
+                <label class="check">
+                  <input id="hideCapture" type="checkbox" />
+                  <span>Hide jbrow from screen sharing and screenshots. While this is on, nobody watching your screen sees
+                    jbrow at all, private addresses included.</span>
+                </label>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="shortcuts">
+              <h2 class="set-section-title">Shortcuts</h2>
+              <label class="set-search sc-search">
+                <span data-icon="search"></span>
+                <input id="shortcutSearch" type="search" spellcheck="false" placeholder="Search shortcuts" aria-label="Search shortcuts" />
+              </label>
+              <div class="set-item" data-keywords="shortcuts keys hotkeys keyboard">
+                <h3>jbrow</h3>
+                <p class="help">
+                  Click a shortcut and press the new keys; <b>Delete</b> removes it, <b>Esc</b> keeps the old one. The first two
+                  work in any app.
+                </p>
+                <div id="actionKeys" class="shortcuts"></div>
+              </div>
+              <div class="set-item" data-keywords="extension shortcuts commands keys">
+                <h3>Extensions</h3>
+                <p class="help">
+                  Keys that run an extension's commands while jbrow is open, for the profile of the tab you're on. They change
+                  the same way.
+                </p>
+                <div id="shortcuts" class="shortcuts"></div>
+              </div>
+            </section>
+
+            <p id="setNoMatch" class="help set-no-match" hidden></p>
           </div>
-          <div class="field">
-            <span class="label">Archive</span>
-            <div id="archiveAfter" class="seg" role="group" aria-label="Archive threads unseen for">
-              <button data-value="1">1 day</button>
-              <button data-value="3">3 days</button>
-              <button data-value="7">1 week</button>
-              <button data-value="30">1 month</button>
-              <button data-value="0">Never</button>
-            </div>
-          </div>
-          <p class="help">
-            Threads you haven't opened for a while first unload their pages and shrink to one line: how many tabs, which
-            sites, how long ago. Opening one loads it again. Later they close and leave the sidebar. Type in the address
-            bar to find and reopen them. Kept threads never archive, and a folder in Kept can catch threads by address before they do:
-            right-click the folder and choose <b>Auto-file rules</b>.
-          </p>
-
-          <h2>Apps</h2>
-          <p class="help">
-            <b>⌥⇧Space</b> shows only the threads of the app you were in, and the sidebar groups each app's threads
-            under its name. Pick the profile an app's new tabs open in; <b>Auto</b> uses the tab you were on.
-            Right-click an app to link it with another, so they share one set of threads.
-          </p>
-          <div id="appList" class="app-list"></div>
-          <button id="addApp" class="chip">Add app…</button>
-
-          <h2>Private addresses</h2>
-          <p class="help">
-            Addresses that contain one of these show as <b>Private</b> in the address bar and the tab list until you click
-            the address bar. One per line; <code>*</code> matches anything, so <code>*.corp.example</code> covers every
-            site under corp.example.
-          </p>
-          <textarea id="privateUrls" rows="5" spellcheck="false" placeholder="*.corp.example&#10;grafana.internal"></textarea>
-
-          <h2>Screen sharing</h2>
-          <label class="check">
-            <input id="hideCapture" type="checkbox" />
-            <span>Hide jbrow from screen sharing and screenshots. While this is on, nobody watching your screen sees
-              jbrow at all, private addresses included.</span>
-          </label>
-
-          <h2>Extension shortcuts</h2>
-          <p class="help">
-            Keys that run an extension's commands while jbrow is open, for the profile of the tab you're on. Click a
-            shortcut and press the new keys; <b>Delete</b> removes it, <b>Esc</b> keeps the old one.
-          </p>
-          <div id="shortcuts" class="shortcuts"></div>
-
-          <p class="help foot">Hotkeys and profiles are in <button id="openSettingsFile" class="link">settings.json</button>; those need a restart.</p>
         </section>
       </main>
+      <div id="panes" class="panes" hidden></div>
+      <aside id="sidePanel" class="side-panel" hidden>
+        <div id="sideSplit" class="side-split" title="Drag to resize"></div>
+        <header id="sideHead" class="side-head" title="Right-click for more">
+          <img id="sideIcon" alt="" /><span id="sideName"></span>
+          <button id="sideClose" class="icon sm" data-icon="close" title="Close side panel" aria-label="Close side panel"></button>
+        </header>
+        <div class="side-body"></div>
+      </aside>
     </div>
     <script src="ui.js"></script>
   </body>

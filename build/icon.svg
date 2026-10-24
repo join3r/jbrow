@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#2aa6b8"/>
+      <stop offset="1" stop-color="#0f4f5b"/>
+    </linearGradient>
+    <linearGradient id="pane" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.55"/>
+    </linearGradient>
+    <linearGradient id="ghost" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <!-- macOS icon grid: 824 px body centered on a 1024 canvas -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <!-- the panel, half materialized: solid on the left, fading to nothing on the right -->
+  <rect x="236" y="300" width="552" height="424" rx="44" fill="none" stroke="url(#ghost)" stroke-width="22" stroke-dasharray="2 34" stroke-linecap="round"/>
+  <path d="M280 300 h180 v424 h-180 a44 44 0 0 1 -44 -44 v-336 a44 44 0 0 1 44 -44 z" fill="url(#pane)"/>
+  <rect x="276" y="356" width="140" height="22" rx="11" fill="#0f4f5b" opacity="0.55"/>
+  <rect x="276" y="408" width="104" height="22" rx="11" fill="#0f4f5b" opacity="0.35"/>
+  <rect x="276" y="460" width="124" height="22" rx="11" fill="#0f4f5b" opacity="0.35"/>
+  <rect x="496" y="300" width="292" height="60" rx="30" fill="#ffffff" opacity="0.28"/>
+</svg>

@@ -35,6 +35,33 @@ await Promise.all([
     format: 'cjs',
     external: ['electron'],
   }),
+  // Two-finger swipe back and forward, in every tab page's isolated preload world.
+  build({
+    ...common,
+    entryPoints: ['src/preload/swipe.ts'],
+    outfile: 'dist/preload-swipe.js',
+    platform: 'node',
+    format: 'cjs',
+    external: ['electron'],
+  }),
+  // The sign-in sheet over pages outside tabs (src/main/signin.ts).
+  build({
+    ...common,
+    entryPoints: ['src/preload/signin.ts'],
+    outfile: 'dist/preload-signin.js',
+    platform: 'node',
+    format: 'cjs',
+    external: ['electron'],
+  }),
+  // Runs in web pages to inject extensions' user scripts (chrome.userScripts).
+  build({
+    ...common,
+    entryPoints: ['src/preload/user-scripts.ts'],
+    outfile: 'dist/preload-user-scripts.js',
+    platform: 'node',
+    format: 'cjs',
+    external: ['electron'],
+  }),
   build({
     ...common,
     entryPoints: ['src/ui/ui.ts'],
@@ -42,8 +69,16 @@ await Promise.all([
     platform: 'browser',
     format: 'iife',
   }),
+  build({
+    ...common,
+    entryPoints: ['src/ui/signin.ts'],
+    outfile: 'dist/ui/signin.js',
+    platform: 'browser',
+    format: 'iife',
+  }),
 ])
 
 await cp('src/ui/index.html', 'dist/ui/index.html')
+await cp('src/ui/signin.html', 'dist/ui/signin.html')
 await cp('src/ui/ui.css', 'dist/ui/ui.css')
 
