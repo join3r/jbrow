@@ -149,6 +149,37 @@ const patches = [
       y: Math.floor(anchorRect.y + anchorRect.height)
     });`,
   },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: "a page context menu click tells the extension which submenu it came from: Bitwarden picks fill, copy username or copy password by parentMenuItemId, which was always -1, so its items did nothing",
+    find: `        click: () => {
+          this.onClicked(extension.id, props.id, webContents2, params);
+        }`,
+    replace: `        click: () => {
+          const parentId = props.parentId === \`group\${extension.id}\` ? void 0 : props.parentId;
+          this.onClicked(extension.id, props.id, webContents2, params, parentId);
+        }`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'see above; also names the frame that was clicked instead of -1',
+    find: `  onClicked(extensionId, menuItemId, webContents2, params) {`,
+    replace: `  onClicked(extensionId, menuItemId, webContents2, params, parentMenuItemId) {`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'see above',
+    find: `      frameId: -1,
+      // TODO: match frameURL with webFrameMain in Electron 12`,
+    replace: `      frameId: params?.frame && !params.frame.isDestroyed?.() ? getFrameId(params.frame) : 0,`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'see above',
+    find: `      parentMenuItemId: -1,
+      // TODO`,
+    replace: `      parentMenuItemId,`,
+  },
 ]
 
 let applied = 0

@@ -140,6 +140,21 @@ function shims(
     }
   }
 
+  // Bitwarden installed before jbrow fired onInstalled (below) never ran its install step, which
+  // turns on the icon in login fields. Its setting was never written, and unwritten means off.
+  // Write what the install step writes, once per profile. A setting the user chose, off included,
+  // is stored and left alone.
+  if (!skip.includes('bitwarden') && runtime?.id === 'nngceckbapebfimnlniiiahkandclblb' && typeof g.document === 'undefined') {
+    const setting = 'global_autofillSettingsLocal_inlineMenuVisibility'
+    const done = 'jbrow.inlineMenuVisibility'
+    void (async () => {
+      const stored = await chrome.storage.local.get([setting, done])
+      if (stored[done]) return
+      if (!(setting in stored)) await chrome.storage.local.set({ [setting]: { __json__: true, value: '2' } })
+      await chrome.storage.local.set({ [done]: true })
+    })().catch((error) => console.warn('[jbrow] could not turn on Bitwarden field icons:', error))
+  }
+
   const event = () => {
     const listeners = new Set<(...args: any[]) => void>()
     return {

@@ -10,7 +10,7 @@ from the jb menu bar item: right-click, **Install test extensions**.
 |---|---|---|
 | **D.Bridge 2** | Native messaging works: the page handshake reaches D.Launcher's host (`dBridge2Nm`), which starts and answers. | Sign something on slovensko.sk with your eID. |
 | **uBlock Origin Lite** | Service worker runs with 6 rulesets enabled (uBlock filters, EasyList, EasyPrivacy, Peter Lowe's, badware, URLhaus). Trackers are blocked; Google ad and analytics scripts are replaced with uBlock's harmless stand-ins, as in Chrome. Checked again on 2026-10-23: until then none of its rules applied, because of jbrow's own request listener (see below), and Google Analytics loaded for real. | Browse a news site. Check that the popup opens and the per-site toggle works. |
-| **Bitwarden** | Installs; service worker runs; every API it asks for is present. The inline menu (its icon in login fields) shows, and opens its list. The toolbar icon follows lock and unlock. | Unlock, fill a login from the field icon, save a new login, use a passkey, copy a password. If it was installed before onInstalled worked (below), the field icon is off: Bitwarden → Settings → Autofill → **Show autofill suggestions on form fields**. Desktop-app unlock goes through native messaging (`com.8bit.bitwarden`), which the D.Bridge test shows working. |
+| **Bitwarden** | Installs; service worker runs; every API it asks for is present. The inline menu (its icon in login fields) shows, and opens its list. The toolbar icon follows lock and unlock. | Unlock, fill a login from the field icon and from the page's right-click menu, save a new login, use a passkey, copy a password. Desktop-app unlock goes through native messaging (`com.8bit.bitwarden`), which the D.Bridge test shows working. |
 | **SponsorBlock** | Service worker runs. It crashed before the fixes below. | Watch a YouTube video with a known sponsor segment. |
 | **Enhancer for YouTube** | Service worker runs. | Open YouTube and use its controls. Its commands have no keys until you assign them under Settings → Extension shortcuts. |
 | **Video Speed Controller** | Works: S and D change the speed on YouTube. It did nothing until the content script shim below. | Change the speed with its in-page keys (S and D). |
@@ -43,6 +43,9 @@ in these places:
 7. Pages got local storage as `chrome.storage.managed` (see the shim's storage item below).
 8. Events answer `hasListener` and `hasListeners` instead of throwing "Method not implemented".
    SideHN calls `cookies.onChanged.hasListener` first thing, so it never set up its login rule.
+9. A click on an extension's item in the page's right-click menu says which submenu it came from
+   (`parentMenuItemId`) and which frame was clicked. Both were always -1. Bitwarden decides
+   between fill, copy username and copy password by the submenu, so its items did nothing.
 
 **`src/preload/extension-shims.ts`** runs in every extension context before the library:
 
@@ -66,6 +69,10 @@ in these places:
    The service worker does this once per extension version, and only while no ruleset is on, so
    one the extension turned off stays off. It remembers that in the extension's own storage, under
    `jbrow.enabledRulesets`.
+7. Bitwarden installed before onInstalled worked (below) never turned on its field icon, and an
+   unwritten setting means off. The service worker writes "on field focus", the value Bitwarden's
+   install step writes, when the setting was never stored. It does this once per profile and
+   remembers that under `jbrow.inlineMenuVisibility`. A setting you chose, off included, stays.
 
 **`src/main/installed.ts`** stands in for `chrome.runtime.onInstalled`, which Electron never
 fires. Bitwarden turns its inline menu on, and shows its welcome page, only on install, so the
