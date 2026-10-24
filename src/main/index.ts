@@ -14,6 +14,7 @@ import { Logins } from './logins'
 import { SignInSheets } from './signin'
 import { ExtensionCommands } from './commands'
 import { Downloads, type DownloadAction } from './downloads'
+import { handleFavicons } from './favicons'
 import { FindInPage } from './find'
 import { frontmostApp, type FrontApp } from './frontmost'
 import { IdleWatcher } from './idle'
@@ -2080,6 +2081,8 @@ app.whenReady().then(async () => {
   buildAppMenu()
   // <browser-action-list> lives in the UI page, which uses the default session.
   ElectronChromeExtensions.handleCRXProtocol(session.defaultSession)
+  // Before the profiles are set up, since the UI shows icons right away; same session either way.
+  handleFavicons(session.defaultSession, (id) => (settings.profiles.some((p) => p.id === id) ? session.fromPartition(partitionFor(id)) : null))
 
   panel = new Panel(() => settings, {
     setPageVisible: () => {

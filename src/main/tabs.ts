@@ -10,6 +10,7 @@ import type { CrashView, Folder, KeepLoaded, Profile, Split, TabRecord, UiTab } 
 import type { Certificates } from './certs'
 import type { DangerousSites } from './dangerous'
 import type { DeviceChooser } from './devices'
+import { faviconUrl } from './favicons'
 import type { Logins } from './logins'
 import type { SitePermissions } from './permissions'
 import type { ProfileRuntime } from './profiles'
@@ -192,6 +193,8 @@ export class Tabs {
       this.prune()
       const cutoff = Date.now() - ARCHIVE_KEEP_MS
       this.archived = (data.archived ?? []).filter((t) => (t.archivedAt ?? 0) > cutoff)
+      // Icons saved before jbrow fetched them itself were the sites' own URLs.
+      for (const t of [...this.records, ...this.archived]) if (t.favicon) t.favicon = faviconUrl(t.profile, t.favicon)
       this.archivedRev++
       this.activeId = this.records.some((t) => t.id === data.activeId) ? data.activeId : null
       this.mru = [...this.records].sort((a, b) => b.lastSeen - a.lastSeen).map((t) => t.id)
@@ -430,7 +433,7 @@ export class Tabs {
     wc.on('page-favicon-updated', (_e, favicons) => {
       const r = rec()
       if (r && favicons[0]) {
-        r.favicon = favicons[0]
+        r.favicon = faviconUrl(r.profile, favicons[0])
         this.changed()
       }
     })
