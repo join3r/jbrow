@@ -52,6 +52,8 @@ export interface Settings {
   hideFromScreenCapture: boolean
   /** Warn before opening sites on the phishing and malware lists (see dangerous.ts). */
   dangerousSites: boolean
+  /** Block third-party cookies in every profile. Read at launch (see third-party-cookies.ts). */
+  blockThirdPartyCookies: boolean
   /** A regular window with a Dock icon that stays when you click away, shown at launch. Off, jbrow only appears on its hotkey. */
   pinned: boolean
   /** Links from other apps with no click or key press just before open in the background, counted in the menu bar. */
@@ -104,6 +106,7 @@ const DEFAULTS: Settings = {
   panel: { widthFraction: 0.72, heightFraction: 0.78, displays: {}, pinned: null },
   hideFromScreenCapture: true,
   dangerousSites: true,
+  blockThirdPartyCookies: true,
   pinned: true,
   quietLinks: true,
   privateUrls: [],

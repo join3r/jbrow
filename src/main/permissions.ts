@@ -2,6 +2,7 @@ import { app, dialog, type BrowserWindow, type Session, type WebContents } from 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { Profile } from '../shared/types'
+import { thirdPartyCookiesBlocked } from './third-party-cookies'
 
 /** Granted without asking, as Chrome does. display-capture asks with its own menu (see screenshare.ts). */
 const ALWAYS = new Set([
@@ -12,6 +13,14 @@ const ALWAYS = new Set([
   'speaker-selection',
   'display-capture',
 ])
+
+/**
+ * Storage access lets an embedded site (Google sign-in, YouTube, comment widgets) use its cookies.
+ * Never asked: with third-party cookies allowed it already can, and while they're blocked a grant
+ * wouldn't give them back (see third-party-cookies.ts). Refusing tells the site to sign in some
+ * other way, usually a popup, instead of carrying on as if it had them.
+ */
+const STORAGE_ACCESS = new Set(['storage-access', 'top-level-storage-access'])
 
 /** Asked once per site and profile. Anything not listed here or in ALWAYS is denied. */
 const ASK: Record<string, string> = {
@@ -24,8 +33,6 @@ const ASK: Record<string, string> = {
   midiSysex: 'control your MIDI devices',
   'idle-detection': 'know when you are away',
   'window-management': 'see your displays and place windows on them',
-  'storage-access': 'use its cookies while embedded in other sites',
-  'top-level-storage-access': 'use its cookies while embedded in other sites',
   openExternal: 'open another app',
 }
 
@@ -129,6 +136,7 @@ export class SitePermissions {
     sess.setPermissionRequestHandler((wc, permission, callback, details) => {
       const origin = originOf(details.requestingUrl)
       if (ALWAYS.has(permission) || isExtension(origin)) return callback(true)
+      if (STORAGE_ACCESS.has(permission)) return callback(!thirdPartyCookiesBlocked())
       const wanted = expand(permission, details as { mediaTypes?: string[]; externalURL?: string })
       if (!wanted.every((p) => describe(p))) return callback(false)
       // The name is read when asking, so a profile renamed in settings asks under its new name.
@@ -137,6 +145,7 @@ export class SitePermissions {
     sess.setPermissionCheckHandler((_wc, permission, requestingOrigin, details) => {
       const origin = originOf(requestingOrigin)
       if (ALWAYS.has(permission) || isExtension(origin)) return true
+      if (STORAGE_ACCESS.has(permission)) return !thirdPartyCookiesBlocked()
       // A site may ask for a USB, HID or serial device. It sees only the ones you pick in the chooser.
       if (permission === 'usb' || permission === 'hid' || permission === 'serial') return true
       if (!isRememberable(origin)) return false

@@ -98,6 +98,8 @@ export interface UiState {
   danger: DangerView | null
   /** The phishing and malware lists: how many hosts, and when they were last downloaded. */
   dangerLists: { hosts: number; updated: number | null }
+  /** Whether this run blocks third-party cookies, which may differ from the setting until a restart. */
+  thirdPartyCookiesBlocked: boolean
   /** A site asking the active tab for a username and password. */
   login: LoginView | null
   /** The active tab's page crashed or stopped responding. */
@@ -142,6 +144,8 @@ export interface Prefs {
   hideFromScreenCapture: boolean
   /** Warn before opening sites on the phishing and malware lists. */
   dangerousSites: boolean
+  /** Block third-party cookies from the next launch on. */
+  blockThirdPartyCookies: boolean
   /** Links from other apps you didn't click open in the background. */
   quietLinks: boolean
   /** Threads unseen this many days unload their pages and show as one line. 0 never does. */

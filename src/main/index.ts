@@ -29,6 +29,7 @@ import { Restyler } from './restyle'
 import { loadSettings, saveSettings, scopeForApp, settingsPath, type Settings } from './settings'
 import { wireSwipes } from './swipe'
 import { Tabs, type UnloadKind } from './tabs'
+import { blockThirdPartyCookies, thirdPartyCookiesBlocked } from './third-party-cookies'
 import { UserScripts } from './user-scripts'
 import { BrowsingHistory, fetchSearchSuggestions } from './visits'
 import { Zoom, ZOOM_STEPS, zoomSite } from './zoom'
@@ -109,6 +110,8 @@ if (process.env.JBROW_USER_DATA) {
   app.setPath('downloads', `${process.env.JBROW_USER_DATA}/Downloads`)
 }
 setupLogging()
+// A Chromium switch, so it's read before the app is ready and a change waits for a restart.
+if (loadSettings().blockThirdPartyCookies) blockThirdPartyCookies()
 // Utilities that quit apps with no open windows (Vorssaint, for one) will quit jbrow while it's
 // hidden. Exclude jbrow in them; this line in the log shows when it happens.
 app.on('before-quit', () => {
@@ -157,6 +160,7 @@ function state(): UiState {
     insecure: !!active && isInsecure(active.url),
     danger: active ? dangerous.view(active.id) : null,
     dangerLists: dangerous.status(),
+    thirdPartyCookiesBlocked: thirdPartyCookiesBlocked(),
     login: active ? logins.view(active.id) : null,
     crash: active ? tabs.crash(active.id) : null,
     devices: active ? devices.view(active.id) : null,
@@ -172,6 +176,7 @@ function state(): UiState {
       privateUrls: settings.privateUrls,
       hideFromScreenCapture: settings.hideFromScreenCapture,
       dangerousSites: settings.dangerousSites,
+      blockThirdPartyCookies: settings.blockThirdPartyCookies,
       quietLinks: settings.quietLinks,
       summarizeAfterDays: settings.summarizeAfterDays,
       archiveAfterDays: settings.archiveAfterDays,
@@ -775,6 +780,7 @@ function updatePrefs(prefs: Partial<Prefs>) {
   }
   if (prefs.quietLinks !== undefined) settings.quietLinks = prefs.quietLinks
   if (prefs.dangerousSites !== undefined) settings.dangerousSites = prefs.dangerousSites
+  if (prefs.blockThirdPartyCookies !== undefined) settings.blockThirdPartyCookies = prefs.blockThirdPartyCookies
   if (prefs.searchUrl !== undefined && isSearchUrl(prefs.searchUrl.trim())) settings.searchUrl = prefs.searchUrl.trim()
   if (prefs.searchSuggestions !== undefined) settings.searchSuggestions = prefs.searchSuggestions
   if (prefs.restyleAgent === 'claude' || prefs.restyleAgent === 'codex') settings.restyle = { ...settings.restyle, agent: prefs.restyleAgent }
@@ -1850,6 +1856,7 @@ function wireIpc() {
   on('hide', () => void panel.hide())
   on('anim-preview', () => void panel.preview())
   on('window-reset', () => panel.resetPlace())
+  on('restart', () => void requestQuit(true))
   on('focus-ui', () => panel.ui.focus())
   on('focus-page', () => focusActive())
   on<{ on: boolean }>('settings-shown', ({ on: shown }) => (settingsShown = shown))

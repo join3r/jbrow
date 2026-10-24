@@ -1560,6 +1560,7 @@ const quietLinks = $<HTMLInputElement>('quietLinks')
 const keepLoadedPinned = $<HTMLInputElement>('keepLoadedPinned')
 const keepLoadedKept = $<HTMLInputElement>('keepLoadedKept')
 const dangerousSites = $<HTMLInputElement>('dangerousSites')
+const blockCookies = $<HTMLInputElement>('blockThirdPartyCookies')
 /** The profile Clear data… clears, or 'all'. */
 let clearFrom = 'all'
 const settingsSearch = $<HTMLInputElement>('settingsSearch')
@@ -1730,6 +1731,10 @@ function renderSettings(all = false) {
   if (all || document.activeElement !== privateUrls) privateUrls.value = S.prefs.privateUrls.join('\n')
   hideCapture.checked = hideFromScreenCapture
   dangerousSites.checked = S.prefs.dangerousSites
+  blockCookies.checked = S.prefs.blockThirdPartyCookies
+  // The switch is read at launch, so a change shows until jbrow restarts.
+  const pending = S.prefs.blockThirdPartyCookies !== S.thirdPartyCookiesBlocked
+  $('cookiesRestart').hidden = $('restartJbrow').hidden = !pending
   const lists = S.dangerLists
   $('dangerLists').textContent = lists.updated
     ? `${lists.hosts.toLocaleString()} sites on the lists, updated ${since(lists.updated)}. From malware-filter, built from OpenPhish, PhishTank and URLhaus.`
@@ -2234,6 +2239,8 @@ quietLinks.addEventListener('change', () => sendPrefs({ quietLinks: quietLinks.c
 keepLoadedPinned.addEventListener('change', () => sendPrefs({ keepLoaded: { ...S!.prefs.keepLoaded, pinned: keepLoadedPinned.checked } }))
 keepLoadedKept.addEventListener('change', () => sendPrefs({ keepLoaded: { ...S!.prefs.keepLoaded, kept: keepLoadedKept.checked } }))
 dangerousSites.addEventListener('change', () => sendPrefs({ dangerousSites: dangerousSites.checked }))
+blockCookies.addEventListener('change', () => sendPrefs({ blockThirdPartyCookies: blockCookies.checked }))
+$('restartJbrow').addEventListener('click', () => send('restart'))
 $('clearProfile').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (!b) return
