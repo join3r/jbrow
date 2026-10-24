@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { urlMatcher } from '../shared/patterns'
-import { MAX_PANES, paneSpans, splitOf } from '../shared/split'
+import { MAX_PANES, PANE_HEAD, paneSpans, splitOf } from '../shared/split'
 import { byOrder, childrenOf, isAsleep, isInFolder, isRoot, parentFolder, rootOf, subtree, threadsOf } from '../shared/threads'
 import type { CrashView, Folder, KeepLoaded, Profile, Split, TabRecord, UiTab } from '../shared/types'
 import type { Certificates } from './certs'
@@ -792,7 +792,11 @@ export class Tabs {
       const live = this.live.get(id)
       if (!live) return
       const on = !this.fullscreenId || id === this.fullscreenId
-      if (on) live.view.setBounds(spans ? { ...area, x: area.x + spans[i].x, width: spans[i].width } : area)
+      if (on) {
+        live.view.setBounds(
+          spans ? { x: area.x + spans[i].x, y: area.y + PANE_HEAD, width: spans[i].width, height: Math.max(0, area.height - PANE_HEAD) } : area,
+        )
+      }
       live.view.setVisible(on && this.deps.contentVisible() && !this.covered(id))
     })
   }
@@ -1118,6 +1122,16 @@ export class Tabs {
     this.prune()
     this.layout()
     this.changed()
+  }
+
+  /** A pane's ×: takes its tab out of the split, and the pane beside it takes focus if it had it. */
+  closePane(id: string) {
+    const split = this.splitOf(id)
+    if (!split) return
+    const i = split.tabs.indexOf(id)
+    const next = id === this.activeId ? (split.tabs[i + 1] ?? split.tabs[i - 1]) : undefined
+    this.leaveSplit(id)
+    if (next) this.activate(next)
   }
 
   /** Dragging a divider. Saved once you let go. */

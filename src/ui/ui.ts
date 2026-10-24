@@ -380,6 +380,9 @@ function renderPanes() {
   panesEl.innerHTML =
     `<div class="pane-ring" style="left:${f.x}px;width:${f.width}px"></div>` +
     spans
+      .map((s, i) => `<button class="pane-x" data-close-pane="${esc(split.tabs[i])}" style="left:${s.x + s.width}px" title="Take out of split view" aria-label="Take out of split view">${icon('close')}</button>`)
+      .join('') +
+    spans
       .slice(1)
       .map((s, i) => `<div class="pane-split${paneDrag?.i === i ? ' drag' : ''}" data-divider="${i}" style="left:${s.x - PANE_GAP}px" title="Drag to resize"></div>`)
       .join('')
@@ -389,6 +392,10 @@ new ResizeObserver(() => renderPanes()).observe(contentEl)
 paneBgs.addEventListener('mousedown', (e) => {
   const id = (e.target as HTMLElement).closest<HTMLElement>('[data-pane]')?.dataset.pane
   if (id && id !== S?.activeId) send('activate', { id })
+})
+panesEl.addEventListener('click', (e) => {
+  const id = (e.target as HTMLElement).closest<HTMLElement>('[data-close-pane]')?.dataset.closePane
+  if (id) send('close-pane', { id })
 })
 // Drag a gap between panes to resize them, as with the side panel.
 panesEl.addEventListener('mousedown', (e) => {

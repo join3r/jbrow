@@ -1,10 +1,11 @@
-/* Sizes here must match SIDEBAR_WIDTH, TOOLBAR_HEIGHT, GUTTER, SIDE_GAP and SIDE_HEADER in src/main/panel.ts, and PANE_GAP in src/shared/split.ts. */
+/* Sizes here must match SIDEBAR_WIDTH, TOOLBAR_HEIGHT, GUTTER, SIDE_GAP and SIDE_HEADER in src/main/panel.ts, and PANE_GAP and PANE_HEAD in src/shared/split.ts. */
 /* Theme colors are set on [data-theme] rather than :root alone, so a theme swatch in settings can show its own. */
 :root {
   --sidebar: 256px;
   --toolbar: 50px;
   --gutter: 8px;
   --pane-gap: 8px;
+  --pane-head: 24px;
   --font: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
   --mono: ui-monospace, 'SF Mono', Menlo, monospace;
   --dur: 180ms;
@@ -417,16 +418,20 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 
 /*
  * Split view: main lays the pages side by side over .pane, with --pane-gap between them. The
- * active tab's own screens fill its pane (--fx, --fw); the ring and the dividers sit in .panes
+ * active tab's own screens fill its pane (--fx, --fw); the ring, the dividers and the ×s sit in .panes
  * above, which doesn't clip, so the ring can show around the focused page.
  */
 #content.split { background: var(--tint); }
 .pane-bgs { display: contents; }
 .pane { position: absolute; top: 0; bottom: 0; border-radius: 9px; background: var(--surface); display: grid; place-items: center; color: var(--muted); font-size: 12px; }
-.split > :is(.blank, .cert-warn) { position: absolute; top: 0; bottom: 0; left: var(--fx); width: var(--fw); overflow-y: auto; border-radius: 9px; background: var(--surface); }
+.split > :is(.blank, .cert-warn) { position: absolute; top: var(--pane-head); bottom: 0; left: var(--fx); width: var(--fw); overflow-y: auto; border-radius: 9px; background: var(--surface); }
 .panes { position: absolute; z-index: 0; left: var(--sidebar); top: var(--toolbar); right: calc(var(--gutter) + var(--side, 0px)); bottom: var(--gutter); pointer-events: none; }
 .pane-ring { position: absolute; top: 0; bottom: 0; border-radius: 9px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); }
 .pane-split { position: absolute; top: 0; bottom: 0; width: var(--pane-gap); cursor: col-resize; pointer-events: auto; }
+/* Each pane's page starts below --pane-head, and its × sits in that strip's right corner. */
+.pane-x { position: absolute; top: 3px; width: 18px; height: 18px; margin-left: -21px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--muted); display: grid; place-items: center; pointer-events: auto; }
+.pane-x:hover { background: var(--hover); color: var(--ink); }
+.pane-x svg.i { width: 12px; height: 12px; }
 .pane-split:hover, .pane-split.drag { background: linear-gradient(var(--accent), var(--accent)) center / 2px 40% no-repeat; }
 .covering :is(.pop, .suggest) { background: color-mix(in srgb, var(--solid) 96%, transparent); }
 
