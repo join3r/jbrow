@@ -345,6 +345,12 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
       const stepper = (k: 'summarizeAfterDays' | 'archiveAfterDays', title: string, sub: string) => `
         <div class="wl-row"><span class="txt"><span class="label">${title}</span><span class="sub">${sub}</span></span>
           <span class="wl-stepper"><button id="wl-${k}-less" data-act="days" data-k="${k}" data-v="-1" aria-label="Fewer days">−</button><output>${p[k] ? days(p[k]) : 'Never'}</output><button id="wl-${k}-more" data-act="days" data-k="${k}" data-v="1" aria-label="More days">+</button></span></div>`
+      // Newest first, as with new tabs at the top.
+      const today = [
+        `<div class="t on" style="--c:${esc(profileColor(0))}"><span>MDN · Popover API</span></div>`,
+        `<div class="t" style="--c:${esc(profileColor(1))}"><span>Hacker News</span></div>`,
+        `<div class="t sleep" style="--c:${esc(profileColor(0))}"><span>RFC 9110 <small>· ${p.summarizeAfterDays ? `${days(p.summarizeAfterDays)} ago` : 'open'}</small></span></div>`,
+      ]
       return `
       <div class="wl-head">
         <span class="wl-eyebrow">Tabs and links</span>
@@ -358,12 +364,12 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
           <div class="t" style="--c:${esc(profileColor(0))}"><span>Sprint board</span></div>
           <div class="t" style="--c:${esc(profileColor(1))}"><span>Flat in Lisbon</span></div>
           <div class="sec">Today</div>
-          <div class="t on" style="--c:${esc(profileColor(0))}"><span>MDN · Popover API</span></div>
-          <div class="t" style="--c:${esc(profileColor(1))}"><span>Hacker News</span></div>
-          <div class="t sleep" style="--c:${esc(profileColor(0))}"><span>RFC 9110 <small>· ${p.summarizeAfterDays ? `${days(p.summarizeAfterDays)} ago` : 'open'}</small></span></div>
+          ${p.newTabsAt === 'bottom' ? [...today].reverse().join('') : today.join('')}
           ${p.archiveAfterDays ? '<div class="arch"><span>Archived 3 tabs</span><b>Undo</b></div>' : ''}
         </div>
         <div class="wl-group flush">
+          <div class="wl-row"><span class="txt"><span class="label">New tabs open at</span><span class="sub">Top is better: the tab you just opened sits right under Kept, where you look first, and a long Today never pushes it out of sight. Older tabs sink to the bottom on their way to the archive.</span></span>
+            ${seg('new-tabs-at', [['top', 'Top'], ['bottom', 'Bottom']], p.newTabsAt)}</div>
           ${stepper('summarizeAfterDays', 'Sleep after', 'The page unloads and the row says which site it was. Kept tabs never sleep.')}
           ${stepper('archiveAfterDays', 'Archive after', 'The tab leaves the sidebar. Undo puts it back where it was.')}
           ${toggle('quietLinks', p.quietLinks, 'Quiet links', 'Links an app opens on its own, without your click, wait in the background with a dot. The menu bar counts them: jb •2.')}
@@ -546,6 +552,8 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
         return prefs({ theme: v as Prefs['theme'] })
       case 'profile-style':
         return prefs({ profileStyle: v as Prefs['profileStyle'] })
+      case 'new-tabs-at':
+        return prefs({ newTabsAt: v as Prefs['newTabsAt'] })
       case 'default':
         S = { ...S, prefs: { ...S.prefs, defaultProfile: v } }
         lastKey = stateKey(S)

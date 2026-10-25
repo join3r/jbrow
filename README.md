@@ -175,7 +175,8 @@ goes to the search engine, nothing that looks like an address (a dot before a do
 a scheme) or matches a private address pattern is sent. Turn them off under **General**.
 
 The sidebar is a flat list of tabs, as in Arc: pinned icons at the top, then Kept, then Today. New
-tabs go to the top of Today, newest first. A tab opened from a page (a link opened in a new tab, ⌘-click,
+tabs go to the top of Today, newest first (or to the bottom, oldest first, with **Tabs → New tabs → Open
+at** in settings or in the welcome). A tab opened from a page (a link opened in a new tab, ⌘-click,
 a script's `window.open`) is a tab of its own at the top of Today too, wherever it was opened from: a
 kept or pinned tab stays as it was and never collects the tabs opened from it.
 

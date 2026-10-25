@@ -75,6 +75,12 @@ test('going through the welcome applies its choices, and ethereal unpins the win
   assert.equal(await ui.eval('document.documentElement.dataset.theme'), 'rose')
   await waitFor(() => jb.readJson('settings.json').theme === 'rose', 'settings.json to have the theme')
 
+  for (let guard = 0; !/Tabs and links/.test(await stepLabel(ui)) && guard < 5; guard++) await click(ui, 'wl-next')
+  assert.match(await stepLabel(ui), /Tabs and links/)
+  await click(ui, 'wl-new-tabs-at-bottom')
+  await jb.waitForState((s) => s.prefs.newTabsAt === 'bottom', 'new tabs at the bottom')
+  await waitFor(() => jb.readJson('settings.json').newTabsAt === 'bottom', 'settings.json to have newTabsAt')
+
   for (let guard = 0; !/Ready/.test(await stepLabel(ui)) && guard < 8; guard++) await click(ui, 'wl-next')
   assert.match(await stepLabel(ui), /Ready/)
   assert.match(await ui.eval('document.getElementById("wl-next").textContent'), /Start browsing/)
