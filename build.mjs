@@ -14,7 +14,9 @@ await Promise.all([
     outfile: 'dist/main.js',
     platform: 'node',
     format: 'cjs',
-    external: ['electron', 'electron-chrome-extensions', 'electron-chrome-web-store'],
+    external: ['electron', 'electron-chrome-extensions', 'electron-chrome-web-store', 'electron-updater'],
+    // Only releases update themselves (src/main/updates.ts); scripts/release.sh sets this.
+    define: { JBROW_RELEASE: JSON.stringify(process.env.JBROW_RELEASE === '1') },
   }),
   // Preload for jbrow's own UI. Sandboxed preloads can't require npm modules,
   // so everything (including the browser-action element) is bundled in.

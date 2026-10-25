@@ -187,6 +187,27 @@ export interface Prefs {
   searchUrl: string
   /** Ask the search engine for suggestions while you type in the address bar. */
   searchSuggestions: boolean
+  /** Check for, download and install new releases on its own. */
+  autoUpdate: boolean
+}
+
+/** Where updating stands, for settings. */
+export interface UpdateView {
+  /** The version running now. */
+  version: string
+  /**
+   * 'source': running from a checkout. 'local': a build made on this Mac, which doesn't update.
+   * 'idle': hasn't checked yet, or a quiet check failed. 'latest': no newer release.
+   */
+  state: 'source' | 'local' | 'idle' | 'checking' | 'downloading' | 'ready' | 'latest' | 'error'
+  /** Of the download, 0–100. */
+  percent: number
+  /** The release being downloaded or ready. */
+  newVersion: string
+  /** Why the last check you asked for failed. */
+  error: string
+  /** When a check last got an answer, 0 for never. */
+  checkedAt: number
 }
 
 /** The first sidebar section ⌘1–9 count from. */

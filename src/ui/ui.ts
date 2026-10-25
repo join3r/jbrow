@@ -5,7 +5,7 @@ import { awayFromHome, displayName, folderThreads, isAsleep, isFolder, isPinned,
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { dragDivider, PANE_GAP, paneSpans, splitOf } from '../shared/split'
 import { initWelcome } from './welcome'
-import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type VisitView } from '../shared/types'
+import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type UpdateView, type VisitView } from '../shared/types'
 import { afterRender, beforeRender, celebrate, downloadsChanged, flourish, setWhimsy } from './whimsy'
 
 declare global {
@@ -1623,6 +1623,7 @@ const pipOnlySites = $<HTMLTextAreaElement>('pipOnlySites')
 const pipExceptSites = $<HTMLTextAreaElement>('pipExceptSites')
 const quietLinks = $<HTMLInputElement>('quietLinks')
 const whimsy = $<HTMLInputElement>('whimsy')
+const autoUpdate = $<HTMLInputElement>('autoUpdate')
 const keepLoadedPinned = $<HTMLInputElement>('keepLoadedPinned')
 const keepLoadedKept = $<HTMLInputElement>('keepLoadedKept')
 const dangerousSites = $<HTMLInputElement>('dangerousSites')
@@ -1671,6 +1672,7 @@ function showSettings(show: boolean) {
     send('shortcuts')
     send('apps')
     send('default-browser')
+    send('updates')
   } else {
     stopRecording()
     savePrivateUrls()
@@ -1827,6 +1829,7 @@ function renderSettings(all = false) {
   pinWindow.checked = S.pinned
   quietLinks.checked = S.prefs.quietLinks
   whimsy.checked = S.prefs.whimsy
+  autoUpdate.checked = S.prefs.autoUpdate
   keepLoadedPinned.checked = S.prefs.keepLoaded.pinned
   keepLoadedKept.checked = S.prefs.keepLoaded.kept
   renderSearchEngine(all)
@@ -2315,6 +2318,7 @@ whimsy.addEventListener('change', () => {
   celebrate(whimsy)
   sendPrefs({ whimsy: whimsy.checked })
 })
+autoUpdate.addEventListener('change', () => sendPrefs({ autoUpdate: autoUpdate.checked }))
 keepLoadedPinned.addEventListener('change', () => sendPrefs({ keepLoaded: { ...S!.prefs.keepLoaded, pinned: keepLoadedPinned.checked } }))
 keepLoadedKept.addEventListener('change', () => sendPrefs({ keepLoaded: { ...S!.prefs.keepLoaded, kept: keepLoadedKept.checked } }))
 dangerousSites.addEventListener('change', () => sendPrefs({ dangerousSites: dangerousSites.checked }))
@@ -2477,6 +2481,31 @@ window.jbrow.on('default-browser', (status: 'yes' | 'no' | 'dev') => {
   $('makeDefault').hidden = status !== 'no'
 })
 $('makeDefault').addEventListener('click', () => send('make-default-browser'))
+
+// ---------- updates ----------
+
+let updateReady = false
+window.jbrow.on('updates', (u: UpdateView) => {
+  const checked = u.checkedAt ? ` Checked ${since(u.checkedAt)}.` : ''
+  const status: Record<UpdateView['state'], string> = {
+    source: `This is jbrow ${u.version} running from source, which doesn't update itself. Pull and run it again.`,
+    local: `This is jbrow ${u.version}, built on this Mac, which doesn't update itself: it would replace your build with the release. Releases from GitHub do.`,
+    idle: `This is jbrow ${u.version}.`,
+    checking: `This is jbrow ${u.version}. Checking for a newer one…`,
+    downloading: `Downloading jbrow ${u.newVersion}… ${u.percent}%`,
+    ready: `jbrow ${u.newVersion} is ready. It installs when you quit, or restart now.`,
+    latest: `jbrow ${u.version} is the latest.${checked}`,
+    error: `This is jbrow ${u.version}. The check failed: ${u.error}`,
+  }
+  $('updateStatus').textContent = status[u.state]
+  const button = $<HTMLButtonElement>('updateButton')
+  updateReady = u.state === 'ready'
+  button.hidden = u.state === 'source' || u.state === 'local' || u.state === 'downloading'
+  button.disabled = u.state === 'checking'
+  button.textContent = updateReady ? 'Restart to update' : 'Check now'
+  autoUpdate.disabled = u.state === 'source' || u.state === 'local'
+})
+$('updateButton').addEventListener('click', () => send(updateReady ? 'install-update' : 'check-updates'))
 
 // ---------- apps ----------
 

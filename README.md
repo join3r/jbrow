@@ -18,7 +18,7 @@ npm start
 ## Install it
 
 ```sh
-npm run dist        # builds release/jbrow-0.1.0-arm64.dmg and release/mac-arm64/jbrow.app
+npm run dist        # builds release/jbrow-0.2.0-arm64.dmg and release/mac-arm64/jbrow.app
 ```
 
 Or let `scripts/install.sh` (`npm run install-app`) do it all. It builds the app, quits the jbrow
@@ -30,8 +30,35 @@ from source and open the installed one. It uses the same tabs, profiles and logi
 signed with the first Developer ID identity in your keychain. It's notarized only when
 electron-builder finds Apple credentials in the environment (`APPLE_KEYCHAIN_PROFILE`, or
 `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`). A copy you build yourself doesn't
-need notarizing; one you send to someone else does. There are no automatic updates: run
-`npm run dist` again and replace the app.
+need notarizing; one you send to someone else does.
+
+### Updates
+
+jbrow from [GitHub Releases](https://github.com/join3r/jbrow/releases) updates itself. It checks
+30 seconds after launch and every 4 hours, and downloads a newer release in the background. A
+downloaded update installs when you quit jbrow. Without a quit, it installs on its own once nobody
+would notice: jbrow has been hidden for 10 minutes and the Mac untouched for 2, or jbrow is showing
+and the Mac has been untouched for 30, with nothing downloading, playing sound or in
+picture-in-picture and no question on screen. jbrow then restarts and comes back as it was, hidden
+or showing, with its tabs. **Updates** under **General** in settings shows the version, says where
+an update stands and has **Check now** or **Restart to update**; turn **Update jbrow on its own** off
+there to check only when you ask. The menu bar item has **Restart to update to 0.2.1** once one is
+ready, and the app menu has **Check for Updates…**.
+
+Builds made on your Mac (`npm run dist`, `npm run install-app`) and `npm start` never update: the
+release would replace your build. Settings says so.
+
+To publish a release, bump `version` in package.json, commit and push, then:
+
+```sh
+npm run release
+```
+
+`scripts/release.sh` checks the tree is clean and pushed and that the version has no release yet,
+builds with `JBROW_RELEASE=1` (what makes a build update itself), tags `v<version>`, then signs,
+notarizes and publishes the DMG, the zip and `latest-mac.yml` to GitHub Releases. It needs the Apple
+credentials above and the `gh` CLI signed in (or `GH_TOKEN`). Every release has to be signed with the
+same Developer ID, or installed copies refuse the update.
 
 The installed app is locked down with Electron fuses (`electronFuses` in package.json). It can't be
 run as Node or with `--inspect`, and local pages get only Chrome's rights. An HTML file you open in

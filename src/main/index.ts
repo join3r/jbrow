@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, MenuItem, nativeImage, nativeTheme, Notification, session, shell, Tray } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, MenuItem, nativeImage, nativeTheme, Notification, powerMonitor, session, shell, Tray } from 'electron'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { urlMatcher } from '../shared/patterns'
@@ -34,6 +34,7 @@ import { blockThirdPartyCookies, thirdPartyCookiesBlocked } from './third-party-
 import { UserScripts } from './user-scripts'
 import { topSiteCompletion } from './top-sites'
 import { BrowsingHistory, fetchSearchSuggestions } from './visits'
+import { takeUpdateRelaunch, Updates } from './updates'
 import { Zoom, ZOOM_STEPS, zoomSite } from './zoom'
 import { rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -64,6 +65,7 @@ let profileDeps: ProfileDeps
 let sidePanels: SidePanels
 let idle: IdleWatcher
 let userScripts: UserScripts
+let updates: Updates
 /** Pages you've visited, per profile, for the address bar's suggestions. */
 const visits = new BrowsingHistory()
 /** The settings screen is recording a shortcut: key presses go to it, not to jbrow or extensions. */
@@ -197,6 +199,7 @@ function state(): UiState {
       zoom: { defaultPercent: settings.zoom.defaultPercent, remember: settings.zoom.remember },
       searchUrl: settings.searchUrl,
       searchSuggestions: settings.searchSuggestions,
+      autoUpdate: settings.autoUpdate,
     },
     now: Date.now(),
   }
@@ -819,6 +822,7 @@ function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.blockThirdPartyCookies !== undefined) settings.blockThirdPartyCookies = prefs.blockThirdPartyCookies
   if (prefs.searchUrl !== undefined && isSearchUrl(prefs.searchUrl.trim())) settings.searchUrl = prefs.searchUrl.trim()
   if (prefs.searchSuggestions !== undefined) settings.searchSuggestions = prefs.searchSuggestions
+  if (prefs.autoUpdate !== undefined) settings.autoUpdate = prefs.autoUpdate
   if (prefs.restyleAgent === 'claude' || prefs.restyleAgent === 'codex') settings.restyle = { ...settings.restyle, agent: prefs.restyleAgent }
   if (prefs.restyleModel) settings.restyle = { ...settings.restyle, model: prefs.restyleModel }
   if (prefs.restyleCodexModel !== undefined) settings.restyle = { ...settings.restyle, codexModel: prefs.restyleCodexModel.trim() }
@@ -986,6 +990,35 @@ async function requestQuit(restart = false) {
   // Only once you've said yes: after relaunch(), any quit would start jbrow again.
   if (restart) app.relaunch()
   app.quit()
+}
+
+/** Restarts into a downloaded update, asking first if that would cancel downloads, as quitting does. */
+async function restartToUpdate() {
+  if (askingToQuit || !(await confirmQuit())) return
+  updates.install()
+}
+
+/** jbrow hidden this long, or nobody touching the Mac this long while it shows, and an update may restart it. */
+const UPDATE_AFTER_HIDDEN_MS = 10 * 60 * 1000
+const UPDATE_AFTER_IDLE_S = 30 * 60
+/** Hidden, you could still be about to call jbrow up; this long without a key or click, you aren't. */
+const UPDATE_HIDDEN_IDLE_S = 2 * 60
+
+/**
+ * A moment an update can restart jbrow in without anyone noticing: nothing would be cancelled or
+ * cut off (downloads, sound, a video in picture-in-picture, a question on screen), and jbrow has
+ * been hidden a while, or showing with nobody at the Mac. Tabs come back as they were.
+ */
+function quietMoment() {
+  if (unfinishedDownloads() || askingToQuit || dialogsOpen > 0 || miniPlayer.webContents) return false
+  if (tabs.pages().some((wc) => wc.isCurrentlyAudible())) return false
+  const idleS = powerMonitor.getSystemIdleTime()
+  if (panel.visible) return idleS >= UPDATE_AFTER_IDLE_S
+  return Date.now() - hiddenAt >= UPDATE_AFTER_HIDDEN_MS && idleS >= UPDATE_HIDDEN_IDLE_S
+}
+
+function sendUpdates() {
+  if (!panel.win.isDestroyed()) panel.ui.send('updates', updates.view())
 }
 
 /**
@@ -1936,6 +1969,9 @@ function wireIpc() {
   on<{ id: string }>('default-profile', ({ id }) => setDefaultProfile(id))
   on('default-browser', () => sendDefaultBrowser())
   on('make-default-browser', () => makeDefaultBrowser())
+  on('updates', () => sendUpdates())
+  on('check-updates', () => updates.check())
+  on('install-update', () => void restartToUpdate())
   on<{ on: boolean }>('recording-shortcut', ({ on: recording }) => setRecording(recording))
   on<{ id: ActionId; shortcut: string }>('set-action-key', ({ id, shortcut }) => {
     const error = setActionKey(id, shortcut)
@@ -1975,6 +2011,7 @@ function buildTray() {
   tray.setToolTip('jbrow')
   const menu = () =>
     Menu.buildFromTemplate([
+      ...(updates.ready ? [{ label: `Restart to update to ${updates.ready}`, click: () => void restartToUpdate() }, { type: 'separator' as const }] : []),
       ...quietMenuItems(),
       { label: `Show jbrow (${shortcutLabel(actionKeys(settings.shortcuts).show)})`, click: () => void onHotkey() },
       { type: 'separator' },
@@ -2051,6 +2088,14 @@ function buildAppMenu() {
         // The standard app menu, with a ⌘Q that asks about running downloads first.
         submenu: [
           { role: 'about' },
+          {
+            label: 'Check for Updates…',
+            click: () => {
+              if (updates.ready) return void restartToUpdate()
+              updates.check()
+              panel.ui.send('settings', { open: true, section: 'general' })
+            },
+          },
           { type: 'separator' },
           item('settings', 'Settings…'),
           { type: 'separator' },
@@ -2138,6 +2183,8 @@ function buildAppMenu() {
 
 app.whenReady().then(async () => {
   app.dock?.hide()
+  // Back from an update jbrow installed on its own: it comes back hidden or showing, as it was.
+  const updated = takeUpdateRelaunch()
   // Without this, macOS quits jbrow a few seconds after it hides: no windows, not frontmost.
   settings = loadSettings()
   nativeTheme.themeSource = settings.appearance
@@ -2312,6 +2359,13 @@ app.whenReady().then(async () => {
   })
   idle = new IdleWatcher()
   userScripts = new UserScripts()
+  updates = new Updates({
+    enabled: () => settings.autoUpdate,
+    quietMoment,
+    shown: () => panel.visible,
+    beforeInstall: () => panel.flush(),
+    onChange: () => sendUpdates(),
+  })
 
   wireIpc()
   wireSwipes(panel.win, (wc) => (tabs.idForWebContents(wc) ? wc : null), () => tabs.activeWebContents())
@@ -2353,6 +2407,7 @@ app.whenReady().then(async () => {
 
   registerHotkeys(true)
   if (!BACKGROUND) buildTray()
+  updates.start()
   // Back from picture-in-picture whenever jbrow is in front again, unless the video belongs to
   // another tab you switched away from: that one waits until you're on its tab.
   panel.win.on('focus', () => {
@@ -2378,7 +2433,7 @@ app.whenReady().then(async () => {
   // macOS launched jbrow to open these, which you asked for.
   for (const url of waitingLinks.splice(0)) await openFromApp(url, true)
   // Pinned, jbrow opens its window at launch like any browser. `npm start -- --show` does too.
-  if (settings.pinned || process.argv.includes('--show')) {
+  if (updated ? updated.shown : settings.pinned || process.argv.includes('--show')) {
     // The log line tells automated runs (test/e2e) that jbrow is up and has handed out focus.
     setTimeout(() => void onHotkey().then(() => console.log('[jbrow] shown')), 600)
   }

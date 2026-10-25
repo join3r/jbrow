@@ -1,7 +1,7 @@
 {
   "name": "jbrow",
   "productName": "jbrow",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A browser that isn't there until you call it.",
   "private": true,
   "license": "GPL-3.0-only",
@@ -19,11 +19,13 @@
     "dist": "npm run setup && electron-builder --mac",
     "top-sites": "node scripts/top-sites.mjs",
     "icon": "sips -s format png build/icon.svg --out build/icon.png",
-    "install-app": "scripts/install.sh"
+    "install-app": "scripts/install.sh",
+    "release": "scripts/release.sh"
   },
   "dependencies": {
     "electron-chrome-extensions": "4.9.0",
-    "electron-chrome-web-store": "0.13.0"
+    "electron-chrome-web-store": "0.13.0",
+    "electron-updater": "6.8.10"
   },
   "devDependencies": {
     "@types/chrome": "0.3.4",
@@ -52,6 +54,12 @@
           "arch": [
             "arm64"
           ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
         }
       ],
       "category": "public.app-category.productivity",
@@ -67,6 +75,12 @@
         "NSLocationWhenInUseUsageDescription": "A site you visit wants your location. jbrow asks you first.",
         "NSBluetoothAlwaysUsageDescription": "A site you visit wants to use a Bluetooth device."
       }
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "join3r",
+      "repo": "jbrow",
+      "releaseType": "release"
     },
     "protocols": [
       {

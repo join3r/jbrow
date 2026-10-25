@@ -90,6 +90,8 @@ export interface Settings {
   sidePanelWidth: number
   /** The welcome has been through or skipped. Until then it shows at launch. */
   welcomed: boolean
+  /** Check GitHub Releases for a newer jbrow, download it and install it once you won't notice (see updates.ts). */
+  autoUpdate: boolean
 }
 
 const DEFAULTS: Settings = {
@@ -133,6 +135,7 @@ const DEFAULTS: Settings = {
   zoom: { defaultPercent: 100, remember: true, sites: {} },
   sidePanelWidth: 360,
   welcomed: false,
+  autoUpdate: true,
 }
 
 export const settingsPath = () => path.join(app.getPath('userData'), 'settings.json')
