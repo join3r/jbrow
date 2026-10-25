@@ -37,7 +37,9 @@ function quarantine(file: string, url: string): Promise<void> {
 /** Download URLs often carry tokens; the log gets the site only. */
 function origin(url: string): string {
   try {
-    return new URL(url).origin
+    const u = new URL(url)
+    // URL gives chrome-extension: the origin "null", which would lump every extension together.
+    return u.protocol === 'chrome-extension:' ? `chrome-extension://${u.host}` : u.origin
   } catch {
     return '(unknown)'
   }

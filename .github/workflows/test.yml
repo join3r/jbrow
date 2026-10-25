@@ -1,0 +1,49 @@
+name: test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      repeat:
+        description: Run every test this many times, to catch flaky ones
+        default: '1'
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      REPEAT: ${{ github.event.inputs.repeat || '1' }}
+      JBROW_TEST_LOGS: ${{ github.workspace }}/test-logs
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # npm can skip install scripts, and then Electron's binary isn't there.
+      - run: node -e "require('fs').existsSync('node_modules/electron/path.txt') || process.exit(1)" || node node_modules/electron/install.js
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npx tsc --noEmit -p test/tsconfig.json
+      - run: node test/run.mjs unit --repeat ${{ env.REPEAT }}
+      - name: end-to-end tests
+        if: runner.os != 'Linux'
+        run: node test/run.mjs e2e --repeat ${{ env.REPEAT }}
+      - name: end-to-end tests (virtual display)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y xdotool
+          xvfb-run -a -s "-screen 0 1440x900x24" node test/run.mjs e2e --repeat ${{ env.REPEAT }}
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: jbrow-logs-${{ matrix.os }}
+          path: test-logs
+          if-no-files-found: ignore

@@ -90,6 +90,8 @@ export class DangerousSites {
   }
 
   private async refresh() {
+    // Turned off, nothing is downloaded. Turning it back on calls start() again.
+    if (!this.deps.enabled()) return
     let failed = false
     mkdirSync(dir(), { recursive: true })
     for (const list of LISTS) {

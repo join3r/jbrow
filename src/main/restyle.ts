@@ -116,7 +116,9 @@ export class CssChecker {
   async check(raw: string): Promise<{ css: string; removed: number } | null> {
     const first = await this.serialize(raw)
     if (first === null) return null
-    let removed = (raw.match(/@import\b/gi) ?? []).length
+    // The @import rules Chromium dropped; one in a string (content: "@import") is still there.
+    const imports = (text: string) => (text.match(/@import\b/gi) ?? []).length
+    let removed = Math.max(0, imports(raw) - imports(first))
     const none = () => (removed++, 'none')
     const string = String.raw`"(?:[^"\\\n]|\\[\s\S])*"`
     const stripped = first
