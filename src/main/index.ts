@@ -2298,6 +2298,7 @@ app.whenReady().then(async () => {
       focusActive()
       tabSwitched()
     },
+    refocus: focusActive,
     onKey,
     searchUrl: () => settings.searchUrl,
     permissions,

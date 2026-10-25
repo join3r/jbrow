@@ -33,6 +33,8 @@ export interface TabsDeps {
   onChange: () => void
   /** Called after a tab becomes active, to move keyboard focus to it. */
   onActivated: () => void
+  /** Moves keyboard focus back to what's in front: the active page, or jbrow's UI. */
+  refocus: () => void
   /** Return true if jbrow handled the key, so the page doesn't see it. */
   onKey: (input: Electron.Input) => boolean
   searchUrl: () => string
@@ -553,6 +555,11 @@ export class Tabs {
       if (this.deps.onKey(input)) event.preventDefault()
     })
     wc.on('context-menu', (_e, params) => void this.contextMenu(id, wc, params, rt))
+    // A tab opened in the background (⌘-click) takes keyboard focus as it starts up. Hidden, it
+    // gets no keys, so ⌘W and the rest went nowhere until you clicked; hand focus back.
+    wc.on('focus', () => {
+      if (!this.shown().includes(id)) this.deps.refocus()
+    })
     // Clicking into another pane of the split focuses it, toolbar and keys and all. Taken from the
     // click, not from the page getting focus: focus also passes through panes on its own, when one
     // loads or while jbrow hands it elsewhere (on Linux, focusing jbrow's UI does).
