@@ -36,6 +36,8 @@ export interface Settings {
   /** Groups of bundle IDs that share one set of tabs for the app hotkey. An app belongs to at most one group. */
   linkedApps: string[][]
   animation: { style: AnimationStyle; durationMs: number; ease: AnimationEase }
+  /** Playful animations in jbrow's own UI: tabs popping in and puffing away, confetti for downloads. */
+  whimsy: boolean
   /** %s is replaced by the encoded query. Pick one under General in settings, or any address with %s. */
   searchUrl: string
   /** Ask the search engine for suggestions as you type in the address bar. Never for addresses or private ones. */
@@ -106,6 +108,7 @@ const DEFAULTS: Settings = {
   },
   linkedApps: [['com.microsoft.VSCode', 'com.apple.Terminal']],
   animation: { style: 'materialize', durationMs: 180, ease: 'spring' },
+  whimsy: false,
   searchUrl: 'https://www.google.com/search?q=%s',
   searchSuggestions: true,
   unpackedExtensions: {},
@@ -163,6 +166,7 @@ export function loadSettings(): Settings {
     if (!Number.isInteger(settings.pinnedRows) || settings.pinnedRows < 1) settings.pinnedRows = DEFAULTS.pinnedRows
     if (!['pinned', 'kept', 'today'].includes(settings.numberFrom)) settings.numberFrom = DEFAULTS.numberFrom
     if (!Array.isArray(settings.openApps)) settings.openApps = DEFAULTS.openApps
+    if (typeof settings.whimsy !== 'boolean') settings.whimsy = DEFAULTS.whimsy
     if (!Number.isFinite(settings.sidePanelWidth)) settings.sidePanelWidth = DEFAULTS.sidePanelWidth
     if (!['system', 'light', 'dark'].includes(settings.appearance)) settings.appearance = DEFAULTS.appearance
     if (!THEMES.some((t) => t.id === settings.theme)) settings.theme = DEFAULTS.theme

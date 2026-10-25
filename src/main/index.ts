@@ -174,6 +174,7 @@ function state(): UiState {
       theme: settings.theme,
       profileStyle: settings.profileStyle,
       animation: settings.animation,
+      whimsy: settings.whimsy,
       privateUrls: settings.privateUrls,
       hideFromScreenCapture: settings.hideFromScreenCapture,
       dangerousSites: settings.dangerousSites,
@@ -787,6 +788,7 @@ function updatePrefs(prefs: Partial<Prefs>) {
   if (THEMES.some((t) => t.id === prefs.theme)) settings.theme = prefs.theme!
   if (prefs.profileStyle === 'tint' || prefs.profileStyle === 'edge' || prefs.profileStyle === 'solid') settings.profileStyle = prefs.profileStyle
   if (prefs.animation) settings.animation = { ...settings.animation, ...prefs.animation }
+  if (typeof prefs.whimsy === 'boolean') settings.whimsy = prefs.whimsy
   if (prefs.privateUrls) settings.privateUrls = prefs.privateUrls.map((p) => p.trim()).filter(Boolean)
   if (prefs.hideFromScreenCapture !== undefined) {
     settings.hideFromScreenCapture = prefs.hideFromScreenCapture

@@ -6,6 +6,7 @@ import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../share
 import { dragDivider, PANE_GAP, paneSpans, splitOf } from '../shared/split'
 import { initWelcome } from './welcome'
 import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type VisitView } from '../shared/types'
+import { afterRender, beforeRender, celebrate, downloadsChanged, flourish, setWhimsy } from './whimsy'
 
 declare global {
   interface Window {
@@ -528,6 +529,8 @@ function renderThreads() {
   const appBlock = (v: ThreadView<UiTab>) => tile(v, false)
   // While filtered to a profile or an app, folders with nothing to show stay out of the way.
   const narrowed = S.filter !== 'all' || !!S.scope
+  const animated = [threadsEl, pinsEl]
+  beforeRender(animated)
   renderPins(s.pinned, numbered)
   let html = settingsTab
     ? `<div class="row set-row ${settingsEl.hidden ? '' : 'cur'}" role="button" tabindex="0" data-settings>
@@ -552,6 +555,12 @@ function renderThreads() {
   bottom += s.apps.map((a) => appSection(a, appBlock)).join('')
   if (bottom) html += `<div class="bottom-sec">${bottom}</div>`
   threadsEl.innerHTML = html
+  afterRender(animated, {
+    tabIds: S.tabs.map((t) => t.id),
+    activeId: S.activeId,
+    filter: `${S.filter}|${S.scope?.key ?? ''}`,
+    clip: sidebarEl.getBoundingClientRect(),
+  })
 
   const input = document.getElementById('ren') as HTMLInputElement | null
   if (input) {
@@ -1336,9 +1345,15 @@ $('newTab').addEventListener('contextmenu', (e) => {
 $('back').addEventListener('click', () => send('nav', { action: 'back' }))
 $('forward').addEventListener('click', () => send('nav', { action: 'forward' }))
 // ⇧-click reloads past the cache, as in Chrome.
-$('reload').addEventListener('click', (e) => send('nav', S?.nav.loading ? { action: 'stop' } : { action: 'reload', hard: e.shiftKey }))
+$('reload').addEventListener('click', (e) => {
+  if (!S?.nav.loading) flourish($('reload'), 'spin')
+  send('nav', S?.nav.loading ? { action: 'stop' } : { action: 'reload', hard: e.shiftKey })
+})
 $('pin').addEventListener('click', () => send('pin'))
-$('newTab').addEventListener('click', () => send('new'))
+$('newTab').addEventListener('click', () => {
+  flourish($('newTab').querySelector('svg'), 'twirl')
+  send('new')
+})
 
 // ---------- extensions popover ----------
 
@@ -1605,6 +1620,7 @@ const pinWindow = $<HTMLInputElement>('pinWindow')
 const pipOnlySites = $<HTMLTextAreaElement>('pipOnlySites')
 const pipExceptSites = $<HTMLTextAreaElement>('pipExceptSites')
 const quietLinks = $<HTMLInputElement>('quietLinks')
+const whimsy = $<HTMLInputElement>('whimsy')
 const keepLoadedPinned = $<HTMLInputElement>('keepLoadedPinned')
 const keepLoadedKept = $<HTMLInputElement>('keepLoadedKept')
 const dangerousSites = $<HTMLInputElement>('dangerousSites')
@@ -1808,6 +1824,7 @@ function renderSettings(all = false) {
   if (all || document.activeElement !== pipExceptSites) pipExceptSites.value = mp.exceptSites.join('\n')
   pinWindow.checked = S.pinned
   quietLinks.checked = S.prefs.quietLinks
+  whimsy.checked = S.prefs.whimsy
   keepLoadedPinned.checked = S.prefs.keepLoaded.pinned
   keepLoadedKept.checked = S.prefs.keepLoaded.kept
   renderSearchEngine(all)
@@ -2290,6 +2307,12 @@ pinWindow.addEventListener('change', () => send('pin', { on: pinWindow.checked }
 $('resetWindow').addEventListener('click', () => send('window-reset'))
 $('showWelcome').addEventListener('click', () => welcome.open(false))
 quietLinks.addEventListener('change', () => sendPrefs({ quietLinks: quietLinks.checked }))
+// Turning it on shows what it's like straight away.
+whimsy.addEventListener('change', () => {
+  setWhimsy(whimsy.checked)
+  celebrate(whimsy)
+  sendPrefs({ whimsy: whimsy.checked })
+})
 keepLoadedPinned.addEventListener('change', () => sendPrefs({ keepLoaded: { ...S!.prefs.keepLoaded, pinned: keepLoadedPinned.checked } }))
 keepLoadedKept.addEventListener('change', () => sendPrefs({ keepLoaded: { ...S!.prefs.keepLoaded, kept: keepLoadedKept.checked } }))
 dangerousSites.addEventListener('change', () => sendPrefs({ dangerousSites: dangerousSites.checked }))
@@ -3027,6 +3050,8 @@ window.jbrow.on('state', (state: UiState) => {
   if (S && S.activeId !== state.activeId) showSettings(false)
   // The find bar searches the page it opened on, so it goes when another tab comes up.
   if (S && S.activeId !== state.activeId) closeFind(false)
+  if (S && !S.pinned && state.pinned) flourish($('pin').querySelector('svg'), 'wiggle')
+  setWhimsy(state.prefs.whimsy)
   S = state
   document.documentElement.dataset.theme = state.prefs.theme
   document.documentElement.dataset.profileStyle = state.prefs.profileStyle
@@ -3077,6 +3102,7 @@ window.jbrow.on('folder-rules', (id: string) => openRules(id))
 window.jbrow.on('downloads', (list: DownloadInfo[]) => {
   downloads = list
   renderDownloads()
+  downloadsChanged(list, (id) => dlList.querySelector(`[data-dl="${CSS.escape(id)}"]`))
 })
 
 let playRun = 0

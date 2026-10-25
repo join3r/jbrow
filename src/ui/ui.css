@@ -659,3 +659,11 @@ body.resizing, body.resizing * { cursor: col-resize !important; }
 
 /* ---------- privacy ---------- */
 #clearData { margin: 4px 0 8px; }
+
+/* ---------- whimsy (see whimsy.ts) ---------- */
+.whimsy-layer { position: fixed; inset: 0; z-index: 1000; pointer-events: none; overflow: hidden; }
+.whimsy-bit { position: absolute; width: 6px; height: 6px; border-radius: 50%; }
+.whimsy-bit.confetti { width: 6px; height: 9px; border-radius: 1.5px; }
+.whimsy-cloud { position: absolute; width: 40px; height: 40px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--c) 45%, transparent) 0 35%, transparent 70%); }
+/* A row's pop overshoots its width for a moment; that shouldn't flash a scrollbar. */
+.whimsy #threads { overflow-x: hidden; }

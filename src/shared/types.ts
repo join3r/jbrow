@@ -148,6 +148,8 @@ export interface Prefs {
   theme: ThemeId
   profileStyle: ProfileStyle
   animation: { style: AnimMessage['style']; durationMs: number; ease: AnimMessage['ease'] }
+  /** Playful animations in jbrow's own UI. */
+  whimsy: boolean
   /** Addresses matching one of these show as "Private" until clicked. `*` matches anything. */
   privateUrls: string[]
   hideFromScreenCapture: boolean

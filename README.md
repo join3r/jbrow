@@ -110,6 +110,10 @@ grow the window's edges around content that already has its final size instead o
 content. Materialize also blurs the UI and, with a stylesheet that's gone once the window is in place,
 the page.
 
+**Whimsy**, also under **Animation** and off until you turn it on, adds some play to the sidebar: new
+tabs pop in, closed ones vanish in a puff, rows glide to their new places, the tab you switch to hops,
+and finished downloads throw confetti. Reduce motion in macOS turns it off.
+
 If another app already uses ⌥Space (Raycast does by default), jbrow shows a notification. Pick
 another key under **Shortcuts** in settings; it takes effect right away.
 
@@ -365,6 +369,7 @@ on first run. Restart jbrow after editing the file by hand (menu bar item, **Res
 - `linkedApps`: groups of bundle IDs that share one set of tabs for ⌥⇧Space. Under **Apps**,
   right-click an app to link or unlink it; its tabs move along right away.
 - `animation`: `style` (materialize, slide, scale, fade, off), `durationMs`, `ease` (spring, snappy, smooth).
+- `whimsy`: playful animations in the sidebar and toolbar (default `false`).
 - `panel`: the window's default size as a fraction of the screen (`widthFraction`, `heightFraction`),
   where you left the unpinned window on each display (`displays`, by macOS display ID, relative to
   the display's usable area) and where you left the pinned one (`pinned`, in screen coordinates).
