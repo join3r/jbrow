@@ -107,8 +107,9 @@ const addedApps = new Set<string>()
 // without touching your real data.
 if (process.env.JBROW_USER_DATA) {
   app.setPath('userData', process.env.JBROW_USER_DATA)
-  app.setPath('logs', `${process.env.JBROW_USER_DATA}/logs`)
-  app.setPath('downloads', `${process.env.JBROW_USER_DATA}/Downloads`)
+  // path.join, not a /: on Windows Chromium fails every download into a folder written C:\x/Downloads.
+  app.setPath('logs', path.join(process.env.JBROW_USER_DATA, 'logs'))
+  app.setPath('downloads', path.join(process.env.JBROW_USER_DATA, 'Downloads'))
 }
 setupLogging()
 // A Chromium switch, so it's read before the app is ready and a change waits for a restart.
