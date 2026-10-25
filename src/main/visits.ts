@@ -193,7 +193,10 @@ export class BrowsingHistory {
   }
 }
 
-/** Asks the search engine what people search for starting with `query`. Empty on any failure. */
+/**
+ * Asks the search engine what people search for starting with `query`. Empty when it answers with
+ * something else; rejects when the request fails or is aborted.
+ */
 export async function fetchSearchSuggestions(suggestUrl: string, query: string, signal: AbortSignal): Promise<string[]> {
   const res = await net.fetch(suggestUrl.replace('%s', encodeURIComponent(query)), {
     signal,

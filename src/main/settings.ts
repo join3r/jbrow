@@ -148,11 +148,11 @@ export function loadSettings(): Settings {
     const settings = { ...structuredClone(DEFAULTS), ...rest }
     // Settings from before the welcome belong to someone who already knows jbrow.
     if (typeof rest.welcomed !== 'boolean') settings.welcomed = true
-    // Older settings have fewer restyle keys.
-    settings.restyle = { ...DEFAULTS.restyle, ...rest.restyle }
-    settings.miniPlayer = { ...DEFAULTS.miniPlayer, ...rest.miniPlayer }
-    settings.zoom = { ...DEFAULTS.zoom, ...rest.zoom }
-    settings.keepLoaded = { ...DEFAULTS.keepLoaded, ...rest.keepLoaded }
+    // Older settings have fewer restyle keys. Cloned, so changing a site's zoom can't change the defaults.
+    settings.restyle = { ...structuredClone(DEFAULTS.restyle), ...rest.restyle }
+    settings.miniPlayer = { ...structuredClone(DEFAULTS.miniPlayer), ...rest.miniPlayer }
+    settings.zoom = { ...structuredClone(DEFAULTS.zoom), ...rest.zoom }
+    settings.keepLoaded = { ...structuredClone(DEFAULTS.keepLoaded), ...rest.keepLoaded }
     // Older settings have only the fractions. A place that isn't a rectangle is dropped.
     const panel = { ...structuredClone(DEFAULTS.panel), ...rest.panel }
     const isRect = (r: unknown): r is Rectangle =>

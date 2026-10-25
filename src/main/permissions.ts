@@ -75,7 +75,9 @@ const storePath = () => path.join(app.getPath('userData'), 'permissions.json')
 
 function originOf(url: string): string {
   try {
-    return new URL(url).origin
+    const u = new URL(url)
+    // URL gives schemes it doesn't know, chrome-extension: included, the origin "null".
+    return u.protocol === 'chrome-extension:' ? `chrome-extension://${u.host}` : u.origin
   } catch {
     return url
   }

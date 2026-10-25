@@ -43,7 +43,7 @@ export function addContentShim(dir: string): boolean {
   const manifestPath = path.join(dir, 'manifest.json')
   if (!existsSync(manifestPath)) return false
   try {
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { content_scripts?: ContentScript[] }
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8').replace(/^\uFEFF/, '')) as { content_scripts?: ContentScript[] }
     // MAIN-world scripts run as the page and have no chrome.storage.
     const scripts = (manifest.content_scripts ?? []).filter((c) => c.js?.length && c.world !== 'MAIN')
     const missing = scripts.filter((c) => c.js![0] !== SHIM_FILE)

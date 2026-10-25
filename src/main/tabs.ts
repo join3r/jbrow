@@ -170,6 +170,8 @@ export class Tabs {
    */
   private histories = new Map<string, NavHistory>()
   private historyTimer: NodeJS.Timeout | null = null
+  /** Tabs whose back and forward list is being restored, with the address to end up on. */
+  private restoring = new Map<string, string>()
 
   /** Kept and pinned threads whose pages never unload (see sweep). Main sets it from settings. */
   keepLoaded: KeepLoaded = { kept: false, pinned: true }
@@ -416,13 +418,25 @@ export class Tabs {
     if (guest) return live
     // A tab that was asleep or archived comes back where it was, with back and forward. One you
     // just typed an address into goes there after, so that address is one step further.
-    const url = rec.url
-    const load = () => (url ? view.webContents.loadURL(url) : undefined)
-    if (!history) void load()?.catch(() => {})
+    const load = (url: string) => (url ? view.webContents.loadURL(url) : undefined)
+    if (!history) void load(rec.url)?.catch(() => {})
     else {
+      // An address typed while it's restoring (see navigate) replaces this one.
+      this.restoring.set(rec.id, rec.url)
+      const target = () => {
+        const url = this.restoring.get(rec.id) ?? rec.url
+        this.restoring.delete(rec.id)
+        return url
+      }
       void view.webContents.navigationHistory
         .restore(history)
-        .then(() => (history.entries[history.index]?.url !== url ? load() : undefined), load)
+        .then(
+          () => {
+            const url = target()
+            return history.entries[history.index]?.url !== url ? load(url) : undefined
+          },
+          () => load(target()),
+        )
         .catch(() => {})
     }
     return live
@@ -539,9 +553,13 @@ export class Tabs {
       if (this.deps.onKey(input)) event.preventDefault()
     })
     wc.on('context-menu', (_e, params) => void this.contextMenu(id, wc, params, rt))
-    // Clicking into another pane of the split focuses it, toolbar and keys and all.
+    // Clicking into another pane of the split focuses it, toolbar and keys and all. Focus can also
+    // pass through a pane while jbrow hands it elsewhere (on Linux, focusing jbrow's UI does), so
+    // only a pane that still has it counts.
     wc.on('focus', () => {
-      if (id !== this.activeId && this.shown().includes(id)) this.activate(id)
+      setImmediate(() => {
+        if (!wc.isDestroyed() && wc.isFocused() && id !== this.activeId && this.shown().includes(id)) this.activate(id)
+      })
     })
     this.deps.devices.watch(wc, rt.profile.id)
     wc.on('enter-html-full-screen', () => {
@@ -827,6 +845,8 @@ export class Tabs {
     // A tab without a page goes to the address once its view is made.
     const live = this.live.get(rec.id)
     if (!live) this.ensureView(rec)
+    // Its back and forward list is still coming back, which would take over; it goes there after.
+    else if (this.restoring.has(rec.id)) this.restoring.set(rec.id, url)
     else if (live.wc.getURL() !== url) void live.wc.loadURL(url).catch(() => {})
     this.activate(rec.id)
   }
@@ -1381,10 +1401,11 @@ function searchEngineName(searchUrl: string): string {
 }
 
 /** `search` sends the text to the search engine even if it looks like an address. */
-function toUrl(input: string, searchUrl: string, search = false): string {
+export function toUrl(input: string, searchUrl: string, search = false): string {
   const text = input.trim()
   if (search) return searchUrl.replace('%s', encodeURIComponent(text))
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text) || /^(about|chrome-extension|file):/i.test(text)) return text
-  if (/^(localhost|[\w-]+(\.[\w-]+)+)(:\d+)?(\/.*)?$/i.test(text) && !text.includes(' ')) return `https://${text}`
+  // Hosts can be in any script (münchen.de, 例え.jp), and IPv6 addresses go in brackets.
+  if (/^(localhost|[\p{L}\p{N}_-]+(\.[\p{L}\p{N}_-]+)+|\[[\da-f:.]+\])(:\d+)?(\/.*)?$/iu.test(text) && !text.includes(' ')) return `https://${text}`
   return searchUrl.replace('%s', encodeURIComponent(text))
 }

@@ -54,7 +54,8 @@ export function looksLikeAddress(text: string): boolean {
       w.startsWith('/') ||
       w.startsWith('~') ||
       /^localhost\b/i.test(w) ||
-      /[\w-]\.[a-z\d-]*[a-z][a-z\d-]*(:\d+)?(\/|$)/i.test(w) ||
+      /[\p{L}\p{N}_-]\.[\p{L}\p{N}-]*\p{L}[\p{L}\p{N}-]*(:\d+)?(\/|$)/iu.test(w) ||
+      /^\[[\da-f:.]+\](:\d+)?(\/|$)/i.test(w) ||
       /:\d+/.test(w) ||
       w.includes('/') ||
       /^\d+\.\d+\.\d+/.test(w) ||

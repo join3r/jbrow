@@ -1165,7 +1165,9 @@ threadsEl.addEventListener('keydown', (e) => {
   if (e.key === 'F2' && el.classList.contains('row') && !el.hasAttribute('data-settings')) startRename(el.dataset.id ?? el.dataset.folder!)
 })
 threadsEl.addEventListener('focusout', (e) => {
-  if ((e.target as HTMLElement).id === 'ren') setTimeout(() => renaming && commitRename(), 0)
+  // A re-render replaces the field, which blurs it too; the new one carries on.
+  const field = e.target as HTMLElement
+  if (field.id === 'ren') setTimeout(() => renaming && field.isConnected && commitRename(), 0)
 })
 
 function startRename(id: string) {

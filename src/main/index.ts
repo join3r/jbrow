@@ -616,9 +616,32 @@ function runAction(id: ActionId) {
   }
 }
 
+/** Off macOS, Ctrl does what ⌘ does: ⌃T opens a tab there, as in Chrome. */
+const CTRL_IS_COMMAND = process.platform !== 'darwin'
+const commandHeld = (input: Electron.Input) => input.meta || (CTRL_IS_COMMAND && input.control)
+
+/**
+ * The shortcuts a key press can be, to look up in that order: the key as pressed, then off macOS
+ * the same with Ctrl as ⌘. So a key that really uses Control, as ⌃Tab does, still wins.
+ */
+function shortcutsFor(input: Electron.Input): string[] {
+  const exact = shortcutFromKey({ ...input, command: input.meta })
+  const asCommand = CTRL_IS_COMMAND && input.control && !input.meta ? shortcutFromKey({ ...input, control: false, command: true }) : null
+  return [exact, asCommand].filter((s): s is string => !!s)
+}
+
+/** The command a key press runs, if any. The summon keys are global shortcuts, so they never reach a window. */
+function actionFor(input: Electron.Input): ActionId | undefined {
+  const keys = actionKeys(settings.shortcuts)
+  for (const shortcut of shortcutsFor(input)) {
+    const action = ACTIONS.find((a) => keys[a.id] === shortcut && !isGlobal(a.id))
+    if (action) return action.id
+  }
+}
+
 /** ⌘+ (1), ⌘− (−1) or ⌘0 (0) for zoom; null for any other key. */
 function zoomDirection(input: Electron.Input): -1 | 0 | 1 | null {
-  if (!input.meta || input.alt) return null
+  if (!commandHeld(input) || input.alt) return null
   const key = input.key.toLowerCase()
   // Matched by code too, so zoom works on layouts where = and - sit elsewhere or need Shift.
   return key === '=' || key === '+' || input.code === 'Equal' || input.code === 'NumpadAdd' ? 1
@@ -638,22 +661,18 @@ function zoomActive(direction: -1 | 0 | 1) {
 function onKey(input: Electron.Input): boolean {
   if (input.type !== 'keyDown' || recordingShortcut) return false
   if (commands?.handleKey(tabs.active()?.profile, input)) return true
-  const shortcut = shortcutFromKey({ ...input, command: input.meta })
-  if (shortcut) {
-    const keys = actionKeys(settings.shortcuts)
-    // The summon keys are global shortcuts, so they never reach a window.
-    const action = ACTIONS.find((a) => keys[a.id] === shortcut && !isGlobal(a.id))
-    if (action) {
-      runAction(action.id)
-      return true
-    }
-    // ⌘G and ⇧⌘G step through the matches while the find bar is open.
-    if (finder.open && (shortcut === 'Command+G' || shortcut === 'Command+Shift+G')) {
-      panel.ui.send('find', { step: shortcut === 'Command+G' ? 1 : -1 })
-      return true
-    }
+  const action = actionFor(input)
+  if (action) {
+    runAction(action)
+    return true
   }
-  if (!input.meta) return false
+  // ⌘G and ⇧⌘G step through the matches while the find bar is open.
+  const shortcuts = shortcutsFor(input)
+  if (finder.open && (shortcuts.includes('Command+G') || shortcuts.includes('Command+Shift+G'))) {
+    panel.ui.send('find', { step: shortcuts.includes('Command+G') ? 1 : -1 })
+    return true
+  }
+  if (!commandHeld(input)) return false
   const key = input.key.toLowerCase()
   const zoomKey = zoomDirection(input)
   if (zoomKey !== null) {
@@ -695,10 +714,7 @@ function onWindowKey(wc: Electron.WebContents, input: Electron.Input): boolean {
     if (zoomSite(wc.getURL())) pushState()
     return true
   }
-  const shortcut = shortcutFromKey({ ...input, command: input.meta })
-  if (!shortcut) return false
-  const keys = actionKeys(settings.shortcuts)
-  const action = ACTIONS.find((a) => keys[a.id] === shortcut && !isGlobal(a.id))?.id
+  const action = actionFor(input)
   if (!action) return false
   if (PANEL_ACTIONS.has(action)) {
     void (async () => {
@@ -793,7 +809,10 @@ function updatePrefs(prefs: Partial<Prefs>) {
     panel.applyContentProtection()
   }
   if (prefs.quietLinks !== undefined) settings.quietLinks = prefs.quietLinks
-  if (prefs.dangerousSites !== undefined) settings.dangerousSites = prefs.dangerousSites
+  if (prefs.dangerousSites !== undefined) {
+    settings.dangerousSites = prefs.dangerousSites
+    if (settings.dangerousSites) dangerous.start()
+  }
   if (prefs.blockThirdPartyCookies !== undefined) settings.blockThirdPartyCookies = prefs.blockThirdPartyCookies
   if (prefs.searchUrl !== undefined && isSearchUrl(prefs.searchUrl.trim())) settings.searchUrl = prefs.searchUrl.trim()
   if (prefs.searchSuggestions !== undefined) settings.searchSuggestions = prefs.searchSuggestions
@@ -2356,7 +2375,10 @@ app.whenReady().then(async () => {
   // macOS launched jbrow to open these, which you asked for.
   for (const url of waitingLinks.splice(0)) await openFromApp(url, true)
   // Pinned, jbrow opens its window at launch like any browser. `npm start -- --show` does too.
-  if (settings.pinned || process.argv.includes('--show')) setTimeout(() => void onHotkey(), 600)
+  if (settings.pinned || process.argv.includes('--show')) {
+    // The log line tells automated runs (test/e2e) that jbrow is up and has handed out focus.
+    setTimeout(() => void onHotkey().then(() => console.log('[jbrow] shown')), 600)
+  }
 })
 
 app.on('will-quit', () => {
