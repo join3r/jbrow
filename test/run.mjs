@@ -79,7 +79,7 @@ for (let run = 1; run <= repeat; run++) {
         '--enable-source-maps',
         '--test',
         // Each end-to-end file launches its own jbrow; a few at a time keeps a CI runner responsive.
-        `--test-concurrency=${kind === 'e2e' ? (process.env.CI ? 2 : 3) : 8}`,
+        `--test-concurrency=${process.env.JBROW_TEST_CONCURRENCY ?? (kind === 'e2e' ? (process.env.CI ? 2 : 3) : 8)}`,
         `--test-timeout=${kind === 'e2e' ? 180_000 : 30_000}`,
         ...(process.env.CI ? ['--test-reporter=spec'] : []),
         ...files,

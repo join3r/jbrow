@@ -115,13 +115,21 @@ export async function makeFolder(jb: Jbrow, name: string): Promise<string> {
   const folder = s.folders.find((f) => !before.has(f.id))!
   if (folder.name !== 'New folder') throw new Error(`a new folder is named ${folder.name}`)
   const ui = await jb.ui()
-  await waitFor(
-    () => ui.call((id) => document.activeElement?.id === 'ren' && !!document.activeElement.closest(`[data-folder="${id}"]`), folder.id),
-    'the name field',
-  )
-  await ui.eval('document.getElementById("ren").select()')
-  await ui.type(name)
-  await ui.press('Enter')
-  await jb.waitForState((s) => s.folders.find((f) => f.id === folder.id)?.name === name, `the folder to be named ${name}`)
-  return folder.id
+  const fieldOpen = () => ui.call((id) => document.activeElement?.id === 'ren' && !!document.activeElement.closest(`[data-folder="${id}"]`), folder.id)
+  // A page that just loaded gets the keyboard a moment later. On a slow machine that can land
+  // while the name field is open, which closes it as clicking away would; it's opened again with
+  // a double click, as you would.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await waitFor(fieldOpen, 'the name field', 5000)
+      await ui.eval('document.getElementById("ren").select()')
+      await ui.type(name)
+      await ui.press('Enter')
+      await jb.waitForState((s) => s.folders.find((f) => f.id === folder.id)?.name === name, `the folder to be named ${name}`, 5000)
+      return folder.id
+    } catch (error) {
+      if (attempt === 3) throw error
+      await ui.call((id) => document.querySelector(`#threads .row[data-folder="${id}"]`)?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })), folder.id)
+    }
+  }
 }
