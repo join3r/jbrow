@@ -16,7 +16,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
-const out = path.join(root, '.test-build')
+// A folder per run, so two runs at once don't delete each other's files.
+const out = path.join(root, '.test-build', String(process.pid))
 
 const args = process.argv.slice(2)
 let repeat = 1
@@ -88,4 +89,5 @@ for (let run = 1; run <= repeat; run++) {
     if (result.status !== 0) failed = true
   }
 }
+rmSync(out, { recursive: true, force: true })
 process.exit(failed ? 1 : 0)

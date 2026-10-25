@@ -10,7 +10,7 @@
 //
 // Each launch gets its own user data folder (JBROW_USER_DATA) and a free debugging port, so
 // test files can run side by side, and next to the jbrow you use.
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createRequire } from 'node:module'
@@ -207,6 +207,9 @@ export class Jbrow {
   private conns: Cdp[] = []
   private exited: Promise<number | null>
   output = ''
+  /** The X display it runs on, on Linux (see ownDisplay). */
+  display = process.env.DISPLAY ?? ''
+  stopDisplay = () => {}
 
   constructor(
     readonly proc: ChildProcess,
@@ -338,6 +341,7 @@ export class Jbrow {
       this.proc.kill('SIGKILL')
       await this.exited
     }
+    this.stopDisplay()
   }
 
   /** Quits and deletes the user data folder (unless it was passed in). */
@@ -371,6 +375,34 @@ export function tempDir(prefix = 'jbrow-e2e-') {
   return mkdtempSync(path.join(tmpdir(), prefix))
 }
 
+const hasXvfb = (() => {
+  if (process.platform !== 'linux') return false
+  try {
+    execFileSync('Xvfb', ['-help'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+})()
+
+/**
+ * On Linux, a virtual display for one jbrow. X11 gives keyboard focus to whichever window asked
+ * last, background or not, so two jbrows on one display take it from each other mid-test.
+ */
+async function ownDisplay(): Promise<{ display: string; stop: () => void } | null> {
+  if (!hasXvfb) return null
+  const x = spawn('Xvfb', ['-displayfd', '3', '-screen', '0', '1440x900x24', '-nolisten', 'tcp'], { stdio: ['ignore', 'ignore', 'ignore', 'pipe'] })
+  const n = await new Promise<string>((resolve, reject) => {
+    let out = ''
+    x.stdio[3]!.on('data', (d) => {
+      out += d
+      if (out.includes('\n')) resolve(out.trim())
+    })
+    x.once('exit', (code) => reject(new Error(`Xvfb exited with ${code}`)))
+  })
+  return { display: `:${n}`, stop: () => x.kill() }
+}
+
 export async function launch(opts: LaunchOptions = {}): Promise<Jbrow> {
   const userData = opts.userData ?? tempDir()
   mkdirSync(userData, { recursive: true })
@@ -380,7 +412,11 @@ export async function launch(opts: LaunchOptions = {}): Promise<Jbrow> {
     writeFileSync(settingsFile, JSON.stringify({ welcomed: true, ...existing, ...opts.settings }, null, 2))
   }
   if (opts.tabs) writeFileSync(path.join(userData, 'tabs.json'), JSON.stringify(opts.tabs, null, 2))
-  for (const [name, content] of Object.entries(opts.files ?? {})) {
+  // Fresh, empty phishing and malware lists, so jbrow doesn't download the real ones. Tests
+  // never touch the internet.
+  const lists = { 'blocklists/phishing.txt': '# none\n', 'blocklists/malware.txt': '# none\n' }
+  for (const name of Object.keys(lists) as (keyof typeof lists)[]) if (existsSync(path.join(userData, name))) delete lists[name]
+  for (const [name, content] of Object.entries({ ...lists, ...opts.files })) {
     mkdirSync(path.dirname(path.join(userData, name)), { recursive: true })
     writeFileSync(path.join(userData, name), content)
   }
@@ -389,12 +425,18 @@ export async function launch(opts: LaunchOptions = {}): Promise<Jbrow> {
   const args = [ROOT, ...(opts.hidden ? [] : ['--show']), '--remote-debugging-port=0', ...(opts.args ?? [])]
   // GitHub's Linux runners don't allow Chromium's sandbox (unprivileged user namespaces).
   if (process.platform === 'linux') args.push('--no-sandbox')
+  const x = await ownDisplay()
   const proc = spawn(ELECTRON, args, {
     cwd: ROOT,
-    env: { ...process.env, JBROW_USER_DATA: userData, JBROW_BACKGROUND: '1', ELECTRON_ENABLE_LOGGING: '0', ...opts.env },
+    env: { ...process.env, ...(x ? { DISPLAY: x.display } : {}), JBROW_USER_DATA: userData, JBROW_BACKGROUND: '1', ELECTRON_ENABLE_LOGGING: '0', ...opts.env },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   const jb = new Jbrow(proc, userData, 0, !opts.userData)
+  if (x) {
+    jb.display = x.display
+    jb.stopDisplay = x.stop
+    proc.once('exit', x.stop)
+  }
   proc.stdout!.on('data', (d) => (jb.output += d))
   proc.stderr!.on('data', (d) => (jb.output += d))
 
@@ -417,6 +459,15 @@ export async function launch(opts: LaunchOptions = {}): Promise<Jbrow> {
   ;(jb as { port: number }).port = port
   try {
     await jb.ui()
+    // The UI loads while the main process is still setting up profiles; tabs.json is read after
+    // that, and a message sent before then would be lost in the restore.
+    await waitFor(() => {
+      if (!jb.running) throw new Error(`jbrow exited with ${proc.exitCode ?? proc.signalCode}`)
+      return jb.output.includes('[jbrow] ready.')
+    }, 'jbrow to finish starting', 30_000)
+    // And has come up (a moment after starting, unless it starts hidden), so focusing the page
+    // then doesn't take focus from what a test is typing into.
+    if (!opts.hidden) await waitFor(() => jb.output.includes('[jbrow] shown'), 'jbrow to come up', 30_000)
   } catch (error) {
     await jb.quit()
     throw new Error(`${(error as Error).message}\n--- jbrow output ---\n${jb.output}`)
