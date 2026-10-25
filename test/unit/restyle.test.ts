@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { beforeEach, test } from 'node:test'
 import type { WebContents } from 'electron'
@@ -283,4 +283,88 @@ test('restyle ignores empty prompts and pages that are not websites', async () =
   await r.restyle(fakePage('file:///C:/x.html') as unknown as WebContents, 'red')
   assert.deepEqual(notes, [])
   assert.equal(changes(), 0)
+})
+
+/**
+ * A stand-in for the claude command: answers each run with the next of `answers` (a stylesheet
+ * and note, null to fail, or 'hang' to never answer) and keeps what each run was sent in a file.
+ */
+function fakeClaude(answers: ({ css: string; note: string } | null | 'hang')[]) {
+  const dir = path.join(userData, `fake-claude-${Math.random().toString(36).slice(2)}`)
+  const bin = path.join(dir, 'claude')
+  const log = path.join(dir, 'runs.jsonl')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(
+    bin,
+    `#!${process.execPath}
+const fs = require('fs')
+const answers = ${JSON.stringify(answers)}
+let input = ''
+process.stdin.on('data', (d) => (input += d))
+process.stdin.on('end', () => {
+  fs.appendFileSync(${JSON.stringify(log)}, input.trim() + '\\n')
+  const answer = answers[fs.readFileSync(${JSON.stringify(log)}, 'utf8').trim().split('\\n').length - 1]
+  if (answer === 'hang') return setTimeout(() => {}, 1e9)
+  if (!answer) { console.error('no answer'); process.exit(1) }
+  console.log(JSON.stringify({ type: 'result', is_error: false, structured_output: answer }))
+})
+`,
+  )
+  chmodSync(bin, 0o755)
+  const runs = () =>
+    readFileSync(log, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => (JSON.parse(l) as { message: { content: { type: string; text?: string }[] } }).message.content.find((c) => c.type === 'text')!.text!)
+  return { bin, runs }
+}
+
+test('restyle puts the first try on the page and keeps what the check returns', { skip: process.platform === 'win32' }, async () => {
+  const wc = fakePage('https://example.com/')
+  const claude = fakeClaude([
+    { css: 'a { color: red; }', note: 'first' },
+    { css: 'a { color: blue; }', note: 'checked' },
+  ])
+  const { r, notes } = restyler([wc], { claudePath: claude.bin })
+  let shown = ''
+  const insert = wc.insertCSS
+  wc.insertCSS = async (css) => ((shown ||= css), insert(css))
+  await quiet(() => r.restyle(wc as unknown as WebContents, 'links in red'))
+  await settle()
+  assert.equal(shown, 'a { color: red; }')
+  const [first, second] = claude.runs()
+  assert.match(first, /Request \(from the person\): links in red/)
+  assert.match(second, /^Check your first try/)
+  assert.match(second, /a \{ color: red; \}/)
+  assert.deepEqual(notes, ['checked'])
+  assert.deepEqual([...wc.inserted.values()], ['a { color: blue; }'])
+  assert.equal(JSON.parse(readFileSync(stylesPath, 'utf8'))['example.com'].changes[0].css, 'a { color: blue; }')
+})
+
+test('restyle keeps the first try when the check fails', { skip: process.platform === 'win32' }, async () => {
+  const wc = fakePage('https://example.com/')
+  const claude = fakeClaude([{ css: 'a { color: red; }', note: 'first' }, null])
+  const { r, notes } = restyler([wc], { claudePath: claude.bin })
+  await quiet(() => r.restyle(wc as unknown as WebContents, 'links in red'))
+  await settle()
+  assert.equal(claude.runs().length, 2)
+  assert.deepEqual(notes, ['first'])
+  assert.deepEqual([...wc.inserted.values()], ['a { color: red; }'])
+})
+
+test('cancelling during the check takes the first try off the page again', { skip: process.platform === 'win32' }, async () => {
+  store({ 'example.com': { enabled: true, changes: [change('green', 'a { color: green; }')] } })
+  const wc = fakePage('https://example.com/')
+  const claude = fakeClaude([{ css: 'a { color: red; }', note: 'first' }, 'hang'])
+  const { r, notes } = restyler([wc], { claudePath: claude.bin })
+  r.load()
+  const done = quiet(() => r.restyle(wc as unknown as WebContents, 'links in red'))
+  while (!r.view('https://example.com/')?.running?.checking) await settle()
+  assert.deepEqual([...wc.inserted.values()], ['a { color: red; }'])
+  r.cancel('example.com')
+  await done
+  await settle()
+  assert.deepEqual(notes, [])
+  assert.deepEqual([...wc.inserted.values()], ['a { color: green; }'])
+  assert.equal(r.view('https://example.com/')?.changes.length, 1)
 })

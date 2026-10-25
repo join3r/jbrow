@@ -1550,8 +1550,9 @@ function renderRestyle() {
   $('restyleRunning').hidden = !r.running
   clearInterval(restyleTimer)
   if (r.running) {
-    const { startedAt, prompt, agent } = r.running
-    const tick = () => ($('restyleRunText').textContent = `${agent} is working on “${prompt}” · ${Math.round((Date.now() - startedAt) / 1000)} s`)
+    const { startedAt, prompt, agent, checking } = r.running
+    const doing = checking ? `checking how “${prompt}” came out` : `working on “${prompt}”`
+    const tick = () => ($('restyleRunText').textContent = `${agent} is ${doing} · ${Math.round((Date.now() - startedAt) / 1000)} s`)
     tick()
     restyleTimer = window.setInterval(tick, 1000)
   }

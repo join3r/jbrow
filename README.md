@@ -338,7 +338,10 @@ The wand icon in the toolbar restyles the site you're on. Type how it should loo
 "hide the sidebar", "wider text column, bigger font") and press Return. jbrow sends Claude a
 screenshot of the page, an outline of its DOM and the site's stylesheet so far, and inserts the
 stylesheet Claude writes back into every page of that site (the hostname, without www) from the
-moment each starts loading. Ask again to refine it; each request builds on the last. The wand turns
+moment each starts loading. Before keeping it, jbrow puts Claude's first try on the page and sends
+it back with a new screenshot and a list of anything that now sits on top of a video or a big image,
+so Claude can fix what came out wrong; if you hide jbrow before then, the first try stands. Ask
+again to refine it; each request builds on the last. The wand turns
 teal on a restyled site and pulses while Claude works, and the note on what changed shows at the
 bottom of the sidebar. The wand's popover lists what you asked for and has **Undo last change**,
 **Show the original** and **Remove all changes**. Settings lists every restyled site.

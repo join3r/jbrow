@@ -354,8 +354,8 @@ export interface RestyleView {
   /** What you asked for so far and what the agent said it changed, oldest first. */
   changes: { prompt: string; note: string }[]
   enabled: boolean
-  /** A request an agent is working on now, with the agent's name. */
-  running: { prompt: string; startedAt: number; agent: string } | null
+  /** A request an agent is working on now, with the agent's name. `checking` once it's looking over its first try on the page. */
+  running: { prompt: string; startedAt: number; agent: string; checking: boolean } | null
 }
 
 export interface StyledSite {
