@@ -36,7 +36,7 @@ export interface Settings {
   /** Groups of bundle IDs that share one set of tabs for the app hotkey. An app belongs to at most one group. */
   linkedApps: string[][]
   animation: { style: AnimationStyle; durationMs: number; ease: AnimationEase }
-  /** Playful animations in jbrow's own UI: tabs popping in and puffing away, confetti for downloads. */
+  /** Playful animations in jbrow's own UI: tabs popping in and puffing away, pages sliding in as you switch tabs. */
   whimsy: boolean
   /** %s is replaced by the encoded query. Pick one under General in settings, or any address with %s. */
   searchUrl: string

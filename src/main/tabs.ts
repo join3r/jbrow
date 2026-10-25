@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { bezier } from '../shared/ease'
 import { urlMatcher } from '../shared/patterns'
 import { MAX_PANES, PANE_HEAD, paneSpans, splitOf } from '../shared/split'
 import { byOrder, flatten, isAsleep, isInFolder, isRoot, parentFolder, samePage, subtree, threadsOf } from '../shared/threads'
@@ -35,6 +36,8 @@ export interface TabsDeps {
   onActivated: () => void
   /** Moves keyboard focus back to what's in front: the active page, or jbrow's UI. */
   refocus: () => void
+  /** Whimsy is on and macOS doesn't ask for reduced motion: pages slide in as you switch tabs. */
+  whimsy: () => boolean
   /** Return true if jbrow handled the key, so the page doesn't see it. */
   onKey: (input: Electron.Input) => boolean
   searchUrl: () => string
@@ -115,6 +118,11 @@ const HISTORY_KEEP = 50
 /** Archived threads are forgotten after this long. */
 const ARCHIVE_KEEP_MS = 90 * 24 * 60 * 60 * 1000
 
+/** How far the page you switch to slides in from, how long it takes, and its curve (the sidebar's glide). */
+const SLIDE_PX = 14
+const SLIDE_MS = 320
+const SLIDE_EASE: [number, number, number, number] = [0.34, 1.25, 0.64, 1]
+
 /** How many closed tabs ⇧⌘T can bring back. */
 const CLOSED_KEEP = 25
 
@@ -176,6 +184,10 @@ export class Tabs {
   private historyTimer: NodeJS.Timeout | null = null
   /** Tabs whose back and forward list is being restored, with the address to end up on. */
   private restoring = new Map<string, string>()
+
+  /** How far above (less than 0) or below its place the shown page is while it slides in. */
+  private slideY = 0
+  private slideTimer: NodeJS.Timeout | null = null
 
   /** Kept and pinned threads whose pages never unload (see sweep). Main sets it from settings. */
   keepLoaded: KeepLoaded = { kept: false, pinned: true }
@@ -785,6 +797,8 @@ export class Tabs {
   activate(id: string) {
     if (!this.get(id)) return
     const panes = this.panesOf(id)
+    const wasShown = this.shown()
+    const from = this.records.findIndex((t) => t.id === this.activeId)
     // Drop empty new tabs you've moved away from, panes of a split you left included. An empty
     // pane of the split you stay in stays.
     for (const prev of this.shown().map((p) => this.get(p))) {
@@ -807,9 +821,35 @@ export class Tabs {
     if (live) {
       this.deps.runtime(this.get(id)!.profile)?.extensions.selectTab(live.wc)
     }
+    // Another pane of the same split, or the tab again, keeps its page where it is (sliding or not).
+    const to = this.records.findIndex((t) => t.id === id)
+    if (from >= 0 && !panes.some((p) => wasShown.includes(p))) this.slideIn(to > from ? SLIDE_PX : -SLIDE_PX)
     this.layout()
     this.changed()
     this.deps.onActivated()
+  }
+
+  /**
+   * Whimsy: the page you switch to slides into place from a little below if its tab is further
+   * down the sidebar, from above if it's further up, overshooting a touch. Only its place changes,
+   * never its size, so the page doesn't lay out again on every frame.
+   */
+  private slideIn(from: number) {
+    if (this.slideTimer) clearInterval(this.slideTimer)
+    this.slideTimer = null
+    this.slideY = 0
+    if (!this.deps.whimsy() || !this.deps.contentVisible() || this.fullscreenId) return
+    const start = performance.now()
+    this.slideY = from
+    this.slideTimer = setInterval(() => {
+      const t = Math.min(1, (performance.now() - start) / SLIDE_MS)
+      this.slideY = Math.round(from * (1 - bezier(SLIDE_EASE, t)))
+      if (t >= 1) {
+        clearInterval(this.slideTimer!)
+        this.slideTimer = null
+      }
+      this.layout()
+    }, 1000 / 120)
   }
 
   /**
@@ -830,8 +870,11 @@ export class Tabs {
       if (!live) return
       const on = !this.fullscreenId || id === this.fullscreenId
       if (on) {
+        const y = area.y + (this.fullscreenId ? 0 : this.slideY)
         live.view.setBounds(
-          spans ? { x: area.x + spans[i].x, y: area.y + PANE_HEAD, width: spans[i].width, height: Math.max(0, area.height - PANE_HEAD) } : area,
+          spans
+            ? { x: area.x + spans[i].x, y: y + PANE_HEAD, width: spans[i].width, height: Math.max(0, area.height - PANE_HEAD) }
+            : { ...area, y },
         )
       }
       live.view.setVisible(on && this.deps.contentVisible() && !this.covered(id))

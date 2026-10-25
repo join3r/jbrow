@@ -6,7 +6,7 @@ import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../share
 import { dragDivider, PANE_GAP, paneSpans, splitOf } from '../shared/split'
 import { initWelcome } from './welcome'
 import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type UpdateView, type VisitView } from '../shared/types'
-import { afterRender, beforeRender, celebrate, downloadsChanged, flourish, setWhimsy } from './whimsy'
+import { afterRender, beforeRender, downloadsChanged, flourish, setWhimsy } from './whimsy'
 
 declare global {
   interface Window {
@@ -2320,7 +2320,6 @@ quietLinks.addEventListener('change', () => sendPrefs({ quietLinks: quietLinks.c
 // Turning it on shows what it's like straight away.
 whimsy.addEventListener('change', () => {
   setWhimsy(whimsy.checked)
-  celebrate(whimsy)
   sendPrefs({ whimsy: whimsy.checked })
 })
 autoUpdate.addEventListener('change', () => sendPrefs({ autoUpdate: autoUpdate.checked }))
@@ -3117,6 +3116,23 @@ function showToast(text: string) {
   toastTimer = window.setTimeout(() => (el.hidden = true), 5000)
 }
 window.jbrow.on('toast', showToast)
+let copiedTimer: number | undefined
+window.jbrow.on('url-copied', () => {
+  const el = $('copied')
+  const omni = el.closest('.omni')!
+  clearTimeout(copiedTimer)
+  // Shown again from the start, so copying twice in a row still pops.
+  el.hidden = true
+  el.classList.remove('out')
+  void el.offsetWidth
+  el.hidden = false
+  omni.classList.add('copied-flash')
+  copiedTimer = window.setTimeout(() => {
+    el.classList.add('out')
+    omni.classList.remove('copied-flash')
+    copiedTimer = window.setTimeout(() => (el.hidden = true), 250)
+  }, 1200)
+})
 window.jbrow.on('settings', ({ open, section }: { open?: boolean; section?: string }) => setSettings(open ?? !!settingsEl.hidden, section))
 window.jbrow.on('rename-tab', (id: string) => startRename(id))
 window.jbrow.on('shortcuts', (data: typeof shortcuts) => {

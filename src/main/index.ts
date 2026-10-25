@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, MenuItem, nativeImage, nativeTheme, Notification, powerMonitor, session, shell, Tray } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, MenuItem, nativeImage, nativeTheme, Notification, powerMonitor, session, shell, systemPreferences, Tray } from 'electron'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { urlMatcher } from '../shared/patterns'
@@ -600,7 +600,7 @@ function runAction(id: ActionId) {
       const url = tabs.active()?.url
       if (!url) return
       clipboard.writeText(url)
-      return toast('Copied URL')
+      return panel.ui.send('url-copied')
     }
     case 'find':
       return openFind()
@@ -2294,6 +2294,7 @@ app.whenReady().then(async () => {
     contentBounds: () => panel.contentBounds(),
     contentVisible: () => panel.pageVisible(),
     onViewAdded: () => panel.keepOrder(),
+    whimsy: () => settings.whimsy && !systemPreferences.getAnimationSettings().prefersReducedMotion,
     onChange: () => pushState(),
     onActivated: () => {
       sidePanels?.layout()

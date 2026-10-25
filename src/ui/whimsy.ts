@@ -1,15 +1,16 @@
 /**
  * Whimsical touches, off unless turned on under Animation in settings: tabs pop in and vanish in a
- * puff, rows glide to their new places, the tab you switch to hops, finished downloads throw
- * confetti. All of it is Web Animations on elements the render already made, so nothing replays
- * when the sidebar redraws, and macOS's Reduce motion turns it all off.
+ * puff, rows glide to their new places, the tab you switch to hops, finished downloads wiggle.
+ * All of it is Web Animations on elements the render already made, so nothing replays when the
+ * sidebar redraws, and macOS's Reduce motion turns it all off. The page sliding in as you switch
+ * tabs is main's (Tabs.slideIn), since pages aren't part of this document.
  */
 
 const reduced = matchMedia('(prefers-reduced-motion: reduce)')
 let on = false
 const live = () => on && !reduced.matches
 
-/** Particles go here, over everything, so they can fly out of the sidebar's clipping. */
+/** Puffs go here, over everything, so they can spill out of the sidebar's clipping. */
 const layer = document.createElement('div')
 layer.className = 'whimsy-layer'
 layer.setAttribute('aria-hidden', 'true')
@@ -21,38 +22,6 @@ export function setWhimsy(enabled: boolean) {
 }
 
 const accent = () => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#1a7f8e'
-const CONFETTI = ['#f6c344', '#ef6f6c', '#5bc0eb', '#9bc53d', '#c879ff']
-const rand = (min: number, max: number) => min + Math.random() * (max - min)
-
-/** `n` bits flung out from the middle of `rect`, falling a little as they fade. */
-function burst(rect: DOMRect, colors: string[], n: number, reach: number, confetti = false) {
-  const x = rect.left + rect.width / 2
-  const y = rect.top + rect.height / 2
-  for (let i = 0; i < n; i++) {
-    const bit = document.createElement('span')
-    bit.className = confetti ? 'whimsy-bit confetti' : 'whimsy-bit'
-    bit.style.background = colors[i % colors.length]
-    bit.style.left = `${x}px`
-    bit.style.top = `${y}px`
-    layer.append(bit)
-    const angle = (i / n) * Math.PI * 2 + rand(-0.3, 0.3)
-    const dist = reach * rand(0.6, 1.1)
-    const dx = Math.cos(angle) * dist
-    const dy = Math.sin(angle) * dist
-    const spin = confetti ? rand(-540, 540) : 0
-    const fall = confetti ? reach * 0.8 : reach * 0.15
-    bit
-      .animate(
-        [
-          { transform: 'translate(-50%, -50%) scale(0.4) rotate(0deg)', opacity: 1 },
-          { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1) rotate(${spin / 2}deg)`, opacity: 1, offset: 0.45 },
-          { transform: `translate(calc(-50% + ${dx * 1.15}px), calc(-50% + ${dy * 1.15 + fall}px)) scale(0.6) rotate(${spin}deg)`, opacity: 0 },
-        ],
-        { duration: confetti ? rand(700, 1000) : rand(420, 560), easing: 'cubic-bezier(0.2, 0.7, 0.3, 1)', fill: 'forwards' },
-      )
-      .finished.finally(() => bit.remove())
-  }
-}
 
 /** A puff of smoke where something was. */
 function poof(rect: DOMRect, color: string) {
@@ -71,13 +40,6 @@ function poof(rect: DOMRect, color: string) {
       { duration: 420, easing: 'cubic-bezier(0.2, 0.8, 0.3, 1)', fill: 'forwards' },
     )
     .finished.finally(() => cloud.remove())
-  burst(rect, [color, accent()], 9, Math.min(46, Math.max(22, rect.width * 0.25)))
-}
-
-/** Confetti from an element, for things worth a small celebration. */
-export function celebrate(el: Element | null) {
-  if (!live() || !el) return
-  burst(el.getBoundingClientRect(), [accent(), ...CONFETTI], 18, 56, true)
 }
 
 /** A one-off flourish on an element that stays in the page (a toolbar button). */
@@ -220,15 +182,13 @@ export function afterRender(containers: HTMLElement[], state: { tabIds: string[]
   }
 }
 
-/** Confetti for each download that just finished. */
+/** A wiggle for each download that just finished. */
 const dlStates = new Map<string, string>()
 export function downloadsChanged(list: { id: string; state: string }[], buttonFor: (id: string) => Element | null) {
   for (const d of list) {
     const prev = dlStates.get(d.id)
     if (prev && prev !== 'completed' && d.state === 'completed') {
-      const b = buttonFor(d.id)
-      celebrate(b)
-      flourish(b, 'wiggle')
+      flourish(buttonFor(d.id), 'wiggle')
     }
     dlStates.set(d.id, d.state)
   }
