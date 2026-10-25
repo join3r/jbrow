@@ -41,6 +41,10 @@ const alphaHost = () => new URL(alpha).host
 
 /** Puts the keyboard in the address bar, as ⌘L does, with its text selected. */
 async function focusOmnibox(ui: Cdp) {
+  // A page the last test opened gets the keyboard a moment after it loads; that would blur the
+  // address bar mid-test.
+  const page = activeTab(await jb.state())?.url
+  if (page) await jb.pageFocused(page)
   await jb.send('focus-ui')
   await ui.eval('omnibox.focus()')
   await waitFor(async () => (await focusedId(ui)) === 'omnibox', 'the address bar to have focus')

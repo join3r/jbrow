@@ -463,6 +463,24 @@ bridge and extension shims), `src/ui` (the toolbar and sidebar), `src/shared` (s
 sides use), `scripts/patch-deps.mjs` (fixes to electron-chrome-extensions).
 The log is at `~/Library/Logs/jbrow/main.log` (menu bar item, **Show log file**).
 
+## Tests
+
+```sh
+npm test                               # build, then unit and end-to-end tests
+npm run test:unit                      # unit tests only, no Electron
+node test/run.mjs e2e tabs split       # end-to-end files whose names contain "tabs" or "split"
+node test/run.mjs --repeat 5           # everything five times, to catch flaky tests
+npm run test:linux                     # the same on Linux, in Docker (test/linux)
+```
+
+Unit tests (`test/unit`) run on Node's test runner, with `test/mocks/electron.ts` in place of
+Electron. End-to-end tests (`test/e2e`) start the built app with `JBROW_BACKGROUND=1`, each in its
+own user data folder, and drive it over CDP (`test/e2e/harness.ts`), so they run next to the jbrow
+you use. They never touch the internet: pages come from a local server. On Linux each jbrow gets
+its own Xvfb display, since X11 hands keyboard focus to whichever window asked last. CI runs it all
+on macOS, Windows and Linux (`.github/workflows/test.yml`); run that workflow by hand with
+**repeat** set to run every test several times.
+
 ## Not built yet
 
 - A username and password asked of an extension's service worker has no page to ask in; jbrow
