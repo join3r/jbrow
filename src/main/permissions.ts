@@ -83,14 +83,19 @@ function originOf(url: string): string {
   }
 }
 
-/** Extensions already listed what they use when you installed them. */
+/**
+ * Extensions already listed what they use when you installed them. Camera, microphone and other
+ * apps they're asked for like a site, as in Chrome.
+ */
 const isExtension = (origin: string) => origin.startsWith('chrome-extension://')
+const extensionsAsk = (permission: string) => /^(camera|microphone|media|openExternal)\b/.test(permission)
 
 /**
- * Only http(s) sites get remembered decisions. Others (data:, file:, sandboxed frames, whose
- * origin is "null") would share one entry with every page like them, so they're asked each time.
+ * Only http(s) sites and extensions get remembered decisions. Others (data:, file:, sandboxed
+ * frames, whose origin is "null") would share one entry with every page like them, so they're
+ * asked each time.
  */
-const isRememberable = (origin: string) => /^https?:\/\//.test(origin)
+const isRememberable = (origin: string) => /^(https?|chrome-extension):\/\//.test(origin)
 
 /**
  * Camera and microphone arrive as one "media" request; jbrow asks and remembers them separately.
@@ -137,16 +142,16 @@ export class SitePermissions {
     const profileId = profile.id
     sess.setPermissionRequestHandler((wc, permission, callback, details) => {
       const origin = originOf(details.requestingUrl)
-      if (ALWAYS.has(permission) || isExtension(origin)) return callback(true)
-      if (STORAGE_ACCESS.has(permission)) return callback(!thirdPartyCookiesBlocked())
       const wanted = expand(permission, details as { mediaTypes?: string[]; externalURL?: string })
+      if (ALWAYS.has(permission) || (isExtension(origin) && !wanted.some(extensionsAsk))) return callback(true)
+      if (STORAGE_ACCESS.has(permission)) return callback(!thirdPartyCookiesBlocked())
       if (!wanted.every((p) => describe(p))) return callback(false)
       // The name is read when asking, so a profile renamed in settings asks under its new name.
       void this.ask(wc, profileId, profile.name, origin, wanted).then(callback)
     })
     sess.setPermissionCheckHandler((_wc, permission, requestingOrigin, details) => {
       const origin = originOf(requestingOrigin)
-      if (ALWAYS.has(permission) || isExtension(origin)) return true
+      if (ALWAYS.has(permission) || (isExtension(origin) && !extensionsAsk(permission))) return true
       if (STORAGE_ACCESS.has(permission)) return !thirdPartyCookiesBlocked()
       // A site may ask for a USB, HID or serial device. It sees only the ones you pick in the chooser.
       if (permission === 'usb' || permission === 'hid' || permission === 'serial') return true

@@ -78,6 +78,23 @@ test('always-granted permissions and extensions need no prompt', async (t) => {
   assert.equal(asked.length, 0)
 })
 
+test('extensions are asked for the camera, the microphone and other apps, once', async (t) => {
+  const asked = answer(t, true)
+  const { request, check } = setup()
+  const ext = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop'
+  assert.equal(check('media', ext, { mediaType: 'video' }), false)
+  assert.equal(await request('media', { requestingUrl: `${ext}/popup.html`, mediaTypes: ['video'] }), true)
+  assert.equal(asked.length, 1)
+  // Remembered for that extension, like a site.
+  assert.equal(check('media', ext, { mediaType: 'video' }), true)
+  assert.equal(await request('media', { requestingUrl: `${ext}/popup.html`, mediaTypes: ['video'] }), true)
+  assert.equal(asked.length, 1)
+  // Another extension asks for itself.
+  assert.equal(check('media', 'chrome-extension://ponmlkjihgfedcbaponmlkjihgfedcba', { mediaType: 'video' }), false)
+  assert.equal(await request('openExternal', { requestingUrl: `${ext}/bg.html`, externalURL: 'zoommtg://x' }), true)
+  assert.equal(asked.length, 2)
+})
+
 test('unknown permissions are denied without asking', async (t) => {
   const asked = answer(t, true)
   const { request, check } = setup()

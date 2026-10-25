@@ -327,17 +327,33 @@ export class Jbrow {
     return JSON.parse(readFileSync(this.file(name), 'utf8')) as T
   }
 
-  /** Quits jbrow the way an outside quit does, and waits for it to exit. */
+  /**
+   * Quits jbrow the way an outside quit does, so it saves what it keeps on quitting, and waits for
+   * it to exit. DevTools' Browser.close does that everywhere; a signal would only on macOS and
+   * Linux (Windows has none: the process is just ended).
+   */
   async quit(timeout = 10_000) {
     for (const c of this.conns) c.close()
     this.conns = []
     this.uiCdp = null
-    if (!this.running) return
+    if (!this.running) return this.stopDisplay()
+    const exited = (ms: number) => {
+      let timer: NodeJS.Timeout | undefined
+      return Promise.race([this.exited.then(() => true), new Promise<boolean>((r) => (timer = setTimeout(() => r(false), ms)))]).finally(() => clearTimeout(timer))
+    }
+    try {
+      const { webSocketDebuggerUrl } = (await (await fetch(`http://127.0.0.1:${this.port}/json/version`, { headers: { connection: 'close' } })).json()) as {
+        webSocketDebuggerUrl: string
+      }
+      const browser = new Cdp({ id: 'browser', type: 'browser', url: '', title: '', webSocketDebuggerUrl })
+      await browser.opened
+      void browser.send('Browser.close').catch(() => {})
+      const done = await exited(timeout)
+      browser.close()
+      if (done) return this.stopDisplay()
+    } catch {}
     this.proc.kill('SIGTERM')
-    let timer: NodeJS.Timeout | undefined
-    const code = await Promise.race([this.exited, new Promise<'timeout'>((r) => (timer = setTimeout(() => r('timeout'), timeout)))])
-    clearTimeout(timer)
-    if (code === 'timeout') {
+    if (!(await exited(timeout))) {
       this.proc.kill('SIGKILL')
       await this.exited
     }
@@ -347,6 +363,11 @@ export class Jbrow {
   /** Quits and deletes the user data folder (unless it was passed in). */
   async close() {
     await this.quit()
+    // JBROW_TEST_LOGS=<dir> keeps what each jbrow printed, for CI to keep when a test fails.
+    if (process.env.JBROW_TEST_LOGS) {
+      mkdirSync(process.env.JBROW_TEST_LOGS, { recursive: true })
+      writeFileSync(path.join(process.env.JBROW_TEST_LOGS, `${path.basename(this.userData)}.log`), this.output)
+    }
     // Helper processes can hold the output pipes open for a while after jbrow exits.
     this.proc.stdout?.destroy()
     this.proc.stderr?.destroy()

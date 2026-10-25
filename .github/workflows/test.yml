@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 40
     env:
       REPEAT: ${{ github.event.inputs.repeat || '1' }}
+      JBROW_TEST_LOGS: ${{ github.workspace }}/test-logs
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -40,3 +41,9 @@ jobs:
         run: |
           sudo apt-get install -y xdotool
           xvfb-run -a -s "-screen 0 1440x900x24" node test/run.mjs e2e --repeat ${{ env.REPEAT }}
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: jbrow-logs-${{ matrix.os }}
+          path: test-logs
+          if-no-files-found: ignore
