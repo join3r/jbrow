@@ -553,13 +553,11 @@ export class Tabs {
       if (this.deps.onKey(input)) event.preventDefault()
     })
     wc.on('context-menu', (_e, params) => void this.contextMenu(id, wc, params, rt))
-    // Clicking into another pane of the split focuses it, toolbar and keys and all. Focus can also
-    // pass through a pane while jbrow hands it elsewhere (on Linux, focusing jbrow's UI does), so
-    // only a pane that still has it counts.
-    wc.on('focus', () => {
-      setImmediate(() => {
-        if (!wc.isDestroyed() && wc.isFocused() && id !== this.activeId && this.shown().includes(id)) this.activate(id)
-      })
+    // Clicking into another pane of the split focuses it, toolbar and keys and all. Taken from the
+    // click, not from the page getting focus: focus also passes through panes on its own, when one
+    // loads or while jbrow hands it elsewhere (on Linux, focusing jbrow's UI does).
+    wc.on('before-mouse-event', (_e, mouse) => {
+      if (mouse.type === 'mouseDown' && id !== this.activeId && this.shown().includes(id)) this.activate(id)
     })
     this.deps.devices.watch(wc, rt.profile.id)
     wc.on('enter-html-full-screen', () => {

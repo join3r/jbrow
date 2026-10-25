@@ -16,6 +16,7 @@ export const tabById = (s: UiState, id: string): UiTab | undefined => s.tabs.fin
 /** Opens `url` in a new tab and waits for it to load; returns that tab. */
 export async function openTab(jb: Jbrow, url: string): Promise<UiTab> {
   const s = await jb.navigate(url, { newTab: true })
+  await jb.pageFocused(activeTab(s)!.url)
   return activeTab(s)!
 }
 

@@ -317,6 +317,23 @@ export class Jbrow {
     return this.connect(target)
   }
 
+  /**
+   * Waits for the keyboard to reach the page at `url`, which jbrow hands it when the tab opens.
+   * It gets there a moment after the page loads, and a test typing into jbrow's own UI before then
+   * would have its field blurred mid-way. Gives up quietly after `timeout` ms, for pages jbrow covers
+   * with its own screen (a sign-in, a crash), which keep the keyboard in the UI.
+   */
+  async pageFocused(url: string, timeout = 3000) {
+    let page: Cdp | undefined
+    try {
+      page = await this.page((t) => t.url === url, timeout)
+      await waitFor(() => page!.eval('document.hasFocus()'), `${url} to have the keyboard`, timeout)
+    } catch {
+    } finally {
+      page?.close()
+    }
+  }
+
   /** Path of a file in the user data folder. */
   file(...parts: string[]) {
     return path.join(this.userData, ...parts)

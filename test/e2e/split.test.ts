@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { after, before, beforeEach, test } from 'node:test'
 import { CMD, CTRL, META, html, launch, serve, waitFor, type Jbrow, type TestServer } from './harness'
-import { activate, activeTab, offline, openTab, shownPage, tabById, waitLoaded, waitRows } from './tab-helpers'
+import { activate, activeTab, offline, openTab, realClick, shownPage, tabById, waitLoaded, waitRows } from './tab-helpers'
 import type { UiState } from '../../src/shared/types'
 
 let jb: Jbrow
@@ -197,4 +197,18 @@ test('splitting a kept tab keeps the new pane right after it', async () => {
   assert.ok(p.order! > tabById(s, left.id)!.order!)
   // Kept on the first page it loaded.
   await jb.waitForState((s) => tabById(s, pane.id)?.home?.url === `${web.url}/right`, 'its pinned page')
+})
+
+test('a click into the other pane makes it the active tab; a pane loading does not', async () => {
+  const left = await openTab(jb, `${web.url}/left`)
+  const right = await splitNew(left.id)
+  await jb.send('navigate', { input: `${web.url}/right` })
+  await waitLoaded(jb, right.id, `${web.url}/right`)
+  // The right pane loading took the keyboard, and it stays the active one.
+  await jb.pageFocused(`${web.url}/right`)
+  assert.equal((await jb.state()).activeId, right.id)
+  await realClick(await shownPage(jb, `${web.url}/left`), 'p')
+  await jb.waitForState((s) => s.activeId === left.id, 'the clicked pane to be active')
+  await realClick(await shownPage(jb, `${web.url}/right`), 'body')
+  await jb.waitForState((s) => s.activeId === right.id, 'the other pane to be active again')
 })

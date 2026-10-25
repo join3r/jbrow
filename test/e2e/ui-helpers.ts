@@ -74,6 +74,7 @@ export const isShown = (ui: Cdp, id: string) =>
 /** Opens a tab at `url` and waits until it's the loaded, active tab. */
 export async function openTab(jb: Jbrow, url: string): Promise<UiTab> {
   const s = await jb.navigate(url, { newTab: true })
+  await jb.pageFocused(activeTab(s)!.url)
   return activeTab(s)!
 }
 
