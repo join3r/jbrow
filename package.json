@@ -52,8 +52,7 @@
         }
       ],
       "category": "public.app-category.productivity",
-      "top-sites": "node scripts/top-sites.mjs",
-    "icon": "build/icon.png",
+      "icon": "build/icon.png",
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
