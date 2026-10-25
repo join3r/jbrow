@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, M
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { urlMatcher } from '../shared/patterns'
-import { awayFromHome, isInFolder, isPinned, keptThreads, numberedThreads, sections, type FolderView } from '../shared/threads'
+import { awayFromHome, besideClosed, isInFolder, isPinned, keptThreads, numberedThreads, sections, type FolderView } from '../shared/threads'
 import { isSearchUrl, looksLikeAddress, suggestUrlFor } from '../shared/engines'
 import { THEMES, type AppEntry, type AppLabel, type Folder, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
@@ -190,6 +190,7 @@ function state(): UiState {
       pinnedExtensions: settings.pinnedExtensions,
       pinnedRows: settings.pinnedRows,
       numberFrom: settings.numberFrom,
+      newTabsAt: settings.newTabsAt,
       openApps: settings.openApps,
       restyleAgent: settings.restyle.agent,
       restyleModel: settings.restyle.model,
@@ -336,7 +337,7 @@ function appLabels(): Record<string, AppLabel> {
 
 function threadsInView() {
   const appNames = Object.fromEntries(Object.entries(appLabels()).map(([k, l]) => [k, l.name]))
-  return sections(tabs.records, { filter, scope: scope?.key ?? null, activeId: tabs.activeId, now: Date.now(), folders: tabs.folders, appNames, earlierAfterMs: settings.earlierAfterHours * HOUR_MS })
+  return sections(tabs.records, { filter, scope: scope?.key ?? null, activeId: tabs.activeId, now: Date.now(), folders: tabs.folders, appNames, earlierAfterMs: settings.earlierAfterHours * HOUR_MS, newTabsAt: settings.newTabsAt })
 }
 
 /** Unloads and archives stale threads, or files them into folders, per settings. */
@@ -829,6 +830,7 @@ function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.earlierAfterHours !== undefined) settings.earlierAfterHours = Math.max(1, prefs.earlierAfterHours)
   if (Number.isFinite(prefs.pinnedRows)) settings.pinnedRows = Math.max(1, Math.round(prefs.pinnedRows!))
   if (prefs.numberFrom === 'pinned' || prefs.numberFrom === 'kept' || prefs.numberFrom === 'today') settings.numberFrom = prefs.numberFrom
+  if (prefs.newTabsAt === 'top' || prefs.newTabsAt === 'bottom') settings.newTabsAt = prefs.newTabsAt
   if (Array.isArray(prefs.openApps)) settings.openApps = prefs.openApps.filter((k) => typeof k === 'string')
   if (prefs.miniPlayer) {
     const mp = { ...settings.miniPlayer, ...prefs.miniPlayer }
@@ -2321,6 +2323,7 @@ app.whenReady().then(async () => {
       sidePanels.layout()
     },
     confirmUnload,
+    besideClosed: (id) => besideClosed(threadsInView(), id, settings.newTabsAt),
     profiles: () => settings.profiles,
     openInProfile: (fromId, profile, url) => {
       const from = tabs.get(fromId)

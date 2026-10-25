@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import {
   awayFromHome,
+  besideClosed,
   byOrder,
   childrenOf,
   displayName,
@@ -251,6 +252,13 @@ describe('sections', () => {
     const s = sections(tabs, baseOpts)
     assert.deepEqual(roots(s.today), ['new', 'mid', 'old'])
     assert.deepEqual(s.earlier, [])
+  })
+
+  test('newTabsAt bottom lists Today and app sections oldest first', () => {
+    const tabs = [tab('b', { createdAt: 2 }), tab('a', { createdAt: 1 }), tab('c', { createdAt: 3 }), tab('x', { createdAt: 4, scope: 'com.x' }), tab('y', { createdAt: 5, scope: 'com.x' })]
+    const s = sections(tabs, { ...baseOpts, newTabsAt: 'bottom' })
+    assert.deepEqual(roots(s.today), ['a', 'b', 'c'])
+    assert.deepEqual(roots(s.apps[0].threads), ['x', 'y'])
   })
 
   test('threads unseen past the threshold move to Earlier, the active one never does', () => {
@@ -548,5 +556,28 @@ describe('awayFromHome', () => {
     assert.equal(awayFromHome(tab('t', { home, url: 'https://a.example/other' })), false)
     assert.equal(awayFromHome(tab('t', { kept: true, url: 'https://a.example/other' })), false)
     assert.equal(awayFromHome(tab('t', { kept: true, home, url: '' })), false)
+  })
+})
+
+describe('besideClosed', () => {
+  const tabs = [tab('a', { createdAt: 1 }), tab('b', { createdAt: 2 }), tab('c', { createdAt: 3 }), tab('k', { kept: true })]
+
+  test('at top, the tab above takes over, or the one below for the top tab', () => {
+    const s = sections(tabs, baseOpts)
+    assert.deepEqual(roots(s.today), ['c', 'b', 'a'])
+    assert.equal(besideClosed(s, 'b', 'top'), 'c')
+    assert.equal(besideClosed(s, 'c', 'top'), 'b')
+  })
+
+  test('at bottom, the tab below takes over, or the one above for the bottom tab', () => {
+    const s = sections(tabs, { ...baseOpts, newTabsAt: 'bottom' })
+    assert.deepEqual(roots(s.today), ['a', 'b', 'c'])
+    assert.equal(besideClosed(s, 'b', 'bottom'), 'c')
+    assert.equal(besideClosed(s, 'c', 'bottom'), 'b')
+  })
+
+  test('nothing for a kept tab or one alone in its section', () => {
+    assert.equal(besideClosed(sections(tabs, baseOpts), 'k'), undefined)
+    assert.equal(besideClosed(sections([tab('solo')], baseOpts), 'solo'), undefined)
   })
 })

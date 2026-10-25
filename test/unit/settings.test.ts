@@ -151,6 +151,7 @@ test('invalid enum and number values fall back to defaults', () => {
   write({
     pinnedRows: 0,
     numberFrom: 'everything',
+    newTabsAt: 'middle',
     openApps: 'com.apple.Terminal',
     sidePanelWidth: 'wide',
     appearance: 'sepia',
@@ -160,6 +161,7 @@ test('invalid enum and number values fall back to defaults', () => {
   const s = loadSettings()
   assert.equal(s.pinnedRows, 1)
   assert.equal(s.numberFrom, 'today')
+  assert.equal(s.newTabsAt, 'top')
   assert.deepEqual(s.openApps, [])
   assert.equal(s.sidePanelWidth, 360)
   assert.equal(s.appearance, 'system')

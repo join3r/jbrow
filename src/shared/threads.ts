@@ -1,4 +1,4 @@
-import type { Folder, TabRecord } from './types'
+import type { Folder, NewTabsAt, TabRecord } from './types'
 
 /** Threads unseen this long move to the Earlier section, unless settings say otherwise. */
 export const EARLIER_AFTER_MS = 12 * 60 * 60 * 1000
@@ -147,10 +147,10 @@ export interface Sections<T extends TabRecord> {
 
 /**
  * Threads in sidebar order. Each is a single tab now; the name stays from when tabs nested. Outside
- * Kept the newest tab comes first, as in Arc, and the order is by creation time so that ⌘1–9
- * don't shift as you switch. The active thread never counts as Earlier.
- * `appNames` names app sections by scope key; main and the UI must pass the same names and
- * `earlierAfterMs`, as they order the sections and so the ⌘ numbers.
+ * Kept the order is by creation time so that ⌘1–9 don't shift as you switch: newest first, as in
+ * Arc, or with `newTabsAt` 'bottom' oldest first. The active thread never counts as Earlier.
+ * `appNames` names app sections by scope key; main and the UI must pass the same names,
+ * `earlierAfterMs` and `newTabsAt`, as they order the sections and so the ⌘ numbers.
  */
 export function sections<T extends TabRecord>(
   tabs: T[],
@@ -163,6 +163,8 @@ export function sections<T extends TabRecord>(
     appNames?: Record<string, string>
     /** Threads unseen this long move to Earlier. Main and the UI must pass the same value, as it orders the ⌘ numbers. */
     earlierAfterMs?: number
+    /** Where new tabs go outside Kept. Main and the UI must pass the same value, as it orders the ⌘ numbers. */
+    newTabsAt?: NewTabsAt
   },
 ): Sections<T> {
   const views = tabs
@@ -181,11 +183,11 @@ export function sections<T extends TabRecord>(
   const inFolder = (v: ThreadView<T>) => !!v.root.folder && folderIds.has(v.root.folder)
   // Showing one app, its threads are the whole list; otherwise each app gets its own section.
   const inApp = (v: ThreadView<T>) => !opts.scope && !!v.root.scope
-  const newest = [...views].reverse()
-  const loose = newest.filter((v) => !v.root.kept && !inApp(v))
+  const ordered = opts.newTabsAt === 'bottom' ? views : [...views].reverse()
+  const loose = ordered.filter((v) => !v.root.kept && !inApp(v))
   const kept = views.filter((v) => v.root.kept && !v.root.pinned)
   const apps = new Map<string, AppView<T>>()
-  for (const v of newest.filter((v) => !v.root.kept && inApp(v))) {
+  for (const v of ordered.filter((v) => !v.root.kept && inApp(v))) {
     const key = v.root.scope!
     let app = apps.get(key)
     if (!app) apps.set(key, (app = { scope: key, name: opts.appNames?.[key] || v.root.scopeName || key, threads: [], earlier: [] }))
@@ -230,6 +232,22 @@ export function numberedThreads<T extends TabRecord>(
   const kept = from === 'today' ? [] : keptThreads(s, { skipCollapsed: true })
   const apps = s.apps.filter((a) => openApps.includes(a.scope)).flatMap((a) => a.threads)
   return [...pinned, ...kept, ...s.today, ...apps].slice(0, 9)
+}
+
+/**
+ * The tab to focus when tab `id` closes: the one beside it in its sidebar section, on the side new
+ * tabs go (above with `newTabsAt` 'top', below with 'bottom'), else on the other side. Undefined
+ * for a kept tab, or one alone in its section.
+ */
+export function besideClosed<T extends TabRecord>(s: Sections<T>, id: string, newTabsAt: NewTabsAt = 'top'): string | undefined {
+  const lists = [s.today, ...s.apps.flatMap((a) => [a.threads, a.earlier]), s.earlier]
+  for (const list of lists) {
+    const i = list.findIndex((v) => v.all.some((t) => t.id === id))
+    if (i < 0) continue
+    const [first, second] = newTabsAt === 'bottom' ? [list[i + 1], list[i - 1]] : [list[i - 1], list[i + 1]]
+    return (first ?? second)?.last.id
+  }
+  return undefined
 }
 
 /**

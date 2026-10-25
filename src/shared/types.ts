@@ -172,6 +172,8 @@ export interface Prefs {
   pinnedRows: number
   /** Where ⌘1 starts: the pinned icons, the Kept rows, or Today, skipping the sections above. */
   numberFrom: NumberFrom
+  /** Where new tabs go outside Kept, and so which tab closing one moves to. */
+  newTabsAt: NewTabsAt
   /** App sections at the bottom of the sidebar that are open, by scope key. The rest are collapsed. */
   openApps: string[]
   /** Claude model alias for restyling sites. */
@@ -212,6 +214,9 @@ export interface UpdateView {
 
 /** The first sidebar section ⌘1–9 count from. */
 export type NumberFrom = 'pinned' | 'kept' | 'today'
+
+/** Where new tabs go in the sidebar outside Kept. Closing a tab focuses the one beside it on that side. */
+export type NewTabsAt = 'top' | 'bottom'
 
 /** Which kept threads keep their pages loaded. Pinned threads are kept too, but have their own switch. */
 export interface KeepLoaded {

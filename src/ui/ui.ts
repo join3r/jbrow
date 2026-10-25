@@ -511,7 +511,7 @@ function renderThreads() {
   const draft = renameInput ? { value: renameInput.value, start: renameInput.selectionStart, end: renameInput.selectionEnd } : null
 
   const appNames = Object.fromEntries(Object.entries(S.apps).map(([k, l]) => [k, l.name]))
-  const s = sections(S.tabs, { filter: S.filter, scope: S.scope?.key ?? null, activeId: S.activeId, now: S.now, folders: S.folders, appNames, earlierAfterMs: S.prefs.earlierAfterHours * HOUR_MS })
+  const s = sections(S.tabs, { filter: S.filter, scope: S.scope?.key ?? null, activeId: S.activeId, now: S.now, folders: S.folders, appNames, earlierAfterMs: S.prefs.earlierAfterHours * HOUR_MS, newTabsAt: S.prefs.newTabsAt })
   const numbered = new Map(numberedThreads(s, { from: S.prefs.numberFrom, openApps: S.prefs.openApps }).map((v, i) => [v.root.id, i + 1]))
   // As in Arc, a split view is one row, where the first of its tabs comes in the sidebar; its
   // other tabs don't show again further down. Pinned tabs stay icons.
@@ -1782,6 +1782,7 @@ function renderSettings(all = false) {
   seg('archiveAfter', String(S.prefs.archiveAfterDays))
   seg('earlierAfter', String(S.prefs.earlierAfterHours))
   seg('numberFrom', S.prefs.numberFrom)
+  seg('newTabsAt', S.prefs.newTabsAt)
   seg('restyleAgent', S.prefs.restyleAgent)
   seg('restyleModel', S.prefs.restyleModel)
   const codex = S.prefs.restyleAgent === 'codex'
@@ -1919,6 +1920,10 @@ $('appearance').addEventListener('click', (e) => {
 $('numberFrom').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ numberFrom: b.dataset.value as Prefs['numberFrom'] })
+})
+$('newTabsAt').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b) sendPrefs({ newTabsAt: b.dataset.value as Prefs['newTabsAt'] })
 })
 $('earlierAfter').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')

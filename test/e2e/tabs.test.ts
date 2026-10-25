@@ -126,20 +126,48 @@ test('a ⌘-click on a link opens it in the background, unread', async () => {
   page.close()
 })
 
-test('closing the active tab moves to the one used before it', async () => {
+test('closing the active tab moves to the tab above it, where new tabs go', async () => {
   const one = await openTab(jb, `${web.url}/one`)
   const two = await openTab(jb, `${web.url}/two`)
   const three = await openTab(jb, `${web.url}/three`)
+  // The sidebar reads three, two, one.
   await activate(jb, one.id)
-  await activate(jb, three.id)
-  await jb.send('close', { id: three.id })
-  let s = await jb.waitForState((s) => !tabById(s, three.id), 'the tab to close')
-  assert.equal(s.activeId, one.id)
-  // Closing one that isn't active leaves the active one alone.
+  await activate(jb, two.id)
   await jb.send('close', { id: two.id })
-  s = await jb.waitForState((s) => !tabById(s, two.id), 'the other tab to close')
+  let s = await jb.waitForState((s) => !tabById(s, two.id), 'the tab to close')
+  assert.equal(s.activeId, three.id)
+  // The top tab has none above, so the one below takes over.
+  await jb.send('close', { id: three.id })
+  s = await jb.waitForState((s) => !tabById(s, three.id), 'the top tab to close')
   assert.equal(s.activeId, one.id)
   await waitRows(jb, (rows) => rows.length === 1 && rows[0].id === one.id, 'one row left')
+})
+
+test('with new tabs at the bottom, closing the active tab moves to the tab below it', async () => {
+  await jb.send('prefs', { newTabsAt: 'bottom' })
+  await jb.waitForState((s) => s.prefs.newTabsAt === 'bottom', 'the setting')
+  try {
+    const one = await openTab(jb, `${web.url}/one`)
+    const two = await openTab(jb, `${web.url}/two`)
+    const three = await openTab(jb, `${web.url}/three`)
+    await waitRows(jb, (rows) => rows.map((r) => r.id).join() === [one.id, two.id, three.id].join(), 'oldest first')
+    await activate(jb, three.id)
+    await activate(jb, two.id)
+    await jb.send('close', { id: two.id })
+    let s = await jb.waitForState((s) => !tabById(s, two.id), 'the tab to close')
+    assert.equal(s.activeId, three.id)
+    await jb.send('close', { id: three.id })
+    s = await jb.waitForState((s) => !tabById(s, three.id), 'the bottom tab to close')
+    assert.equal(s.activeId, one.id)
+    // Closing one that isn't active leaves the active one alone.
+    const four = await openTab(jb, `${web.url}/two`)
+    await activate(jb, one.id)
+    await jb.send('close', { id: four.id })
+    s = await jb.waitForState((s) => !tabById(s, four.id), 'the other tab to close')
+    assert.equal(s.activeId, one.id)
+  } finally {
+    await jb.send('prefs', { newTabsAt: 'top' })
+  }
 })
 
 test('closing the last tab leaves an empty new tab', async () => {

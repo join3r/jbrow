@@ -63,6 +63,8 @@ export interface TabsDeps {
    * to answer before returning: Electron only lets the page go from inside the event.
    */
   confirmUnload: (id: string, kind: UnloadKind) => boolean
+  /** The tab beside one in the sidebar that takes over when it closes, per settings. Asked before it goes. */
+  besideClosed: (id: string) => string | undefined
 }
 
 /** What a page asking to stay would be left for: another page, the same one again, or nothing. */
@@ -886,6 +888,7 @@ export class Tabs {
     const rec = this.get(id)
     if (!rec) return
     const panes = this.panesOf(id)
+    const beside = this.activeId === id && !rec.kept ? this.deps.besideClosed(id) : undefined
     if (rec.kept && rec.home && !remove) {
       this.dropView(rec)
       this.histories.delete(rec.id)
@@ -904,11 +907,12 @@ export class Tabs {
     this.prune()
     if (this.activeId === id) {
       this.activeId = null
-      // In a split, the pane to its left (or right) takes over. Otherwise the next tab comes from
-      // outside Kept; a kept tab only comes up when asked for.
+      // In a split, the pane to its left (or right) takes over. Otherwise the tab beside it in the
+      // sidebar, on the side new tabs go, or else the last one used outside Kept; a kept tab only
+      // comes up when asked for.
       const i = panes.indexOf(id)
-      const beside = [panes[i - 1], panes[i + 1]].find((p) => p && p !== id && this.get(p))
-      const next = beside ?? this.mru.find((m) => {
+      const pane = [panes[i - 1], panes[i + 1]].find((p) => p && p !== id && this.get(p))
+      const next = pane ?? (beside && this.get(beside) ? beside : undefined) ?? this.mru.find((m) => {
         const t = this.get(m)
         return t && !t.kept
       })

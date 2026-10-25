@@ -2,7 +2,7 @@ import { app, type Rectangle } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ActionId } from '../shared/shortcuts'
-import { THEMES, type Appearance, type KeepLoaded, type MiniPlayerPrefs, type NumberFrom, type Profile, type ProfileStyle, type RestyleAgent, type ThemeId } from '../shared/types'
+import { THEMES, type Appearance, type KeepLoaded, type MiniPlayerPrefs, type NewTabsAt, type NumberFrom, type Profile, type ProfileStyle, type RestyleAgent, type ThemeId } from '../shared/types'
 
 export type AnimationStyle = 'materialize' | 'slide' | 'scale' | 'fade' | 'off'
 export type AnimationEase = 'spring' | 'snappy' | 'smooth'
@@ -76,6 +76,8 @@ export interface Settings {
   pinnedRows: number
   /** Where ⌘1 starts: pinned, Kept or Today. */
   numberFrom: NumberFrom
+  /** New tabs at the top of Today and app sections, newest first, or at the bottom, oldest first. Closing the active tab focuses the tab beside it on that side. */
+  newTabsAt: NewTabsAt
   /** App sections open at the bottom of the sidebar, by scope key. They start collapsed. */
   openApps: string[]
   /** Your extension shortcuts, per profile, extension ID and command: Electron accelerators, '' for none. Unlisted commands use the extension's suggestion. */
@@ -128,6 +130,7 @@ const DEFAULTS: Settings = {
   pinnedExtensions: [],
   pinnedRows: 1,
   numberFrom: 'today',
+  newTabsAt: 'top',
   openApps: [],
   extensionShortcuts: {},
   restyle: { agent: 'claude', model: 'sonnet', codexModel: '', claudePath: '', codexPath: '' },
@@ -168,6 +171,7 @@ export function loadSettings(): Settings {
     settings.panel = panel
     if (!Number.isInteger(settings.pinnedRows) || settings.pinnedRows < 1) settings.pinnedRows = DEFAULTS.pinnedRows
     if (!['pinned', 'kept', 'today'].includes(settings.numberFrom)) settings.numberFrom = DEFAULTS.numberFrom
+    if (!['top', 'bottom'].includes(settings.newTabsAt)) settings.newTabsAt = DEFAULTS.newTabsAt
     if (!Array.isArray(settings.openApps)) settings.openApps = DEFAULTS.openApps
     if (typeof settings.whimsy !== 'boolean') settings.whimsy = DEFAULTS.whimsy
     if (!Number.isFinite(settings.sidePanelWidth)) settings.sidePanelWidth = DEFAULTS.sidePanelWidth
