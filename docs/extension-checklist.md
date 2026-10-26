@@ -17,7 +17,7 @@ from the jb menu bar item: right-click, **Install test extensions**.
 | **Consent-O-Matic** | Service worker runs; opened its welcome page on first install. | Visit a few sites with cookie banners. |
 | **Canvas Blocker** | Service worker runs. Electron warns that `notifications` and `contextMenus` are unknown permissions, but the library provides both. | Check a canvas fingerprinting test page. |
 | **SideHN** | Works: on a page opened with `?hnid=`, the sidebar loads the HN thread, and with an HN login cookie the frame's request carries it (its `modifyHeaders` rule sets `Cookie`, `Sec-Fetch-*` and `Referer`). Its "Method not implemented" error was `cookies.onChanged.hasListener`, not the header rule. | Log in to HN, open a story link from HN and check that the sidebar shows you logged in and lets you vote and reply. |
-| **Stem** (yours, unpacked) | Not tested. Open a Personal tab, then puzzle icon → **Add from folder…** and pick its folder. It has a native messaging host (`com.stem.browser`), which should work the same way D.Bridge does. | Whatever Stem does in Chrome. |
+| **Stem** (yours, unpacked) | Connects: its native host (`com.stem.browser`) starts and Stem answers with the profile's name. It never did before 2026-10-26: `chrome.debugger` was missing, so its service worker threw on its first line and never started (see `debugger.ts` below). Through `chrome.debugger`, in a background tab: attach, the `Page`/`Runtime`/`Network`/`Log` enables, focus emulation, the file chooser intercept, an isolated world and binding, the accessibility tree, typing (diacritics included), clicks, keys and a clipped screenshot all work. | Ask Stem to do something in a jbrow tab: open a page, fill a form, take a screenshot. Check that each profile shows in Stem's Settings. Downloads won't reach Stem (see Known gaps). |
 
 ## What jbrow had to fix
 
@@ -123,6 +123,26 @@ extension's button toggle the panel instead of opening its popup, and the button
 gets **Open side panel**, as in Chrome. Global options and the button behavior are kept in
 `side-panel.json`; which panels are open is not, as in Chrome.
 
+**`src/main/debugger.ts`** implements `chrome.debugger` for tab targets (`attach`, `detach`,
+`sendCommand`, `onEvent`, `onDetach`) on each page's `webContents.debugger`. One extension at a
+time per tab, with Chrome's error messages, and command errors come back as the protocol's JSON, as
+in Chrome. Electron's debugger is a full DevTools session, so jbrow holds an extension to its tab
+as Chrome does. It attaches only to web pages (http, https, data, about:blank with a web origin,
+blob of a web page) and the extension's own pages. It lets go when the tab goes, or is redirected,
+anywhere else: jbrow's pages, another extension's, a file. Each command checks the tab's address
+again. Only domains that act on the page are let through (`Page`, `Runtime`, `DOM`, `Input`,
+`Network`, `Emulation`, `Accessibility`, `Log`, `CSS`, `Overlay`, `Fetch` and the like, listed in
+`PAGE_DOMAINS`), plus `Browser.getVersion`. Within them, refused: every cookie method beyond the
+page's own `Network.getCookies`,
+`Network.clearBrowserCache`, `Page.setDownloadBehavior`, and `Page.navigate` to such a place.
+`DOM.setFileInputFiles` and `Network.loadNetworkResource` need file access, which jbrow gives
+unpacked extensions only (Stem's uploads use the first). A hidden tab (any background tab, and every tab while jbrow is hidden) draws no frames,
+so a CDP screenshot of it waited forever. Chrome counts a debugger as a capturer and keeps the tab
+drawing; Electron 44 has no such count, so while `Page.captureScreenshot` runs jbrow keeps the page
+drawing with `capturePage` every 100 ms. For that, and so pages opened in the background measure a
+real viewport, a new tab's view is now laid out at the page area's size instead of 0×0
+(`ensureView` in `tabs.ts`).
+
 **`src/main/user-scripts.ts`** and **`src/preload/user-scripts.ts`** implement `chrome.userScripts`:
 `register`, `update`, `unregister`, `getScripts`, `configureWorld`, `getWorldConfigurations`,
 `resetWorldConfiguration` and `execute`, with Chrome's checks (duplicate IDs, IDs starting with
@@ -158,3 +178,8 @@ These are worth sending upstream to electron-browser-shell once they've proven t
 - Static rulesets are turned on from the extension's service worker, so an extension that has rulesets
   but no service worker keeps them off.
 - Extension service workers stop after about 30 seconds idle and wake on events, as in Chrome.
+- `chrome.debugger` reaches tabs only, not extension or browser targets, and has no `getTargets`.
+  jbrow shows no "is debugging this browser" bar. Files are off limits even for an extension
+  allowed file access.
+- `chrome.downloads` is the library's stub: `search` answers nothing and no events fire, so Stem
+  never sees a download a page started.

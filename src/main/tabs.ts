@@ -415,6 +415,9 @@ export class Tabs {
       ? new WebContentsView({ webContents: guest })
       : new WebContentsView({ webPreferences: { session: rt.session, sandbox: true, contextIsolation: true } })
     view.setVisible(false)
+    // A tab opened in the background is laid out at the page area's size, as in Chrome, not at
+    // 0×0 until it's first shown: its page measures a real viewport, and a debugger can capture it.
+    view.setBounds(this.deps.contentBounds())
     view.setBorderRadius(9)
     const win = this.deps.window()
     win.contentView.addChildView(view)

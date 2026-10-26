@@ -20,6 +20,7 @@ import { Downloads, type DownloadAction } from './downloads'
 import { handleFavicons } from './favicons'
 import { FindInPage } from './find'
 import { frontmostApp, type FrontApp } from './frontmost'
+import { ExtensionDebugger } from './debugger'
 import { IdleWatcher } from './idle'
 import { secondsSinceInput } from './input'
 import { logPath, setupLogging } from './log'
@@ -67,6 +68,7 @@ let permissions: SitePermissions
 let profileDeps: ProfileDeps
 let sidePanels: SidePanels
 let idle: IdleWatcher
+let extensionDebugger: ExtensionDebugger
 let userScripts: UserScripts
 let updates: Updates
 /** Pages you've visited, per profile, for the address bar's suggestions. */
@@ -1736,6 +1738,7 @@ async function deleteProfile(id: string) {
   tabs.forgetProfile(id)
   sidePanels.forgetProfile(id)
   idle.forgetProfile(id)
+  extensionDebugger.forgetProfile(id)
   userScripts.forgetProfile(id)
   visits.clear(id)
 
@@ -2497,6 +2500,7 @@ app.whenReady().then(async () => {
     },
   })
   idle = new IdleWatcher()
+  extensionDebugger = new ExtensionDebugger()
   userScripts = new UserScripts()
   updates = new Updates({
     enabled: () => settings.autoUpdate,
@@ -2515,6 +2519,7 @@ app.whenReady().then(async () => {
     devices,
     attach: (rt) => {
       idle.attach(rt)
+      extensionDebugger.attach(rt)
       sidePanels.attach(rt)
       userScripts.attach(rt)
     },

@@ -331,6 +331,18 @@ function shims(
     })
   }
 
+  // chrome.debugger (src/main/debugger.ts), tab targets only. Stem drives tabs through it, and
+  // without it the worker's first `chrome.debugger.onEvent` threw, so it never started.
+  if (!skip.includes('debugger') && permitted('debugger') && !chrome.debugger) {
+    define(chrome, 'debugger', {
+      attach: api('debugger.attach'),
+      detach: api('debugger.detach'),
+      sendCommand: api('debugger.sendCommand'),
+      onEvent: remoteEvent('debugger.onEvent'),
+      onDetach: remoteEvent('debugger.onDetach'),
+    })
+  }
+
   // chrome.userScripts (src/main/user-scripts.ts), and runtime.onUserScriptMessage for messages
   // from user scripts in a world configured with `messaging: true`. Every context that listens
   // answers: with the first response, or with nothing if no listener there responds.
