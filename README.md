@@ -177,8 +177,10 @@ a scheme) or matches a private address pattern is sent. Turn them off under **Ge
 The sidebar is a flat list of tabs, as in Arc: pinned icons at the top, then Kept, then Today. New
 tabs go to the top of Today, newest first (or to the bottom, oldest first, with **Tabs → New tabs → Open
 at** in settings or in the welcome). A tab opened from a page (a link opened in a new tab, ⌘-click,
-a script's `window.open`) is a tab of its own at the top of Today too, wherever it was opened from: a
-kept or pinned tab stays as it was and never collects the tabs opened from it.
+a script's `window.open`) is a tab of its own right beside the one it came from: above it with new tabs
+at the top, below it with new tabs at the bottom. Several opened from the same tab line up in the order
+they opened. A kept or pinned tab stays as it was and never collects the tabs opened from it: those go
+where new tabs go. When a new tab lands outside what the sidebar shows, the sidebar scrolls to it.
 
 Tabs opened from an app with ⌥⇧Space get their own section in the sidebar, under the app's name and
 icon (linked apps share one), and tabs opened from those go to the top of the same section. Kept tabs

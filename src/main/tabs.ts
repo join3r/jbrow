@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { bezier } from '../shared/ease'
 import { urlMatcher } from '../shared/patterns'
 import { MAX_PANES, PANE_HEAD, paneSpans, splitOf } from '../shared/split'
-import { byOrder, flatten, isAsleep, isInFolder, isRoot, parentFolder, samePage, subtree, threadsOf } from '../shared/threads'
+import { byOrder, createdBeside, flatten, isAsleep, isInFolder, isRoot, parentFolder, samePage, subtree, threadsOf } from '../shared/threads'
 import type { CrashView, Folder, KeepLoaded, Profile, Split, TabRecord, UiTab } from '../shared/types'
 import type { Certificates } from './certs'
 import type { DangerousSites } from './dangerous'
@@ -77,8 +77,9 @@ export interface CreateOptions {
   profile: string
   url?: string
   /**
-   * The tab it was opened from. Like a link in Arc, it goes to the top of Today, or of the opener's
-   * app section, never into Kept: a kept or pinned tab stays what it was.
+   * The tab it was opened from. The new tab goes right beside it in Today, or in the opener's app
+   * section, on the side new tabs go. Never into Kept: a kept or pinned tab stays what it was, and
+   * what it opens goes where new tabs go.
    */
   opener?: string
   scope?: string
@@ -377,7 +378,7 @@ export class Tabs {
       app: from ? from.app : opts.app,
       url: opts.url ?? '',
       title: '',
-      createdAt: now,
+      createdAt: from ? createdBeside(this.records, from, now) : now,
       lastSeen: now,
       unread: opts.unread,
     }

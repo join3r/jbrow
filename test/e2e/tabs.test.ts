@@ -126,6 +126,35 @@ test('a ⌘-click on a link opens it in the background, unread', async () => {
   page.close()
 })
 
+test('a tab opened from a page goes beside it, and the sidebar scrolls to it', async () => {
+  const parent = await openTab(jb, `${web.url}/links`)
+  // Newer tabs above it, and a sidebar short enough that it sits below the fold.
+  for (let i = 0; i < 12; i++) await jb.navigate(`${web.url}/one?${i}`, { newTab: true })
+  await jb.waitForState((s) => s.tabs.length >= 13, 'the other tabs')
+  await activate(jb, parent.id)
+  const ui = await jb.ui()
+  await ui.eval('Object.assign(document.getElementById("threads").style, { flex: "none", height: "200px" })')
+  await ui.eval('document.getElementById("threads").scrollTop = 0')
+  const page = await shownPage(jb, `${web.url}/links`)
+  await realClick(page, '#blank', CMD)
+  const s = await jb.waitForState((s) => s.tabs.some((t) => t.opener === parent.id && t.title === 'Child'), 'the background tab')
+  const child = s.tabs.find((t) => t.opener === parent.id)!
+  const rows = await waitRows(jb, (rows) => rows.some((r) => r.id === child.id), 'the child row')
+  const at = rows.findIndex((r) => r.id === child.id)
+  assert.equal(rows[at + 1]?.id, parent.id, 'right above its opener')
+  await waitFor(
+    () =>
+      ui.call((id) => {
+        const list = document.getElementById('threads')!.getBoundingClientRect()
+        const row = document.querySelector(`#threads .row[data-id="${id}"]`)!.getBoundingClientRect()
+        return row.top >= list.top && row.bottom <= list.bottom
+      }, child.id),
+    'the sidebar to scroll to the new tab',
+  )
+  await ui.eval('document.getElementById("threads").removeAttribute("style")')
+  page.close()
+})
+
 test('closing the active tab moves to the tab above it, where new tabs go', async () => {
   const one = await openTab(jb, `${web.url}/one`)
   const two = await openTab(jb, `${web.url}/two`)

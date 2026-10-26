@@ -561,6 +561,7 @@ function renderThreads() {
     filter: `${S.filter}|${S.scope?.key ?? ''}`,
     clip: sidebarEl.getBoundingClientRect(),
   })
+  revealNewTab()
 
   const input = document.getElementById('ren') as HTMLInputElement | null
   if (input) {
@@ -570,6 +571,29 @@ function renderThreads() {
     } else input.select()
     input.focus()
   }
+}
+
+/** Tab IDs as of the last sidebar render, to tell which tabs just opened. */
+let renderedTabs: Set<string> | null = null
+
+/**
+ * Scrolls the sidebar to a tab that just opened, in front or in the background, when it lands
+ * above or below what's in view: beside its opener, or at the top or bottom of Today.
+ */
+function revealNewTab() {
+  const ids = S!.tabs.map((t) => t.id)
+  const fresh = renderedTabs ? ids.filter((id) => !renderedTabs!.has(id)) : []
+  renderedTabs = new Set(ids)
+  const id = fresh.includes(S!.activeId ?? '') ? S!.activeId! : fresh.at(-1)
+  const row = id && threadsEl.querySelector<HTMLElement>(`.row[data-id="${CSS.escape(id)}"]`)
+  if (!row) return
+  // From the row's middle, as it may be scaling in.
+  const box = threadsEl.getBoundingClientRect()
+  const r = row.getBoundingClientRect()
+  const top = r.top + r.height / 2 - row.offsetHeight / 2 - box.top
+  const bottom = top + row.offsetHeight - threadsEl.clientHeight
+  const by = top < 0 ? top : bottom > 0 ? bottom : 0
+  if (by) threadsEl.scrollBy({ top: by, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
 }
 
 // ---------- pinned tabs ----------

@@ -5,6 +5,7 @@ import {
   besideClosed,
   byOrder,
   childrenOf,
+  createdBeside,
   displayName,
   EARLIER_AFTER_MS,
   flatFolders,
@@ -579,5 +580,34 @@ describe('besideClosed', () => {
   test('nothing for a kept tab or one alone in its section', () => {
     assert.equal(besideClosed(sections(tabs, baseOpts), 'k'), undefined)
     assert.equal(besideClosed(sections([tab('solo')], baseOpts), 'solo'), undefined)
+  })
+})
+
+describe('createdBeside', () => {
+  const tabs = [
+    tab('a', { createdAt: 10 }),
+    tab('b', { createdAt: 20 }),
+    tab('c', { createdAt: 30 }),
+    tab('k', { createdAt: 25, kept: true }),
+    tab('x', { createdAt: 22, scope: 'com.app' }),
+  ]
+  const place = (list: TabRecord[], opener: string) => [...list, tab('n', { createdAt: createdBeside(list, list.find((t) => t.id === opener)!, NOW), opener })]
+
+  test('a tab opened from another goes right above it at top, right below it at bottom', () => {
+    const list = place(tabs, 'a')
+    assert.deepEqual(roots(sections(list, baseOpts).today), ['c', 'b', 'n', 'a'])
+    assert.deepEqual(roots(sections(list, { ...baseOpts, newTabsAt: 'bottom' }).today), ['a', 'n', 'b', 'c'])
+  })
+
+  test('tabs opened one after another from the same tab stay in the order they opened', () => {
+    let list = place(tabs, 'b')
+    list = [...list.slice(0, -1), { ...list.at(-1)!, id: 'n1' }]
+    list = place(list, 'b')
+    assert.deepEqual(roots(sections(list, baseOpts).today), ['c', 'n', 'n1', 'b', 'a'])
+  })
+
+  test('from the newest tab, or a kept one, it is just a new tab', () => {
+    assert.equal(createdBeside(tabs, tabs[2], NOW), NOW)
+    assert.equal(createdBeside(tabs, tabs[3], NOW), NOW)
   })
 })

@@ -235,6 +235,24 @@ export function numberedThreads<T extends TabRecord>(
 }
 
 /**
+ * The creation time for a tab opened from `opener`, so it sits right beside the opener on the side
+ * new tabs go: above it with `newTabsAt` 'top', below it with 'bottom'. Outside Kept the sidebar
+ * orders by creation time, so the tab takes a time between the opener's and the next tab's in its
+ * section. Tabs the opener already opened there stay nearer it, so several open in order, as in
+ * Chrome. A kept or pinned opener doesn't collect them: those get `now`, as any new tab.
+ */
+export function createdBeside(tabs: TabRecord[], opener: TabRecord, now: number): number {
+  if (opener.kept || !isRoot(tabs, opener)) return now
+  const section = tabs
+    .filter((t) => !t.kept && isRoot(tabs, t) && (t.scope ?? '') === (opener.scope ?? '') && t.createdAt >= opener.createdAt)
+    .sort((a, b) => a.createdAt - b.createdAt)
+  let i = section.indexOf(opener)
+  while (section[i + 1]?.opener === opener.id) i++
+  const next = section[i + 1]
+  return next ? (section[i].createdAt + next.createdAt) / 2 : now
+}
+
+/**
  * The tab to focus when tab `id` closes: the one beside it in its sidebar section, on the side new
  * tabs go (above with `newTabsAt` 'top', below with 'bottom'), else on the other side. Undefined
  * for a kept tab, or one alone in its section.
