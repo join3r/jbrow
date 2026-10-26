@@ -19,6 +19,10 @@ before(async () => {
     '/left': html('Left'),
     '/right': html('Right'),
     '/cookie/set': { headers: { 'set-cookie': 'kept=yes; Path=/; Max-Age=86400' }, body: html('Set') },
+    '/hints': (req, res) => {
+      res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-store', 'access-control-allow-origin': '*' })
+      res.end(String(req.headers['sec-ch-ua'] ?? ''))
+    },
     '/cookie/get': (req, res) => {
       res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' })
       res.end(html(/kept=yes/.test(req.headers.cookie ?? '') ? 'Has cookie' : 'No cookie'))
@@ -186,6 +190,35 @@ test('an address typed while a tab is getting its history back is where it ends 
     await waitLoaded(restored, 'b', `${web.url}/three`)
     await restored.send('nav', { action: 'back' })
     await waitLoaded(restored, 'b', `${web.url}/two`)
+  } finally {
+    await restored.close()
+    await removeDir(dir)
+  }
+})
+
+test('a tab that got its history back still tells sites which browser it is', async () => {
+  // Electron's history restore drops user agent client hints from the tab. Cloudflare's Turnstile
+  // takes a Chrome without them for a fake and never passes it.
+  const dir = tempDir()
+  const now = Date.now()
+  const restored = await launch({
+    userData: dir,
+    settings: offline(web),
+    tabs: { activeId: 'a', tabs: [{ id: 'a', profile: 'personal', url: `${web.url}/two`, title: 'Two', createdAt: now, lastSeen: now }], folders: [], archived: [] },
+    files: { 'history.json': JSON.stringify({ a: { index: 1, entries: [{ url: `${web.url}/one`, title: 'One' }, { url: `${web.url}/two`, title: 'Two' }] } }) },
+  })
+  try {
+    await waitLoaded(restored, 'a', `${web.url}/two`)
+    await restored.send('navigate', { input: `${web.url}/three` })
+    await waitLoaded(restored, 'a', `${web.url}/three`)
+    const page = await restored.page(`${web.url}/three`)
+    const header = await page.eval<string>(`fetch('/hints').then((r) => r.text())`)
+    assert.match(header, /Chromium/)
+    const worker = await page.eval<string>(`new Promise((resolve) => {
+      const w = new Worker(URL.createObjectURL(new Blob(['postMessage(navigator.userAgentData.platform)'])))
+      w.onmessage = (e) => resolve(e.data)
+    })`)
+    assert.ok(worker, 'navigator.userAgentData in a worker')
   } finally {
     await restored.close()
     await removeDir(dir)

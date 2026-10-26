@@ -444,14 +444,23 @@ export class Tabs {
         this.restoring.delete(rec.id)
         return url
       }
+      // Electron's restore leaves the tab without user agent client hints, for good: no Sec-CH-UA
+      // headers, and no navigator.userAgentData in workers. To Cloudflare that's a fake Chrome, and
+      // Turnstile never lets it through (bistro.sk's login). Setting the user agent again brings
+      // them back for everything after. Not before restore resolves: that stalls the restore.
+      const hints = () => view.webContents.setUserAgent(rt.session.getUserAgent())
       void view.webContents.navigationHistory
         .restore(history)
         .then(
           () => {
+            hints()
             const url = target()
             return history.entries[history.index]?.url !== url ? load(url) : undefined
           },
-          () => load(target()),
+          () => {
+            hints()
+            return load(target())
+          },
         )
         .catch(() => {})
     }
