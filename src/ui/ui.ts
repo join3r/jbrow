@@ -5,7 +5,7 @@ import { awayFromHome, displayName, folderThreads, isAsleep, isFolder, isPinned,
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { dragDivider, PANE_GAP, paneSpans, splitOf } from '../shared/split'
 import { initWelcome } from './welcome'
-import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type UpdateView, type VisitView } from '../shared/types'
+import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type ExtensionView, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type UpdateView, type VisitView } from '../shared/types'
 import { afterRender, beforeRender, downloadsChanged, flourish, setWhimsy } from './whimsy'
 
 declare global {
@@ -1381,6 +1381,10 @@ $('openStore').addEventListener('click', () => {
   setExtensions(false)
   send('open-store')
 })
+$('manageExtensions').addEventListener('click', () => {
+  setExtensions(false)
+  setSettings(true, 'extensions')
+})
 document.addEventListener('mousedown', (e) => {
   if (!extPop.hidden && !(e.target as HTMLElement).closest('.ext')) setExtensions(false)
 })
@@ -1637,6 +1641,7 @@ const SECTION_NAMES: Record<string, string> = {
   general: 'General',
   appearance: 'Appearance',
   profiles: 'Profiles',
+  extensions: 'Extensions',
   threads: 'Tabs',
   archived: 'Archived',
   apps: 'Apps',
@@ -1671,6 +1676,7 @@ function showSettings(show: boolean) {
     settingsEl.focus()
     renderSettings(true)
     send('shortcuts')
+    send('extensions')
     send('apps')
     send('default-browser')
     send('updates')
@@ -1695,7 +1701,7 @@ function showSection(id: string) {
 const matches = (el: Element, q: string) => `${el.textContent} ${(el as HTMLElement).dataset.keywords ?? ''}`.toLowerCase().includes(q)
 
 /**
- * Hides what doesn't match a query. Shortcut lists match row by row, keeping the extension and
+ * Hides what doesn't match a query. Shortcut and extension lists match row by row, keeping the extension and
  * profile names above any row that's left; the rest match a whole block at a time.
  */
 function filterItem(item: HTMLElement, q: string): boolean {
@@ -2561,6 +2567,47 @@ appListEl.addEventListener('contextmenu', (e) => {
 })
 $('addApp').addEventListener('click', () => send('add-app'))
 
+// ---------- extensions ----------
+
+const extListEl = $('extList')
+let extList: { profiles: Profile[]; extensions: ExtensionView[] } = { profiles: [], extensions: [] }
+
+function renderExtensionList() {
+  const { profiles, extensions } = extList
+  const used = profiles.filter((p) => extensions.some((x) => x.profile === p.id))
+  if (!used.length) {
+    extListEl.innerHTML = `<p class="help">No extensions yet. Add them from the Chrome Web Store.</p>`
+    return applySearch()
+  }
+  let html = ''
+  for (const p of used) {
+    if (used.length > 1) html += `<div class="ext-profile sc-profile"><span class="dot" style="background:${esc(p.color)}"></span>${esc(p.name)}</div>`
+    for (const x of extensions.filter((x) => x.profile === p.id)) {
+      const img = x.icon ? `<img src="${esc(x.icon)}" alt="">` : `<span class="no-icon">${esc(x.name.slice(0, 1))}</span>`
+      const meta = [x.version, x.unpacked ? 'from a folder' : ''].filter(Boolean).join(' · ')
+      html += `<div class="ext-row sc-row${x.enabled ? '' : ' off'}" data-ext="${esc(x.id)}" data-ext-profile="${esc(p.id)}" data-keywords="${esc(`${x.name} ${p.name}`)}">
+        <span class="ext-icon">${img}</span>
+        <span class="ext-name" title="${esc(x.description)}">${esc(x.name)}<small>${esc(meta)}</small></span>
+        <span class="ext-acts"><button class="icon sm" data-ext-remove title="Remove" aria-label="Remove ${esc(x.name)}">${icon('trash')}</button></span>
+        <input type="checkbox" data-ext-on ${x.enabled ? 'checked' : ''} title="${x.enabled ? 'Turn off' : 'Turn on'}" aria-label="${esc(x.name)} on">
+      </div>`
+    }
+  }
+  extListEl.innerHTML = html
+  applySearch()
+}
+
+extListEl.addEventListener('change', (e) => {
+  const box = (e.target as HTMLElement).closest<HTMLInputElement>('[data-ext-on]')
+  const r = box?.closest<HTMLElement>('[data-ext]')
+  if (box && r) send('extension-enabled', { profile: r.dataset.extProfile, id: r.dataset.ext, on: box.checked })
+})
+extListEl.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-ext-remove]')
+  const r = b?.closest<HTMLElement>('[data-ext]')
+  if (r) send('remove-extension', { profile: r.dataset.extProfile, id: r.dataset.ext })
+})
+
 // ---------- shortcuts ----------
 
 const actionKeysEl = $('actionKeys')
@@ -3136,6 +3183,10 @@ window.jbrow.on('url-copied', () => {
 })
 window.jbrow.on('settings', ({ open, section }: { open?: boolean; section?: string }) => setSettings(open ?? !!settingsEl.hidden, section))
 window.jbrow.on('rename-tab', (id: string) => startRename(id))
+window.jbrow.on('extensions', (data: typeof extList) => {
+  extList = data
+  renderExtensionList()
+})
 window.jbrow.on('shortcuts', (data: typeof shortcuts) => {
   shortcuts = data
   renderShortcuts()

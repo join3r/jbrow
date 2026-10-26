@@ -1,9 +1,8 @@
-import { app, globalShortcut, type WebContents } from 'electron'
-import { readFileSync } from 'node:fs'
-import path from 'node:path'
+import { globalShortcut, type WebContents } from 'electron'
 import { ACTIONS, actionKeys, canonical, FIXED, shortcutFromKey } from '../shared/shortcuts'
 import type { ExtensionShortcut } from '../shared/types'
 import { BACKGROUND } from './background'
+import { localize, messages } from './extension-files'
 import { libraryOf } from './library'
 import type { ProfileRuntime } from './profiles'
 import type { Settings } from './settings'
@@ -44,23 +43,6 @@ function fromChrome(chromeKey: string): string | null {
   }
   return canonical(mods, CHROME_KEYS[key] ?? (key.length === 1 ? key.toUpperCase() : key))
 }
-
-/** The extension's messages.json for your language, falling back to its default language. */
-function messages(ext: Electron.Extension): Record<string, { message: string }> {
-  const fallback = (ext.manifest as { default_locale?: string }).default_locale
-  const locale = app.getLocale().replace('-', '_')
-  for (const lang of [locale, locale.split('_')[0], fallback]) {
-    if (!lang) continue
-    try {
-      const raw = JSON.parse(readFileSync(path.join(ext.path, '_locales', lang, 'messages.json'), 'utf8'))
-      return Object.fromEntries(Object.entries(raw).map(([k, v]) => [k.toLowerCase(), v as { message: string }]))
-    } catch {}
-  }
-  return {}
-}
-
-const localize = (text: string, msgs: Record<string, { message: string }>) =>
-  text.replace(/__MSG_(\w+)__/g, (m, key: string) => msgs[key.toLowerCase()]?.message ?? m)
 
 export class ExtensionCommands {
   constructor(

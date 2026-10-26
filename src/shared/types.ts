@@ -371,6 +371,20 @@ export interface AnimMessage {
   ease: 'spring' | 'snappy' | 'smooth'
 }
 
+/** An extension in a profile, for the Extensions settings. */
+export interface ExtensionView {
+  profile: string
+  id: string
+  name: string
+  version: string
+  description: string
+  /** Data URL. */
+  icon?: string
+  enabled: boolean
+  /** Loaded from a folder you chose, rather than installed from the Chrome Web Store. */
+  unpacked: boolean
+}
+
 /** An extension command (chrome.commands) and the shortcut it has in one profile. */
 export interface ExtensionShortcut {
   profile: string

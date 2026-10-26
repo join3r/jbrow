@@ -4,7 +4,7 @@ import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, t
 import { urlMatcher } from '../shared/patterns'
 import { awayFromHome, besideClosed, isInFolder, isPinned, keptThreads, numberedThreads, sections, type FolderView } from '../shared/threads'
 import { isSearchUrl, looksLikeAddress, suggestUrlFor } from '../shared/engines'
-import { THEMES, type AppEntry, type AppLabel, type Folder, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
+import { THEMES, type AppEntry, type AppLabel, type Folder, type ExtensionView, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
 import { BACKGROUND } from './background'
 import { Certificates } from './certs'
@@ -13,6 +13,9 @@ import { DeviceChooser } from './devices'
 import { Logins } from './logins'
 import { SignInSheets } from './signin'
 import { ExtensionCommands } from './commands'
+import { eraseExtensionData, iconOf, localize, localizedName, messages, readFolder, type ExtensionFolder } from './extension-files'
+import { forgetInstall } from './installed'
+import { jbrowExtensionDir } from './jbrow-extension'
 import { Downloads, type DownloadAction } from './downloads'
 import { handleFavicons } from './favicons'
 import { FindInPage } from './find'
@@ -25,7 +28,7 @@ import { SitePermissions } from './permissions'
 import { MiniPlayer } from './pip'
 import { pickShareSource } from './screenshare'
 import { SidePanels } from './side-panel'
-import { installTestExtensions, loadUnpacked, partitionFor, setupProfile, setupProfiles, type ProfileDeps, type ProfileRuntime, type TabHooks } from './profiles'
+import { installTestExtensions, loadUnpacked, partitionFor, setupProfile, setupProfiles, startWorker, type ProfileDeps, type ProfileRuntime, type TabHooks } from './profiles'
 import { Restyler } from './restyle'
 import { loadSettings, saveSettings, scopeForApp, settingsPath, type Settings } from './settings'
 import { wireSwipes } from './swipe'
@@ -224,6 +227,120 @@ function togglePinnedExtension(id: string) {
   settings.pinnedExtensions = pinned.includes(id) ? pinned.filter((p) => p !== id) : [...pinned, id]
   saveSettings(settings)
   pushState()
+}
+
+// ---------- turning extensions off and removing them ----------
+
+/** Every extension in every profile, on or off, for the Extensions settings. */
+function extensionViews(): ExtensionView[] {
+  const views: ExtensionView[] = []
+  for (const p of settings.profiles) {
+    const rt = runtimes.get(p.id)
+    if (!rt) continue
+    const view = (ext: ExtensionFolder, id: string, enabled: boolean): ExtensionView => ({
+      profile: p.id,
+      id,
+      name: localizedName(ext),
+      version: String(ext.manifest.version ?? ''),
+      description: localize(String(ext.manifest.description ?? ''), messages(ext)),
+      icon: iconOf(ext),
+      enabled,
+      unpacked: !isInside(ext.path, rt.extensionsPath),
+    })
+    for (const ext of rt.session.extensions.getAllExtensions()) {
+      if (ext.path !== jbrowExtensionDir()) views.push(view(ext, ext.id, true))
+    }
+    for (const d of settings.disabledExtensions[p.id] ?? []) {
+      const ext = readFolder(d.path)
+      if (ext) views.push(view(ext, d.id, false))
+    }
+  }
+  return views.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+const isInside = (file: string, dir: string) => !path.relative(dir, file).startsWith('..')
+
+let extensionsQueued = false
+function sendExtensions() {
+  if (extensionsQueued) return
+  extensionsQueued = true
+  // Removing or loading several at once sends one list.
+  setTimeout(() => {
+    extensionsQueued = false
+    if (!panel.win.isDestroyed() && settingsShown) panel.ui.send('extensions', { profiles: settings.profiles, extensions: extensionViews() })
+  }, 50)
+}
+
+/** Turns an extension off (it stays installed, and loads no more) or back on. */
+async function setExtensionEnabled(profileId: string, id: string, on: boolean) {
+  const rt = runtimes.get(profileId)
+  if (!rt) return
+  const disabled = (settings.disabledExtensions[profileId] ??= [])
+  if (!on) {
+    const ext = rt.session.extensions.getExtension(id)
+    if (!ext) return
+    disabled.push({ id, path: ext.path })
+    saveSettings(settings)
+    rt.session.extensions.removeExtension(id)
+  } else {
+    const entry = disabled.find((d) => d.id === id)
+    if (!entry) return
+    try {
+      const unpacked = !isInside(entry.path, rt.extensionsPath)
+      const ext = await rt.session.extensions.loadExtension(entry.path, unpacked ? { allowFileAccess: true } : undefined)
+      await startWorker(rt.session, ext, profileId)
+    } catch (error) {
+      console.error(`[extensions] could not turn ${id} back on:`, error)
+      toast(`That extension didn't load: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  pushState()
+  sendExtensions()
+}
+
+/** Removes an extension from a profile after asking, with what it stored. A folder you added stays on disk. */
+async function removeExtension(profileId: string, id: string) {
+  const rt = runtimes.get(profileId)
+  if (!rt) return
+  const loaded = rt.session.extensions.getExtension(id)
+  const entry = settings.disabledExtensions[profileId]?.find((d) => d.id === id)
+  const dir = loaded?.path ?? entry?.path
+  const folder = dir ? readFolder(dir) : null
+  if (!dir || !folder) return
+  const name = localizedName(folder)
+  const unpacked = !isInside(dir, rt.extensionsPath)
+  const { response } = await dialog.showMessageBox(panel.win, {
+    type: 'warning',
+    message: `Remove "${name}" from ${rt.profile.name}?`,
+    detail: unpacked
+      ? 'What it stored is erased. Its folder stays where it is, so you can add it again.'
+      : 'What it stored is erased, like its settings and anything you saved in it.',
+    buttons: ['Cancel', 'Remove'],
+    defaultId: 0,
+    cancelId: 0,
+  })
+  if (response !== 1) return
+
+  if (loaded) rt.session.extensions.removeExtension(id)
+  if (settings.disabledExtensions[profileId]) {
+    settings.disabledExtensions[profileId] = settings.disabledExtensions[profileId].filter((d) => d.id !== id)
+  }
+  if (unpacked) settings.unpackedExtensions[profileId] = (settings.unpackedExtensions[profileId] ?? []).filter((d) => d !== dir)
+  if (settings.extensionShortcuts[profileId]) delete settings.extensionShortcuts[profileId][id]
+  const elsewhere = [...runtimes.values()].some(
+    (other) => other.session.extensions.getExtension(id) || settings.disabledExtensions[other.profile.id]?.some((d) => d.id === id),
+  )
+  if (!elsewhere) settings.pinnedExtensions = settings.pinnedExtensions.filter((p) => p !== id)
+  saveSettings(settings)
+  userScripts.forgetExtension(profileId, id)
+  forgetInstall(rt.session, id)
+  if (!unpacked) await rm(path.join(rt.extensionsPath, id), { recursive: true, force: true }).catch(() => {})
+  await eraseExtensionData(rt.session, id)
+  commands.refresh()
+  commands.registerGlobal()
+  pushState()
+  sendExtensions()
+  toast(`Removed ${name} from ${rt.profile.name}.`)
 }
 
 let pushQueued = false
@@ -1524,7 +1641,20 @@ function attachProfile(rt: ProfileRuntime) {
       menu.append(new MenuItem({ label: open ? 'Close side panel' : 'Open side panel', click: () => sidePanels.toggle(rt.profile.id, ext) }))
     }
     menu.append(new MenuItem({ label: pinned ? 'Unpin from toolbar' : 'Pin to toolbar', click: () => togglePinnedExtension(extensionId) }))
+    menu.append(new MenuItem({ type: 'separator' }))
+    menu.append(new MenuItem({ label: 'Turn off', click: () => void setExtensionEnabled(rt.profile.id, extensionId, false) }))
+    menu.append(new MenuItem({ label: `Remove from ${rt.profile.name}…`, click: () => void removeExtension(rt.profile.id, extensionId) }))
   })
+  // One installed again from the Web Store, or a folder added again, is on: it no longer counts as turned off.
+  rt.session.extensions.on('extension-loaded', (_e, ext) => {
+    const disabled = settings.disabledExtensions[rt.profile.id]
+    if (disabled?.some((d) => d.id === ext.id)) {
+      settings.disabledExtensions[rt.profile.id] = disabled.filter((d) => d.id !== ext.id)
+      saveSettings(settings)
+    }
+    sendExtensions()
+  })
+  rt.session.extensions.on('extension-unloaded', () => sendExtensions())
   rt.extensions.on('browser-action-popup-created', (popup: { browserWindow?: BrowserWindow }) => {
     const tab = tabs.activeWebContents()
     if (popup.browserWindow && tab) popupTabs.set(popup.browserWindow.webContents, tab)
@@ -1614,6 +1744,7 @@ async function deleteProfile(id: string) {
   for (const [bundleId, p] of Object.entries(settings.appProfiles)) if (p === id) delete settings.appProfiles[bundleId]
   delete settings.unpackedExtensions[id]
   delete settings.extensionShortcuts[id]
+  delete settings.disabledExtensions[id]
   saveSettings(settings)
   permissions.forgetProfile(id)
   runtimes.delete(id)
@@ -1961,6 +2092,9 @@ function wireIpc() {
   on('find-stop', () => finder.stop())
   on('shortcuts', () => sendShortcuts())
   on('apps', () => sendApps())
+  on('extensions', () => sendExtensions())
+  on<{ profile: string; id: string; on: boolean }>('extension-enabled', ({ profile, id, on: enabled }) => void setExtensionEnabled(profile, id, enabled))
+  on<{ profile: string; id: string }>('remove-extension', ({ profile, id }) => void removeExtension(profile, id))
   on<{ key: string; profile: string }>('app-profile', ({ key, profile }) => setAppProfile(key, profile))
   on<{ key: string }>('app-menu', ({ key }) => appMenu(key))
   on('add-app', () => void addApp())

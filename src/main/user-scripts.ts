@@ -105,6 +105,13 @@ export class UserScripts {
     this.save()
   }
 
+  /** A removed extension's registrations go with it. */
+  forgetExtension(profile: string, extId: string) {
+    if (!this.registered[profile]?.[extId]) return
+    delete this.registered[profile][extId]
+    this.save()
+  }
+
   private of(profile: string, extId: string): Registered {
     return ((this.registered[profile] ??= {})[extId] ??= { scripts: [], worlds: [] })
   }

@@ -657,6 +657,20 @@ body.resizing, body.resizing * { cursor: col-resize !important; }
 .app-name em { font-style: normal; font-size: 11px; color: var(--muted); margin-left: 6px; }
 .app-row .seg button { flex: none; padding: 4px 10px; }
 
+.ext-profile { display: flex; align-items: center; gap: 6px; margin: 18px 0 6px; font-weight: 600; }
+.ext-profile:first-child { margin-top: 0; }
+.ext-profile .dot { width: 8px; height: 8px; border-radius: 50%; }
+.ext-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 4px 0; }
+.ext-icon img, .ext-icon .no-icon { width: 22px; height: 22px; display: block; }
+.ext-icon .no-icon { display: grid; place-items: center; border-radius: 5px; background: var(--muted); color: #fff; font-size: 11px; text-transform: uppercase; }
+.ext-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ext-name small { font-size: 11px; color: var(--muted); margin-left: 6px; }
+.ext-row.off .ext-icon, .ext-row.off .ext-name { opacity: 0.5; }
+.ext-row input { margin: 0; accent-color: var(--accent); }
+/* Remove shows on hover, like Restore and Forget on archived rows. */
+.ext-acts { display: flex; visibility: hidden; }
+.ext-row:hover .ext-acts, .ext-acts:focus-within { visibility: visible; }
+
 .profile-list { margin-bottom: 10px; }
 .profile-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 3px 0; }
 .swatch { position: relative; width: 22px; height: 22px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--line); cursor: pointer; }

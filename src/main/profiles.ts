@@ -4,6 +4,7 @@ import { installChromeWebStore, installExtension } from 'electron-chrome-web-sto
 import path from 'node:path'
 import type { Profile } from '../shared/types'
 import { shimContentScripts } from './content-shim'
+import { installedFolders } from './extension-files'
 import { trackInstalls } from './installed'
 import type { DeviceChooser } from './devices'
 import { writeJbrowExtension } from './jbrow-extension'
@@ -96,6 +97,8 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
   await installChromeWebStore({
     session: sess,
     extensionsPath,
+    // jbrow loads them itself below, leaving out the ones you turned off.
+    loadExtensions: false,
     async beforeInstall(details) {
       const permissions = [...(details.manifest.permissions ?? []), ...(details.manifest.host_permissions ?? [])]
       const options = {
@@ -120,7 +123,18 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
     console.error(`[profiles] ${profile.id}: could not load jbrow's own extension:`, error)
   }
 
+  const disabled = settings.disabledExtensions[profile.id] ?? []
+  for (const [id, ext] of installedFolders(extensionsPath)) {
+    if (disabled.some((d) => d.id === id)) continue
+    try {
+      await sess.extensions.loadExtension(ext.path)
+    } catch (error) {
+      console.error(`[profiles] ${profile.id}: could not load ${ext.path}:`, error)
+    }
+  }
+
   for (const dir of settings.unpackedExtensions[profile.id] ?? []) {
+    if (disabled.some((d) => d.path === dir)) continue
     try {
       const ext = await sess.extensions.loadExtension(dir, { allowFileAccess: true })
       console.log(`[profiles] ${profile.id}: loaded unpacked ${ext.name} from ${dir}`)
@@ -136,7 +150,7 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
 }
 
 /** MV3 service workers don't start on their own until something wakes them. */
-async function startWorker(sess: Session, ext: Electron.Extension, profileId: string) {
+export async function startWorker(sess: Session, ext: Electron.Extension, profileId: string) {
   const manifest = ext.manifest as { manifest_version?: number; background?: { service_worker?: string } }
   if (manifest.manifest_version === 3 && manifest.background?.service_worker) {
     await sess.serviceWorkers.startWorkerForScope(ext.url).catch((error) => {

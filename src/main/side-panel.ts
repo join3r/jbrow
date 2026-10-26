@@ -1,7 +1,8 @@
-import { app, Menu, nativeImage, WebContentsView, type BrowserWindow, type Rectangle, type WebContents } from 'electron'
+import { app, Menu, WebContentsView, type BrowserWindow, type Rectangle, type WebContents } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { SidePanelState } from '../shared/types'
+import { iconOf } from './extension-files'
 import { libraryOf, permissionsOf } from './library'
 import { GUTTER, SIDE_GAP, SIDEBAR_WIDTH } from './panel'
 import type { ProfileRuntime } from './profiles'
@@ -338,17 +339,3 @@ export class SidePanels {
 const defaultPath = (ext: Electron.Extension): string | undefined =>
   (ext.manifest as { side_panel?: { default_path?: string } }).side_panel?.default_path?.replace(/^\//, '')
 
-const icons = new Map<string, string | undefined>()
-/** The extension's icon as a data URL, for the panel's header. */
-function iconOf(ext: Electron.Extension): string | undefined {
-  if (icons.has(ext.path)) return icons.get(ext.path)
-  const list = (ext.manifest as { icons?: Record<string, string> }).icons ?? {}
-  const size = Object.keys(list).map(Number).sort((a, b) => Math.abs(a - 32) - Math.abs(b - 32))[0]
-  let url: string | undefined
-  if (size) {
-    const img = nativeImage.createFromPath(path.join(ext.path, list[size]))
-    if (!img.isEmpty()) url = img.resize({ width: 32, height: 32 }).toDataURL()
-  }
-  icons.set(ext.path, url)
-  return url
-}

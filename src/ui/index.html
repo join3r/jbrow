@@ -95,6 +95,7 @@
               <div class="pop-sep"></div>
               <button id="addExtension" class="pop-item"><span data-icon="folderPlus"></span>Add from folder…</button>
               <button id="openStore" class="pop-item"><span data-icon="store"></span>Chrome Web Store</button>
+              <button id="manageExtensions" class="pop-item"><span data-icon="settings"></span>Manage extensions</button>
             </div>
           </div>
           <button id="pin" class="icon" data-icon="pin" title="Pin: keep as a regular window with a Dock icon" aria-label="Pin" aria-pressed="false"></button>
@@ -213,6 +214,7 @@
               <button class="set-nav-item" data-section="general"><span data-icon="settings"></span>General</button>
               <button class="set-nav-item" data-section="appearance"><span data-icon="palette"></span>Appearance</button>
               <button class="set-nav-item" data-section="profiles"><span data-icon="user"></span>Profiles</button>
+              <button class="set-nav-item" data-section="extensions"><span data-icon="puzzle"></span>Extensions</button>
               <button class="set-nav-item" data-section="threads"><span data-icon="listTree"></span>Tabs</button>
               <button class="set-nav-item" data-section="archived"><span data-icon="archive"></span>Archived</button>
               <button class="set-nav-item" data-section="apps"><span data-icon="grid"></span>Apps</button>
@@ -355,6 +357,17 @@
                 </p>
                 <div id="profileList" class="profile-list"></div>
                 <button id="addProfile" class="chip">Add profile</button>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="extensions">
+              <h2 class="set-section-title">Extensions</h2>
+              <div class="set-item" data-keywords="extension extensions add-ons plugins turn off disable enable remove uninstall delete">
+                <p class="help">
+                  Every extension in each profile, including the ones without a toolbar button. Uncheck one to turn it off; it
+                  stays installed with its settings. Removing one erases what it stored.
+                </p>
+                <div id="extList" class="ext-list"></div>
               </div>
             </section>
 

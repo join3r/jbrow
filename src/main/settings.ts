@@ -44,6 +44,8 @@ export interface Settings {
   searchSuggestions: boolean
   /** Unpacked extension folders to load, per profile ID. */
   unpackedExtensions: Record<string, string[]>
+  /** Extensions turned off, per profile ID: they stay installed but don't load. `path` is the folder to load when turned back on. */
+  disabledExtensions: Record<string, { id: string; path: string }[]>
   /**
    * Where the window goes. Until you move or resize it, it's this fraction of the display's work
    * area. `displays`: where you left the unpinned panel on each display, by display ID, relative to
@@ -116,6 +118,7 @@ const DEFAULTS: Settings = {
   searchUrl: 'https://www.google.com/search?q=%s',
   searchSuggestions: true,
   unpackedExtensions: {},
+  disabledExtensions: {},
   panel: { widthFraction: 0.72, heightFraction: 0.78, displays: {}, pinned: null },
   hideFromScreenCapture: true,
   dangerousSites: true,
