@@ -27,15 +27,15 @@ export type TabHooks = (profileId: string) => Pick<
 
 export const partitionFor = (profileId: string) => `persist:profile-${profileId}`
 
+/** Electron's own user agent, read before jbrow replaces it. */
+let electronUserAgent: string | undefined
+
 /**
  * Chrome Web Store only offers "Add to Chrome" to user agents that look like Chrome.
  * Google sign-in is the exception: see setupProfiles.
  */
-function chromeLikeUserAgent(s: Session): string {
-  return s
-    .getUserAgent()
-    .replace(/\sElectron\/\S+/, '')
-    .replace(new RegExp(`\\s${app.getName()}/\\S+`, 'i'), '')
+function chromeLikeUserAgent(ua: string): string {
+  return ua.replace(/\sElectron\/\S+/, '').replace(new RegExp(`\\s${app.getName()}/\\S+`, 'i'), '')
 }
 
 export interface ProfileDeps {
@@ -59,8 +59,13 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
   const sess = session.fromPartition(partition)
   // Google sign-in gets the real user agent from jbrow's own extension (see jbrow-extension.ts):
   // a session.webRequest listener here would switch off every extension's declarativeNetRequest.
-  const ownExtension = writeJbrowExtension(sess.getUserAgent())
-  sess.setUserAgent(chromeLikeUserAgent(sess))
+  electronUserAgent ??= app.userAgentFallback
+  const ownExtension = writeJbrowExtension(electronUserAgent)
+  sess.setUserAgent(chromeLikeUserAgent(electronUserAgent))
+  // A cross-site frame in its own process (Cloudflare's Turnstile on bistro.sk's login) reads
+  // navigator.userAgent from the app's user agent, not the session's. Left as Electron's, it
+  // disagrees with the Chrome one in the request headers, and Turnstile fails the check.
+  app.userAgentFallback = chromeLikeUserAgent(electronUserAgent)
 
   // Without a handler Electron rejects getDisplayMedia, so Meet and friends can't share the
   // screen. The macOS system picker (useSystemPicker) closes and reopens on the first click,

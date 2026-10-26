@@ -18,6 +18,12 @@ before(async () => {
     '/icon': html('With icon', '').replace('<title>', '<link rel="icon" href="/icon.png"><title>'),
     '/icon.png': { headers: { 'content-type': 'image/png' }, body: PNG },
     '/retitle': html('First title', '<script>setTimeout(() => (document.title = "Second title"), 50)</script>'),
+    // localhost is another site than 127.0.0.1, so the frame gets its own process.
+    '/framed': (req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html' })
+      res.end(html('Framed', `<iframe src="http://localhost:${req.socket.localPort}/ua"></iframe>`))
+    },
+    '/ua': html('UA', '<script>parent.postMessage(navigator.userAgent, "*")</script>'),
     '/count': { headers: { 'cache-control': 'no-store' }, body: html('Counted') },
     // Never answers; closing the server drops the connection.
     '/slow': () => {},
@@ -157,4 +163,17 @@ test('stop ends a load that takes too long', async () => {
   assert.equal(s.tabs.find((x) => x.id === t.id)!.title, 'Page A')
   const rows = await sidebarRows(jb)
   assert.ok(!rows.find((r) => r.id === t.id)?.classes.includes('loading'))
+})
+
+test('a frame from another site sees the same user agent as the page', async () => {
+  // Cloudflare's Turnstile runs in one, and fails a browser whose frame says Electron while its
+  // requests say Chrome (bistro.sk's login).
+  await openTab(jb, `${web.url}/framed`)
+  const page = await jb.page(`${web.url}/framed`)
+  const framed = await page.eval<string>(`new Promise((resolve) => {
+    addEventListener('message', (e) => resolve(e.data))
+    document.querySelector('iframe').src += '?again'
+  })`)
+  assert.equal(framed, await page.eval<string>('navigator.userAgent'))
+  assert.doesNotMatch(framed, /Electron/)
 })
