@@ -180,6 +180,39 @@ const patches = [
       // TODO`,
     replace: `      parentMenuItemId,`,
   },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: "native messaging: a host ends with the page or service worker that opened it. It outlived both, so every extension reload or worker restart left one more running; Stem's stale hosts took turns knocking the live one off Stem's socket",
+    find: `        application
+      );
+      this.hostMap[connectionId] = host;
+    };`,
+    replace: `        application
+      );
+      this.hostMap[connectionId] = host;
+      /* jbrow: the host ends with its opener, see scripts/patch-deps.mjs */
+      const sender = event.sender;
+      const workers = this.ctx.session.serviceWorkers;
+      const gone = () => {
+        try {
+          this.disconnectNative(event, connectionId);
+        } catch (error) {
+          d7("disconnect after opener went: %s", error);
+        }
+      };
+      const stopped = ({ versionId, runningStatus }) => {
+        if (versionId === sender.versionId && runningStatus === "stopped") gone();
+      };
+      if (event.type === "frame") sender.once("destroyed", gone);
+      else workers.on("running-status-changed", stopped);
+      const destroy = host.destroy.bind(host);
+      host.destroy = () => {
+        if (event.type === "frame") sender.off("destroyed", gone);
+        else workers.off("running-status-changed", stopped);
+        destroy();
+      };
+    };`,
+  },
 ]
 
 let applied = 0

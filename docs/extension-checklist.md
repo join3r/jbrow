@@ -46,6 +46,10 @@ in these places:
 9. A click on an extension's item in the page's right-click menu says which submenu it came from
    (`parentMenuItemId`) and which frame was clicked. Both were always -1. Bitwarden decides
    between fill, copy username and copy password by the submenu, so its items did nothing.
+10. A native messaging host ends when the page or service worker that opened it goes away.
+    Before, every extension reload or worker restart left the old host running. On 2026-10-27
+    jbrow had six Stem hosts for two profiles. Each one reconnected to Stem every two seconds
+    and knocked the previous one off, so Stem's actions failed with "disconnected".
 
 **`src/preload/extension-shims.ts`** runs in every extension context before the library:
 
