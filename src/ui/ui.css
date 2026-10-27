@@ -159,6 +159,7 @@ button:focus-visible, input:focus-visible, [role='button']:focus-visible { outli
 .seg { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; }
 .seg button { flex: 1; min-width: 0; border: 0; background: none; border-radius: 6px; padding: 4px 2px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seg button[aria-pressed='true'] { background: var(--selected); color: var(--ink); font-weight: 600; }
+.seg button:disabled { opacity: 0.4; }
 /* More choices than fit in one row: buttons keep their full names and wrap. */
 .seg-wrap { flex-wrap: wrap; }
 .seg-wrap button { flex: 1 0 auto; padding: 4px 8px; }

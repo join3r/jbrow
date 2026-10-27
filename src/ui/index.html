@@ -606,6 +606,12 @@
                   with your subscription, so the <code>claude</code> or <code>codex</code> command must be installed and
                   signed in. Each request sends a screenshot of the page and an outline of its layout and text.
                 </p>
+                <label class="check">
+                  <input id="restyleEnabled" type="checkbox" />
+                  <span>Restyle sites</span>
+                </label>
+                <p id="restyleFound" class="help"></p>
+                <div id="restyleOptions">
                 <div class="field">
                   <span class="label">Agent</span>
                   <div id="restyleAgent" class="seg" role="group" aria-label="Agent for restyling">
@@ -626,6 +632,7 @@
                   <input id="restyleCodexModel" class="text" spellcheck="false" placeholder="Codex's default" />
                 </div>
                 <div id="styledSites" class="styled-sites"></div>
+                </div>
               </div>
             </section>
 

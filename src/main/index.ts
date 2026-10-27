@@ -4,7 +4,7 @@ import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, t
 import { urlMatcher } from '../shared/patterns'
 import { awayFromHome, besideClosed, isInFolder, isPinned, keptThreads, numberedThreads, sections, type FolderView } from '../shared/threads'
 import { forcedSearch, isSearchUrl, looksLikeAddress, suggestUrlFor } from '../shared/engines'
-import { THEMES, URL_BAR_STYLES, type AppEntry, type AppLabel, type Folder, type ExtensionView, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
+import { THEMES, URL_BAR_STYLES, type AppEntry, type AppLabel, type Folder, type ExtensionView, type Prefs, type Profile, type RestyleAgent, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
 import { BACKGROUND } from './background'
 import { Certificates } from './certs'
@@ -177,6 +177,7 @@ function state(): UiState {
     crash: active ? tabs.crash(active.id) : null,
     devices: active ? devices.view(active.id) : null,
     styledSites: restyler.styledSites(),
+    restyleAgents: restyler.agents(),
     zoomSites: zoom.list(),
     nav: tabs.navState(),
     keys: actionKeys(settings.shortcuts),
@@ -200,6 +201,7 @@ function state(): UiState {
       numberFrom: settings.numberFrom,
       newTabsAt: settings.newTabsAt,
       openApps: settings.openApps,
+      restyleEnabled: settings.restyle.enabled,
       restyleAgent: settings.restyle.agent,
       restyleModel: settings.restyle.model,
       restyleCodexModel: settings.restyle.codexModel,
@@ -925,6 +927,23 @@ function tabSwitched() {
   if (settings.miniPlayer.onTabSwitch && panel.visible) toMiniPlayer(prev)
 }
 
+/**
+ * Turns restyling on, if claude or codex is installed: looked for again first, since you may have
+ * just installed one. If only the other agent is there, it switches to that one.
+ */
+async function setRestyleEnabled() {
+  const found = await restyler.checkAgents()
+  const agent = found[settings.restyle.agent] ? settings.restyle.agent : (Object.keys(found) as RestyleAgent[]).find((a) => found[a])
+  if (!agent) {
+    toast("jbrow can't find Claude Code or Codex. Install one and sign in, then turn restyling on.")
+    return pushState()
+  }
+  settings.restyle = { ...settings.restyle, enabled: true, agent }
+  saveSettings(settings)
+  restyler.refreshAll()
+  pushState()
+}
+
 function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.appearance === 'system' || prefs.appearance === 'light' || prefs.appearance === 'dark') {
     settings.appearance = prefs.appearance
@@ -949,7 +968,13 @@ function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.searchSuggestions !== undefined) settings.searchSuggestions = prefs.searchSuggestions
   if (prefs.urlBarStyle && URL_BAR_STYLES.includes(prefs.urlBarStyle)) settings.urlBarStyle = prefs.urlBarStyle
   if (prefs.autoUpdate !== undefined) settings.autoUpdate = prefs.autoUpdate
-  if (prefs.restyleAgent === 'claude' || prefs.restyleAgent === 'codex') settings.restyle = { ...settings.restyle, agent: prefs.restyleAgent }
+  // Only an agent that's installed, and restyling only turned on with one (see setRestyleEnabled).
+  if ((prefs.restyleAgent === 'claude' || prefs.restyleAgent === 'codex') && restyler.agents()[prefs.restyleAgent]) settings.restyle = { ...settings.restyle, agent: prefs.restyleAgent }
+  if (prefs.restyleEnabled === false && settings.restyle.enabled) {
+    settings.restyle = { ...settings.restyle, enabled: false }
+    restyler.refreshAll()
+  }
+  if (prefs.restyleEnabled === true) void setRestyleEnabled()
   if (prefs.restyleModel) settings.restyle = { ...settings.restyle, model: prefs.restyleModel }
   if (prefs.restyleCodexModel !== undefined) settings.restyle = { ...settings.restyle, codexModel: prefs.restyleCodexModel.trim() }
   if (prefs.earlierAfterHours !== undefined) settings.earlierAfterHours = Math.max(1, prefs.earlierAfterHours)
@@ -2075,6 +2100,7 @@ function wireIpc() {
     else if (action === 'reload') tabs.reload(tabs.activeId!, hard)
     else wc.stop()
   })
+  on('restyle-check', () => void restyler.checkAgents())
   on<{ prompt: string }>('restyle', ({ prompt }) => {
     const wc = tabs.activeWebContents()
     if (wc) void restyler.restyle(wc, prompt)
@@ -2415,6 +2441,7 @@ app.whenReady().then(async () => {
     notify: toast,
   })
   restyler.load()
+  void restyler.checkAgents()
   certs = new Certificates(() => {
     tabs.layout()
     pushState()

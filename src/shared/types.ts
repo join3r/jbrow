@@ -117,6 +117,8 @@ export interface UiState {
   devices: DeviceChooserView | null
   /** Every site with a restyle, for the settings screen. */
   styledSites: StyledSite[]
+  /** Whether the claude and codex commands are installed; null until jbrow has looked. */
+  restyleAgents: Record<RestyleAgent, boolean | null>
   /** Sites with a zoom of their own, in percent. */
   zoomSites: { site: string; percent: number }[]
   nav: { canGoBack: boolean; canGoForward: boolean; loading: boolean }
@@ -176,6 +178,8 @@ export interface Prefs {
   newTabsAt: NewTabsAt
   /** App sections at the bottom of the sidebar that are open, by scope key. The rest are collapsed. */
   openApps: string[]
+  /** Restyling is on (see RestyleSettings.enabled). */
+  restyleEnabled: boolean
   /** Claude model alias for restyling sites. */
   restyleAgent: RestyleAgent
   restyleModel: string
@@ -356,8 +360,8 @@ export interface RestyleView {
   /** What you asked for so far and what the agent said it changed, oldest first. */
   changes: { prompt: string; note: string }[]
   enabled: boolean
-  /** A request an agent is working on now, with the agent's name. `checking` once it's looking over its first try on the page. */
-  running: { prompt: string; startedAt: number; agent: string; checking: boolean } | null
+  /** A request an agent is working on now, with the agent's name and what it's doing ("working on “…”"). */
+  running: { prompt: string; startedAt: number; agent: string; doing: string } | null
 }
 
 export interface StyledSite {

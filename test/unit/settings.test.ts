@@ -78,7 +78,7 @@ test('nested objects from older versions gain their new keys', () => {
     keepLoaded: { kept: true },
   })
   const s = loadSettings()
-  assert.deepEqual(s.restyle, { agent: 'claude', model: 'opus', codexModel: '', claudePath: '', codexPath: '' })
+  assert.deepEqual(s.restyle, { enabled: false, agent: 'claude', model: 'opus', codexModel: '', claudePath: '', codexPath: '' })
   assert.equal(s.miniPlayer.onHide, false)
   assert.equal(s.miniPlayer.sites, 'all')
   assert.deepEqual(s.miniPlayer.onlySites, [])
@@ -236,4 +236,18 @@ test('scopeForApp with no linked groups', () => {
   s.linkedApps = []
   assert.equal(scopeForApp(s, 'com.apple.Safari'), 'com.apple.Safari')
   assert.equal(scopeForApp(s, ''), '')
+})
+
+test('restyling is off by default, and stays on for older settings with restyled sites', () => {
+  const styles = path.join(path.dirname(settingsPath()), 'styles.json')
+  rmSync(styles, { force: true })
+  write({ restyle: { model: 'opus' } })
+  assert.equal(loadSettings().restyle.enabled, false)
+  writeFileSync(styles, JSON.stringify({ 'a.com': { enabled: true, changes: [{ prompt: 'x', css: 'a{}', note: '', at: 1 }] } }))
+  assert.equal(loadSettings().restyle.enabled, true)
+  // An explicit choice wins.
+  write({ restyle: { enabled: false } })
+  assert.equal(loadSettings().restyle.enabled, false)
+  rmSync(styles)
+  rmSync(settingsPath())
 })

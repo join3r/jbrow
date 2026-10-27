@@ -341,13 +341,21 @@ a new tab only to start a download closes that tab again.
 
 ## Restyling sites with Claude
 
-The wand icon in the toolbar restyles the site you're on. Type how it should look ("dark theme",
+Restyling is off until you turn on **Restyle sites** under **Restyling** in settings, which you can
+only do with Claude Code or Codex installed (jbrow looks for them each time settings opens). Then the
+wand icon in the toolbar restyles the site you're on; it's hidden while restyling is off or the agent
+you picked isn't installed. Turned off, saved styles stop applying until you turn it on again. Type how it should look ("dark theme",
 "hide the sidebar", "wider text column, bigger font") and press Return. jbrow sends Claude a
-screenshot of the page, an outline of its DOM and the site's stylesheet so far, and inserts the
-stylesheet Claude writes back into every page of that site (the hostname, without www) from the
-moment each starts loading. Before keeping it, jbrow puts Claude's first try on the page and sends
-it back with a new screenshot and a list of anything that now sits on top of a video or a big image,
-so Claude can fix what came out wrong; if you hide jbrow before then, the first try stands. Ask
+screenshot of the page, an outline of its DOM, the colors and fonts on screen and the site's
+stylesheet so far, and inserts the stylesheet Claude settles on into every page of that site (the
+hostname, without www) from the moment each starts loading. Claude works on the live page with three
+tools jbrow serves it over a local MCP server: **inspect** (what selectors match, with computed
+colors, contrast, fonts, spacing and position), **outline** (any part of the DOM in detail) and
+**preview** (puts a stylesheet on the page and returns a screenshot, or a full-resolution close-up,
+plus selectors that match nothing, text with too little contrast, bars now over a video or image and
+sideways scrolling). It previews, critiques and fixes until it's happy, usually two to four times,
+so you see the page change while it works. Codex, if you pick it in settings, works the same way
+with the same tools. Ask
 again to refine it; each request builds on the last. The wand turns
 teal on a restyled site and pulses while Claude works, and the note on what changed shows at the
 bottom of the sidebar. The wand's popover lists what you asked for and has **Undo last change**,
@@ -356,14 +364,14 @@ bottom of the sidebar. The wand's popover lists what you asked for and has **Und
 It runs Claude Code's `claude -p` with your Claude subscription, so install Claude Code and sign in
 first (`claude`, then `/login`). jbrow finds `claude` in `~/.local/bin`, `/opt/homebrew/bin`,
 `/usr/local/bin` or your login shell's PATH; set `restyle.claudePath` otherwise. Each run has no
-tools, settings, CLAUDE.md or MCP servers, and jbrow leaves `ANTHROPIC_API_KEY` out of its
+tools but jbrow's, and no settings, CLAUDE.md, plugins or MCP servers of yours, and jbrow leaves `ANTHROPIC_API_KEY` out of its
 environment so it can't bill an API key instead. Because page text reaches Claude, a page could try
 to talk it into CSS that sends what you type elsewhere (`input[value^=a] { background: url(…) }`),
 so jbrow removes every `url()`, `image-set()` and `@import` that isn't a `data:` URL before using a
 stylesheet, and says so when it does. Chromium parses the stylesheet first (in a blank page with no
 network), and jbrow checks and inserts Chromium's own serialization of it, so escapes and odd line
 endings can't hide a reference from the check. Pick the model under **Restyling** in settings;
-Sonnet takes about 10 seconds. Styles are kept in `styles.json` next to `settings.json`.
+a request takes about 15 to 60 seconds. Styles are kept in `styles.json` next to `settings.json`.
 
 ## Welcome
 
@@ -429,7 +437,7 @@ on first run. Restart jbrow after editing the file by hand (menu bar item, **Res
 - `archiveAfterDays`: archive tabs unseen this many days; 0 turns archiving off.
 - `zoom`: `defaultPercent`, `remember`, and `sites`, each zoomed site (hostname without www) with its zoom in percent.
 - `sidePanelWidth`: width of an extension's side panel in pixels; dragging its edge sets it.
-- `restyle`: `model` for restyling (a Claude model alias such as sonnet, opus or haiku) and
+- `restyle`: `enabled`, whether restyling is on; `model` for restyling (a Claude model alias such as sonnet, opus or haiku) and
   `claudePath`, the claude command if jbrow doesn't find it on its own.
 
 Tabs, folders and archived tabs are in `tabs.json` next to it, and the browsing history in `visits.json`.

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { beforeEach, test } from 'node:test'
 import type { WebContents } from 'electron'
@@ -102,7 +102,7 @@ test('CssChecker gives up when the stylesheet cannot be parsed', async () => {
 // ---------- Restyler ----------
 
 function settings(over: Partial<RestyleSettings> = {}): RestyleSettings {
-  return { agent: 'claude', model: 'sonnet', codexModel: '', claudePath: '', codexPath: '', ...over }
+  return { enabled: true, agent: 'claude', model: 'sonnet', codexModel: '', claudePath: '', codexPath: '', ...over }
 }
 
 function fakePage(url: string, id = 1) {
@@ -125,8 +125,12 @@ function fakePage(url: string, id = 1) {
     async capturePage() {
       return { isEmpty: () => false, getSize: () => ({ width: 800, height: 600 }), toJPEG: () => Buffer.from('jpeg') }
     },
-    async executeJavaScriptInIsolatedWorld() {
-      return { title: 'T', viewport: '800×600', dark: false, outline: 'body', vars: '' }
+    scripts: [] as string[],
+    async executeJavaScriptInIsolatedWorld(_world: number, [{ code }]: { code: string }[]) {
+      wc.scripts.push(code)
+      if (code.startsWith('((SELS)')) return 'a: 3 matches'
+      if (code.startsWith('((CSS)')) return 'Selectors that match nothing on this page:\n- .gone'
+      return { title: 'T', viewport: '800×600', dark: false, outline: 'body', vars: '', covers: [], palette: 'page: white' }
     },
   }
   return wc
@@ -285,86 +289,191 @@ test('restyle ignores empty prompts and pages that are not websites', async () =
   assert.equal(changes(), 0)
 })
 
+type Agent = 'claude' | 'codex'
+
 /**
- * A stand-in for the claude command: answers each run with the next of `answers` (a stylesheet
- * and note, null to fail, or 'hang' to never answer) and keeps what each run was sent in a file.
+ * A stand-in for the claude or codex command that works like the real one with tools: it finds
+ * jbrow's MCP server the way that agent does (claude: a --mcp-config file; codex: -c settings and
+ * the token in its environment), makes each of `calls` on it in turn (keeping what came back),
+ * then answers with `answer`, or hangs when it's 'hang'.
  */
-function fakeClaude(answers: ({ css: string; note: string } | null | 'hang')[]) {
-  const dir = path.join(userData, `fake-claude-${Math.random().toString(36).slice(2)}`)
-  const bin = path.join(dir, 'claude')
-  const log = path.join(dir, 'runs.jsonl')
+function fakeAgent(agent: Agent, calls: { name: string; arguments: object }[], answer: { css: string; note: string } | 'hang') {
+  const dir = path.join(userData, `fake-${agent}-${Math.random().toString(36).slice(2)}`)
+  const bin = path.join(dir, agent)
+  const log = path.join(dir, 'log.json')
   mkdirSync(dir, { recursive: true })
   writeFileSync(
     bin,
     `#!${process.execPath}
 const fs = require('fs')
-const answers = ${JSON.stringify(answers)}
+const argv = process.argv
+const arg = (name) => argv[argv.indexOf(name) + 1]
+let url, headers
+if (${JSON.stringify(agent)} === 'claude') {
+  ;({ url, headers } = JSON.parse(fs.readFileSync(arg('--mcp-config'), 'utf8')).mcpServers.jbrow)
+} else {
+  url = JSON.parse(argv.find((a) => a.startsWith('mcp_servers.jbrow.url=')).split('=').slice(1).join('='))
+  headers = { Authorization: 'Bearer ' + process.env.JBROW_MCP_TOKEN }
+}
 let input = ''
 process.stdin.on('data', (d) => (input += d))
-process.stdin.on('end', () => {
-  fs.appendFileSync(${JSON.stringify(log)}, input.trim() + '\\n')
-  const answer = answers[fs.readFileSync(${JSON.stringify(log)}, 'utf8').trim().split('\\n').length - 1]
+process.stdin.on('end', async () => {
+  const rpc = async (id, method, params) => (await (await fetch(url, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id, method, params }) })).json())
+  const record = { args: argv.slice(2), input, tools: [], results: [] }
+  await rpc(1, 'initialize', { protocolVersion: '2025-06-18' })
+  record.tools = (await rpc(2, 'tools/list', {})).result.tools.map((t) => t.name)
+  record.unauthorized = (await fetch(url, { method: 'POST', body: '{}' })).status
+  let id = 3
+  for (const call of ${JSON.stringify(calls)}) record.results.push((await rpc(id++, 'tools/call', call)).result)
+  fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify(record))
+  const answer = ${JSON.stringify(answer)}
   if (answer === 'hang') return setTimeout(() => {}, 1e9)
-  if (!answer) { console.error('no answer'); process.exit(1) }
-  console.log(JSON.stringify({ type: 'result', is_error: false, structured_output: answer }))
+  if (${JSON.stringify(agent)} === 'claude') console.log(JSON.stringify({ type: 'result', is_error: false, structured_output: answer }))
+  else fs.writeFileSync(arg('--output-last-message'), JSON.stringify(answer))
 })
 `,
   )
   chmodSync(bin, 0o755)
-  const runs = () =>
-    readFileSync(log, 'utf8')
-      .trim()
-      .split('\n')
-      .map((l) => (JSON.parse(l) as { message: { content: { type: string; text?: string }[] } }).message.content.find((c) => c.type === 'text')!.text!)
-  return { bin, runs }
+  const record = () => {
+    const r = JSON.parse(readFileSync(log, 'utf8')) as {
+      args: string[]
+      input: string
+      tools: string[]
+      unauthorized: number
+      results: { content: { type: string; text?: string; data?: string }[]; isError?: boolean }[]
+    }
+    // What the agent was asked: claude gets a stream-json message, codex plain text.
+    const text = agent === 'claude' ? (JSON.parse(r.input) as { message: { content: { type: string; text?: string }[] } }).message.content.find((c) => c.type === 'text')!.text! : r.input
+    return { ...r, text }
+  }
+  const settings: Partial<RestyleSettings> = agent === 'claude' ? { claudePath: bin } : { agent: 'codex', codexPath: bin }
+  return { bin, record, log, settings }
 }
 
-test('restyle puts the first try on the page and keeps what the check returns', { skip: process.platform === 'win32' }, async () => {
+for (const agent of ['claude', 'codex'] as const) {
+  test(`${agent}: works on the page with tools and keeps the stylesheet it answers with`, { skip: process.platform === 'win32' }, async () => {
+    const wc = fakePage('https://example.com/')
+    const fake = fakeAgent(
+      agent,
+      [
+        { name: 'inspect', arguments: { selectors: ['a'] } },
+        { name: 'preview', arguments: { css: 'a { color: red; }' } },
+        { name: 'preview', arguments: { css: 'a { background: url(https://evil.example/) }' } },
+        { name: 'outline', arguments: { selector: 'main' } },
+      ],
+      { css: 'a { color: blue; }', note: 'blue links' },
+    )
+    const { r, notes } = restyler([wc], fake.settings)
+    let shown = ''
+    const insert = wc.insertCSS
+    wc.insertCSS = async (css) => ((shown ||= css), insert(css))
+    await quiet(() => r.restyle(wc as unknown as WebContents, 'links in red'))
+    await settle()
+    const run = fake.record()
+    assert.deepEqual(run.tools, ['inspect', 'outline', 'preview'])
+    assert.equal(run.unauthorized, 401)
+    // The token is never on the command line.
+    assert.doesNotMatch(run.args.join(' '), /Bearer|[0-9a-f]{48}/)
+    assert.match(run.text, /Request \(from the person\): links in red/)
+    assert.match(run.text, /Colors and fonts on screen now:\npage: white/)
+    const [inspected, previewed, refused] = run.results
+    assert.equal(inspected.content[0].text, 'a: 3 matches')
+    // The preview went on the page, and came back as a screenshot with what looked wrong.
+    assert.equal(shown, 'a { color: red; }')
+    assert.equal(previewed.content[0].type, 'image')
+    assert.match(previewed.content[1].text!, /match nothing on this page:\n- \.gone/)
+    assert.equal(refused.isError, true)
+    assert.match(refused.content[0].text!, /another server/)
+    assert.deepEqual(notes, ['blue links'])
+    assert.deepEqual([...wc.inserted.values()], ['a { color: blue; }'])
+  })
+
+  test(`${agent}: cancelling takes a preview off the page again`, { skip: process.platform === 'win32' }, async () => {
+    store({ 'example.com': { enabled: true, changes: [change('green', 'a { color: green; }')] } })
+    const wc = fakePage('https://example.com/')
+    const fake = fakeAgent(agent, [{ name: 'preview', arguments: { css: 'a { color: red; }' } }], 'hang')
+    const { r, notes } = restyler([wc], fake.settings)
+    r.load()
+    const done = quiet(() => r.restyle(wc as unknown as WebContents, 'links in red'))
+    while (!existsSync(fake.log)) await settle()
+    assert.match(r.view('https://example.com/')!.running!.doing, /^trying a stylesheet/)
+    assert.deepEqual([...wc.inserted.values()], ['a { color: red; }'])
+    r.cancel('example.com')
+    await done
+    await settle()
+    assert.deepEqual(notes, [])
+    assert.deepEqual([...wc.inserted.values()], ['a { color: green; }'])
+  })
+}
+
+test('claude: runs with only jbrow’s tools, and its MCP config file is removed afterwards', { skip: process.platform === 'win32' }, async () => {
   const wc = fakePage('https://example.com/')
-  const claude = fakeClaude([
-    { css: 'a { color: red; }', note: 'first' },
-    { css: 'a { color: blue; }', note: 'checked' },
-  ])
-  const { r, notes } = restyler([wc], { claudePath: claude.bin })
-  let shown = ''
+  const fake = fakeAgent('claude', [], { css: 'a { color: red; }', note: 'red' })
+  const { r } = restyler([wc], fake.settings)
+  await quiet(() => r.restyle(wc as unknown as WebContents, 'links in red'))
+  const { args } = fake.record()
+  assert.ok(args.includes('--strict-mcp-config'))
+  assert.ok(!args.includes('--safe-mode'))
+  assert.equal(args[args.indexOf('--tools') + 1], '')
+  assert.equal(existsSync(args[args.indexOf('--mcp-config') + 1]), false)
+})
+
+test('codex: jbrow’s tools are approved up front', { skip: process.platform === 'win32' }, async () => {
+  const wc = fakePage('https://example.com/')
+  const fake = fakeAgent('codex', [], { css: 'a { color: red; }', note: 'red' })
+  const { r } = restyler([wc], fake.settings)
+  await quiet(() => r.restyle(wc as unknown as WebContents, 'links in red'))
+  const { args } = fake.record()
+  assert.ok(args.includes('mcp_servers.jbrow.default_tools_approval_mode="approve"'))
+  assert.ok(args.includes('mcp_servers.jbrow.bearer_token_env_var="JBROW_MCP_TOKEN"'))
+})
+
+test('a preview after the page left the site is refused', { skip: process.platform === 'win32' }, async () => {
+  const wc = fakePage('https://example.com/')
+  const fake = fakeAgent('claude', [{ name: 'preview', arguments: { css: 'a { color: red; }' } }], { css: 'a { color: red; }', note: 'red' })
+  const { r } = restyler([wc], fake.settings)
+  // Leaves the site as the preview goes in.
   const insert = wc.insertCSS
-  wc.insertCSS = async (css) => ((shown ||= css), insert(css))
+  wc.insertCSS = async (css) => ((wc.url = 'https://other.com/'), insert(css))
   await quiet(() => r.restyle(wc as unknown as WebContents, 'links in red'))
-  await settle()
-  assert.equal(shown, 'a { color: red; }')
-  const [first, second] = claude.runs()
-  assert.match(first, /Request \(from the person\): links in red/)
-  assert.match(second, /^Check your first try/)
-  assert.match(second, /a \{ color: red; \}/)
-  assert.deepEqual(notes, ['checked'])
-  assert.deepEqual([...wc.inserted.values()], ['a { color: blue; }'])
-  assert.equal(JSON.parse(readFileSync(stylesPath, 'utf8'))['example.com'].changes[0].css, 'a { color: blue; }')
+  const [result] = fake.record().results
+  assert.equal(result.isError, true)
+  assert.match(result.content[0].text!, /left the site/)
 })
 
-test('restyle keeps the first try when the check fails', { skip: process.platform === 'win32' }, async () => {
+test('turned off, restyling applies no stylesheets and takes no requests', async () => {
+  store({ 'example.com': { enabled: true, changes: [change('red', 'a { color: red; }')] } })
   const wc = fakePage('https://example.com/')
-  const claude = fakeClaude([{ css: 'a { color: red; }', note: 'first' }, null])
-  const { r, notes } = restyler([wc], { claudePath: claude.bin })
-  await quiet(() => r.restyle(wc as unknown as WebContents, 'links in red'))
-  await settle()
-  assert.equal(claude.runs().length, 2)
-  assert.deepEqual(notes, ['first'])
-  assert.deepEqual([...wc.inserted.values()], ['a { color: red; }'])
-})
-
-test('cancelling during the check takes the first try off the page again', { skip: process.platform === 'win32' }, async () => {
-  store({ 'example.com': { enabled: true, changes: [change('green', 'a { color: green; }')] } })
-  const wc = fakePage('https://example.com/')
-  const claude = fakeClaude([{ css: 'a { color: red; }', note: 'first' }, 'hang'])
-  const { r, notes } = restyler([wc], { claudePath: claude.bin })
+  const on = { enabled: true }
+  const { r, notes } = restyler([wc])
+  ;(r as unknown as { deps: RestyleDeps }).deps.settings = () => settings(on)
   r.load()
-  const done = quiet(() => r.restyle(wc as unknown as WebContents, 'links in red'))
-  while (!r.view('https://example.com/')?.running?.checking) await settle()
-  assert.deepEqual([...wc.inserted.values()], ['a { color: red; }'])
-  r.cancel('example.com')
-  await done
+  r.onNavigate(wc as unknown as WebContents)
   await settle()
+  assert.deepEqual([...wc.inserted.values()], ['a { color: red; }'])
+  on.enabled = false
+  r.refreshAll()
+  await settle()
+  assert.equal(wc.inserted.size, 0)
+  await r.restyle(wc as unknown as WebContents, 'blue')
   assert.deepEqual(notes, [])
-  assert.deepEqual([...wc.inserted.values()], ['a { color: green; }'])
-  assert.equal(r.view('https://example.com/')?.changes.length, 1)
+  assert.equal(r.view('https://example.com/')?.running, null)
+  // Nothing was forgotten: turned on again, the site's style is back.
+  on.enabled = true
+  r.refreshAll()
+  await settle()
+  assert.deepEqual([...wc.inserted.values()], ['a { color: red; }'])
+})
+
+test('checkAgents says which agents are installed', async () => {
+  const there = path.join(userData, 'agent-there')
+  writeFileSync(there, '')
+  const { r, changes } = restyler([], { claudePath: there, codexPath: path.join(userData, 'agent-missing') })
+  assert.deepEqual(r.agents(), { claude: null, codex: null })
+  assert.deepEqual(await r.checkAgents(), { claude: true, codex: false })
+  assert.deepEqual(r.agents(), { claude: true, codex: false })
+  assert.equal(changes(), 1)
+  // Nothing changed, so nothing to tell the UI.
+  await r.checkAgents()
+  assert.equal(changes(), 1)
 })

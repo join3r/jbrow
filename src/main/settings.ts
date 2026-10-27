@@ -8,6 +8,8 @@ export type AnimationStyle = 'materialize' | 'slide' | 'scale' | 'fade' | 'off'
 export type AnimationEase = 'spring' | 'snappy' | 'smooth'
 
 export interface RestyleSettings {
+  /** Restyling is on: the wand shows and sites' stylesheets apply. Only turned on with claude or codex installed. */
+  enabled: boolean
   /** Which coding agent writes the stylesheets. */
   agent: RestyleAgent
   /** Claude model alias. */
@@ -139,7 +141,7 @@ const DEFAULTS: Settings = {
   newTabsAt: 'top',
   openApps: [],
   extensionShortcuts: {},
-  restyle: { agent: 'claude', model: 'sonnet', codexModel: '', claudePath: '', codexPath: '' },
+  restyle: { enabled: false, agent: 'claude', model: 'sonnet', codexModel: '', claudePath: '', codexPath: '' },
   miniPlayer: { onHide: true, onTabSwitch: false, mutedToo: false, sites: 'all', onlySites: [], exceptSites: [] },
   zoom: { defaultPercent: 100, remember: true, sites: {} },
   sidePanelWidth: 360,
@@ -165,6 +167,8 @@ export function loadSettings(): Settings {
     if (typeof rest.welcomed !== 'boolean') settings.welcomed = true
     // Older settings have fewer restyle keys. Cloned, so changing a site's zoom can't change the defaults.
     settings.restyle = { ...structuredClone(DEFAULTS.restyle), ...rest.restyle }
+    // Restyling from before it could be turned off stays on for whoever restyled a site.
+    if (typeof rest.restyle?.enabled !== 'boolean') settings.restyle.enabled = hasStyledSites()
     settings.miniPlayer = { ...structuredClone(DEFAULTS.miniPlayer), ...rest.miniPlayer }
     settings.zoom = { ...structuredClone(DEFAULTS.zoom), ...rest.zoom }
     settings.keepLoaded = { ...structuredClone(DEFAULTS.keepLoaded), ...rest.keepLoaded }
@@ -191,6 +195,15 @@ export function loadSettings(): Settings {
   } catch (error) {
     console.error(`[settings] ${file} is not valid JSON, using defaults:`, error)
     return structuredClone(DEFAULTS)
+  }
+}
+
+function hasStyledSites(): boolean {
+  try {
+    const sites = JSON.parse(readFileSync(path.join(app.getPath('userData'), 'styles.json'), 'utf8')) as Record<string, { changes?: unknown[] }>
+    return Object.values(sites).some((s) => !!s.changes?.length)
+  } catch {
+    return false
   }
 }
 

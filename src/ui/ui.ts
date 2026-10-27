@@ -1535,6 +1535,9 @@ function renderRestyle() {
   if (!S) return
   const r = S.restyle
   const button = $<HTMLButtonElement>('restyleButton')
+  // Only while restyling is on and the agent it uses is installed.
+  button.hidden = !S.prefs.restyleEnabled || !S.restyleAgents[S.prefs.restyleAgent]
+  if (button.hidden) return setRestyle(false)
   button.disabled = !r
   button.classList.toggle('styled', !!r && r.enabled && r.changes.length > 0)
   button.classList.toggle('busy', !!r?.running)
@@ -1547,8 +1550,7 @@ function renderRestyle() {
   $('restyleRunning').hidden = !r.running
   clearInterval(restyleTimer)
   if (r.running) {
-    const { startedAt, prompt, agent, checking } = r.running
-    const doing = checking ? `checking how “${prompt}” came out` : `working on “${prompt}”`
+    const { startedAt, agent, doing } = r.running
     const tick = () => ($('restyleRunText').textContent = `${agent} is ${doing} · ${Math.round((Date.now() - startedAt) / 1000)} s`)
     tick()
     restyleTimer = window.setInterval(tick, 1000)
@@ -1571,7 +1573,7 @@ function renderRestyle() {
 
 function setRestyle(open: boolean) {
   if (open === !restylePane.hidden) return
-  if (open && !S?.restyle) return
+  if (open && (!S?.restyle || $('restyleButton').hidden)) return
   restylePane.hidden = !open
   $('sidebar').classList.toggle('restyling', open)
   $('restyleButton').setAttribute('aria-expanded', String(open))
@@ -1673,6 +1675,8 @@ function showSettings(show: boolean) {
     send('apps')
     send('default-browser')
     send('updates')
+    // You may have installed or removed claude or codex since jbrow looked.
+    send('restyle-check')
   } else {
     stopRecording()
     savePrivateUrls()
@@ -1783,6 +1787,23 @@ function renderSettings(all = false) {
   seg('earlierAfter', String(S.prefs.earlierAfterHours))
   seg('numberFrom', S.prefs.numberFrom)
   seg('newTabsAt', S.prefs.newTabsAt)
+  const found = S.restyleAgents
+  const any = found.claude || found.codex
+  restyleEnabled.checked = S.prefs.restyleEnabled
+  // Can't be turned on without claude or codex, but can always be turned off.
+  restyleEnabled.disabled = !S.prefs.restyleEnabled && !any
+  $('restyleFound').textContent =
+    found.claude === null || found.codex === null
+      ? 'Looking for Claude Code and Codex…'
+      : !any
+        ? 'Install Claude Code (the claude command) or Codex (the codex command) and sign in to turn this on.'
+        : `Found ${[found.claude && 'Claude Code', found.codex && 'Codex'].filter(Boolean).join(' and ')}.`
+  $('restyleOptions').hidden = !S.prefs.restyleEnabled
+  $('restyleAgent').querySelectorAll<HTMLButtonElement>('[data-value]').forEach((b) => {
+    const there = found[b.dataset.value as Prefs['restyleAgent']] !== false
+    b.disabled = !there
+    b.title = there ? '' : 'Not installed'
+  })
   seg('restyleAgent', S.prefs.restyleAgent)
   seg('restyleModel', S.prefs.restyleModel)
   const codex = S.prefs.restyleAgent === 'codex'
@@ -1930,6 +1951,8 @@ $('earlierAfter').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ earlierAfterHours: Number(b.dataset.value) })
 })
+const restyleEnabled = $<HTMLInputElement>('restyleEnabled')
+restyleEnabled.addEventListener('change', () => sendPrefs({ restyleEnabled: restyleEnabled.checked }))
 $('restyleAgent').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ restyleAgent: b.dataset.value as Prefs['restyleAgent'] })
