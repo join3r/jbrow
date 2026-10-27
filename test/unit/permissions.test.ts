@@ -18,13 +18,20 @@ type RequestHandler = (wc: WebContents, permission: string, callback: (granted: 
 type CheckHandler = (wc: WebContents | null, permission: string, origin: string, details: Record<string, unknown>) => boolean
 type DeviceHandler = (details: Record<string, unknown>) => boolean
 
+/** An installed extension that lists geolocation and notifications in its manifest. */
+const MAPS = 'abcdefghijklmnopabcdefghijklmnop'
+
 /** A session that keeps the handlers jbrow sets, and a page to ask from. */
 function setup(profile = { id: 'p', name: 'Personal', color: '#000' }) {
   const handlers = {} as { request: RequestHandler; check: CheckHandler; device: DeviceHandler }
+  const installed: Record<string, { name: string; manifest: Record<string, unknown> }> = {
+    [MAPS]: { name: 'Maps Helper', manifest: { permissions: ['storage', 'geolocation', 'notifications'] } },
+  }
   const sess = {
     setPermissionRequestHandler: (h: RequestHandler) => void (handlers.request = h),
     setPermissionCheckHandler: (h: CheckHandler) => void (handlers.check = h),
     setDevicePermissionHandler: (h: DeviceHandler) => void (handlers.device = h),
+    extensions: { getExtension: (id: string) => installed[id] ?? null },
   }
   const perms = new SitePermissions(() => null)
   perms.attach(sess as unknown as Session, profile)
@@ -66,16 +73,34 @@ test('isLasting: a serial number, or a serial port without USB IDs', () => {
   assert.equal(isLasting('serial', { vendorId: '2341', portName: 'COM4' }), false)
 })
 
-test('always-granted permissions and extensions need no prompt', async (t) => {
+test('always-granted permissions, and what an extension listed in its manifest, need no prompt', async (t) => {
   const asked = answer(t, false)
   const { request, check } = setup()
   for (const p of ['fullscreen', 'pointerLock', 'clipboard-sanitized-write', 'display-capture']) {
     assert.equal(await request(p, { requestingUrl: 'https://a.com/' }), true, p)
     assert.equal(check(p, 'https://a.com'), true, p)
   }
-  assert.equal(await request('geolocation', { requestingUrl: 'chrome-extension://abcdefghijklmnopabcdefghijklmnop/bg.html' }), true)
-  assert.equal(check('notifications', 'chrome-extension://abcdefghijklmnopabcdefghijklmnop'), true)
+  assert.equal(await request('geolocation', { requestingUrl: `chrome-extension://${MAPS}/bg.html` }), true)
+  assert.equal(check('notifications', `chrome-extension://${MAPS}`), true)
   assert.equal(asked.length, 0)
+})
+
+test("an extension is asked like a site for what its manifest doesn't list", async (t) => {
+  const asked = answer(t, false)
+  const { request, check } = setup()
+  // Listed geolocation, not clipboardRead.
+  assert.equal(check('clipboard-read', `chrome-extension://${MAPS}`), false)
+  assert.equal(await request('clipboard-read', { requestingUrl: `chrome-extension://${MAPS}/popup.html` }), false)
+  assert.equal(asked.length, 1)
+  assert.match(asked[0].message!, /^Maps Helper wants to read your clipboard/)
+  // An extension that isn't installed in the profile lists nothing.
+  const other = 'chrome-extension://ponmlkjihgfedcbaponmlkjihgfedcba'
+  assert.equal(check('geolocation', other), false)
+  assert.equal(await request('geolocation', { requestingUrl: `${other}/bg.html` }), false)
+  assert.equal(asked.length, 2)
+  // What it lists in its manifest isn't anything a site may never have.
+  assert.equal(await request('mediaKeySystem', { requestingUrl: `chrome-extension://${MAPS}/bg.html` }), false)
+  assert.equal(asked.length, 2)
 })
 
 test('extensions are asked for the camera, the microphone and other apps, once', async (t) => {
