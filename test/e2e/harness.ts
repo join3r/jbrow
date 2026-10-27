@@ -323,7 +323,7 @@ export class Jbrow {
    * would have its field blurred mid-way. Gives up quietly after `timeout` ms, for pages jbrow covers
    * with its own screen (a sign-in, a crash), which keep the keyboard in the UI.
    */
-  async pageFocused(url: string, timeout = 3000) {
+  async pageFocused(url: string, timeout = 8000) {
     let page: Cdp | undefined
     try {
       page = await this.page((t) => t.url === url, timeout)
