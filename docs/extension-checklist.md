@@ -50,6 +50,10 @@ in these places:
     Before, every extension reload or worker restart left the old host running. On 2026-10-27
     jbrow had six Stem hosts for two profiles. Each one reconnected to Stem every two seconds
     and knocked the previous one off, so Stem's actions failed with "disconnected".
+11. An open native messaging host keeps its service worker running, as in Chrome, and ends when
+    its extension unloads. Electron stops an idle worker after 30 seconds. With item 10 alone
+    that ended Stem's host, and since jbrow's `chrome.alarms` runs on the worker's own timers,
+    nothing woke the worker again: Stem had no jbrow tabs until jbrow restarted.
 
 **`src/preload/extension-shims.ts`** runs in every extension context before the library:
 

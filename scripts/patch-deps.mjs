@@ -213,6 +213,24 @@ const patches = [
       };
     };`,
   },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: "native messaging: an open host keeps the service worker that opened it running, as in Chrome, and ends when its extension unloads. Electron stopped the worker after 30 idle seconds, the patch above then ended its host, and nothing woke the worker again, so Stem lost the browser for good. A worker kept running never reports stopped, even after a reload, hence the unload",
+    find: `      const destroy = host.destroy.bind(host);
+      host.destroy = () => {`,
+    replace: `      /* jbrow: an open host keeps its service worker running, see scripts/patch-deps.mjs */
+      let task = event.type === "frame" ? undefined : sender.startTask?.();
+      const extensions = this.ctx.session.extensions ?? this.ctx.session;
+      const unloaded = (_event, extension) => {
+        if (extension.id === event.extension.id) gone();
+      };
+      extensions.on("extension-unloaded", unloaded);
+      const destroy = host.destroy.bind(host);
+      host.destroy = () => {
+        extensions.off("extension-unloaded", unloaded);
+        task?.end();
+        task = undefined;`,
+  },
 ]
 
 let applied = 0
