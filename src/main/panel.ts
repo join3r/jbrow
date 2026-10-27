@@ -355,7 +355,8 @@ export class Panel {
     let place: Rectangle
     if (this.pinned && panel.pinned) {
       this.display = screen.getDisplayMatching(panel.pinned)
-      place = fit(panel.pinned, this.display.workArea)
+      // Off screen in the background, the window keeps its size even where the screen is smaller.
+      place = BACKGROUND ? panel.pinned : fit(panel.pinned, this.display.workArea)
     } else {
       this.display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
       place = this.floatingPlace(this.display)

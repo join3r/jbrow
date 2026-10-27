@@ -441,13 +441,19 @@ async function ownDisplay(): Promise<{ display: string; stop: () => void } | nul
   return { display: `:${n}`, stop: () => x.kill() }
 }
 
+/**
+ * The window every test gets, whatever the screen: CI machines have small ones (1024×768 on
+ * Windows), and the address bar's preview panel only shows in a window wider than about 1050.
+ */
+const WINDOW = { widthFraction: 0.72, heightFraction: 0.78, displays: {}, pinned: { x: 0, y: 0, width: 1440, height: 900 } }
+
 export async function launch(opts: LaunchOptions = {}): Promise<Jbrow> {
   const userData = opts.userData ?? tempDir()
   mkdirSync(userData, { recursive: true })
   const settingsFile = path.join(userData, 'settings.json')
   const existing = existsSync(settingsFile) ? JSON.parse(readFileSync(settingsFile, 'utf8')) : {}
   if (!opts.userData || opts.settings) {
-    writeFileSync(settingsFile, JSON.stringify({ welcomed: true, ...existing, ...opts.settings }, null, 2))
+    writeFileSync(settingsFile, JSON.stringify({ welcomed: true, panel: WINDOW, ...existing, ...opts.settings }, null, 2))
   }
   if (opts.tabs) writeFileSync(path.join(userData, 'tabs.json'), JSON.stringify(opts.tabs, null, 2))
   // Fresh, empty phishing and malware lists, so jbrow doesn't download the real ones. Tests
