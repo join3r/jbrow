@@ -100,6 +100,16 @@ function extensionOf(sess: Session, origin: string): Electron.Extension | undefi
   return isExtension(origin) ? sess.extensions.getExtension(origin.slice('chrome-extension://'.length)) ?? undefined : undefined
 }
 
+/**
+ * Who the prompt says is asking: a site by its host, an extension as an extension, so one named
+ * like a site can't pass for it. The name is the extension's own, kept to one short line.
+ */
+function requester(origin: string, name?: string): string {
+  if (!isExtension(origin)) return origin.replace(/^https?:\/\//, '')
+  const clean = name?.replace(/[\p{C}\s]+/gu, ' ').trim().slice(0, 40)
+  return clean ? `The extension “${clean}”` : 'An extension'
+}
+
 /** Whether the extension behind `origin` listed `permission` in its manifest. */
 function listed(sess: Session, origin: string, permission: string): boolean {
   const key = MANIFEST[permission]
@@ -263,7 +273,7 @@ export class SitePermissions {
     const key = `${profileId} ${remembers ? origin : `page ${wc.id}`} ${open.join(',')}`
     let prompt = this.pending.get(key)
     if (!prompt) {
-      prompt = this.prompt(profileName, name ?? origin, open, remembers).then(({ allow, remember }) => {
+      prompt = this.prompt(profileName, requester(origin, name), open, remembers).then(({ allow, remember }) => {
         if (remember) {
           const site = ((this.store[profileId] ??= {})[origin] ??= {})
           for (const p of open) site[p] = allow
@@ -281,10 +291,11 @@ export class SitePermissions {
     return prompt
   }
 
+  /** `who` is what requester() makes of the origin. */
   private async prompt(profileName: string, who: string, permissions: string[], remembers: boolean) {
     const what = permissions.map(describe)
     const list = what.length > 1 ? `${what.slice(0, -1).join(', ')} and ${what.at(-1)}` : what[0]
-    const host = remembers ? who.replace(/^https?:\/\//, '') : 'This page'
+    const host = remembers ? who : 'This page'
     const options: Electron.MessageBoxOptions = {
       type: 'question',
       message: `${host} wants to ${list}`,

@@ -92,12 +92,13 @@ test("an extension is asked like a site for what its manifest doesn't list", asy
   assert.equal(check('clipboard-read', `chrome-extension://${MAPS}`), false)
   assert.equal(await request('clipboard-read', { requestingUrl: `chrome-extension://${MAPS}/popup.html` }), false)
   assert.equal(asked.length, 1)
-  assert.match(asked[0].message!, /^Maps Helper wants to read your clipboard/)
+  assert.match(asked[0].message!, /^The extension “Maps Helper” wants to read your clipboard/)
   // An extension that isn't installed in the profile lists nothing.
   const other = 'chrome-extension://ponmlkjihgfedcbaponmlkjihgfedcba'
   assert.equal(check('geolocation', other), false)
   assert.equal(await request('geolocation', { requestingUrl: `${other}/bg.html` }), false)
   assert.equal(asked.length, 2)
+  assert.match(asked[1].message!, /^An extension wants to know your location/)
   // What it lists in its manifest isn't anything a site may never have.
   assert.equal(await request('mediaKeySystem', { requestingUrl: `chrome-extension://${MAPS}/bg.html` }), false)
   assert.equal(asked.length, 2)
