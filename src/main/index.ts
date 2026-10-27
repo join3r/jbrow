@@ -656,15 +656,16 @@ function openThread(n: number) {
 }
 
 /**
- * Moves a tab to another profile. A new tab just switches; a loaded page can't change its
- * session, so it reopens in the other profile next to the original.
+ * Moves a tab to another profile. A new tab just switches, and so does a loaded one `inPlace`
+ * (the profile in the address bar): its page loads again there. Otherwise a loaded page reopens
+ * in the other profile next to the original.
  */
-function switchProfile(id: string, next: string) {
+function switchProfile(id: string, next: string, inPlace = false) {
   const cur = tabs.get(id)
   if (!cur || cur.profile === next) return
   if (filter !== 'all' && filter !== next) filter = 'all'
-  if (!cur.url) {
-    cur.profile = next
+  if (!cur.url || inPlace) {
+    tabs.setProfile(id, next)
     pushState()
     return
   }
@@ -2063,7 +2064,7 @@ function wireIpc() {
   on<{ on?: boolean } | undefined>('pin', (data) => setPinned(data?.on ?? !panel.pinned))
   on<{ profile: string }>('set-profile', ({ profile }) => {
     const id = tabs.activeId
-    if (id) switchProfile(id, profile)
+    if (id) switchProfile(id, profile, true)
   })
   on('new-tab-menu', () => newTabMenu())
   on<{ action: 'back' | 'forward' | 'reload' | 'stop'; hard?: boolean }>('nav', ({ action, hard }) => {

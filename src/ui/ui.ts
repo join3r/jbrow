@@ -41,6 +41,7 @@ const rulesPop = $('rulesPop')
 const folderRules = $<HTMLTextAreaElement>('folderRules')
 const certPop = $('certPop')
 const devicePop = $('devicePop')
+const profilePop = $('profilePop')
 const send = window.jbrow.send
 const welcome = initWelcome($('welcome'), send, () => syncOverlay())
 
@@ -414,11 +415,64 @@ function renderProfileBand() {
   name.textContent = p.name
   band.style.setProperty('--pc', p.color || '#8a93a1')
   band.classList.toggle('typed', other)
+  const others = S!.profiles.filter((x) => x.id !== p.id)
+  const pick = others.length === 1 ? others[0].name : 'another profile'
   name.title =
-    document.activeElement !== omnibox ? `This tab is in the ${p.name} profile`
+    document.activeElement !== omnibox ? `This tab is in the ${p.name} profile. Click to reload it in ${pick}`
     : other ? `Opens in a new tab in ${p.name} (Tab to switch)`
     : `Opens in ${p.name} (Tab to switch)`
+  if (!profilePop.hidden) renderProfilePop()
 }
+
+/**
+ * The profile in the address bar, clicked: with two profiles, the other one; with more, a menu.
+ * While you type, it picks where what's typed opens, as Tab does. Otherwise the tab itself moves,
+ * its page loading again in the profile picked.
+ */
+function pickProfile(id: string) {
+  const active = activeTab()
+  if (!S || !active) return
+  setProfilePop(false)
+  if (document.activeElement === omnibox) setTypedProfile(id)
+  else send('set-profile', { profile: id })
+}
+
+function renderProfilePop() {
+  const active = activeTab()
+  if (!S || !active) return setProfilePop(false)
+  const cur = typedProfile ?? active.profile
+  profilePop.innerHTML = S.profiles
+    .map(
+      (p) =>
+        `<button class="pop-item" role="menuitemradio" aria-checked="${p.id === cur}" data-profile="${esc(p.id)}" style="--pc:${esc(p.color || '#8a93a1')}"><span class="dot"></span>${esc(p.name)}</button>`,
+    )
+    .join('')
+}
+
+function setProfilePop(open: boolean) {
+  if (open === !profilePop.hidden) return
+  profilePop.hidden = !open
+  $('profileName').setAttribute('aria-expanded', String(open))
+  if (open) renderProfilePop()
+  syncOverlay()
+}
+
+$('profileName').addEventListener('mousedown', (e) => e.preventDefault())
+$('profileName').addEventListener('click', () => {
+  const active = activeTab()
+  if (!S || !active) return
+  if (S.profiles.length > 2) return setProfilePop(!!profilePop.hidden)
+  const other = S.profiles.find((p) => p.id !== (typedProfile ?? active.profile))
+  if (other) pickProfile(other.id)
+})
+profilePop.addEventListener('mousedown', (e) => e.preventDefault())
+profilePop.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-profile]')
+  if (b?.dataset.profile) pickProfile(b.dataset.profile)
+})
+document.addEventListener('mousedown', (e) => {
+  if (!profilePop.hidden && !(e.target as HTMLElement).closest('#profilePop, #profileName')) setProfilePop(false)
+})
 
 /** Tab and ⇧Tab in the address bar step through the profiles what's typed will open in. */
 function cycleTypedProfile(step: number) {
@@ -426,10 +480,23 @@ function cycleTypedProfile(step: number) {
   if (!S || !active) return
   const ids = S.profiles.map((p) => p.id)
   const i = ids.indexOf(typedProfile ?? active.profile)
-  typedProfile = ids[(i + step + ids.length) % ids.length]
+  setTypedProfile(ids[(i + step + ids.length) % ids.length])
+}
+
+/** Picks the profile what's typed in the address bar opens in. */
+function setTypedProfile(id: string) {
+  const active = activeTab()
+  if (!active) return
+  typedProfile = id
   // An empty tab has nothing to lose, so it moves over right away.
-  if (!active.url) send('set-profile', { profile: typedProfile })
+  if (!active.url) send('set-profile', { profile: id })
   render()
+  // The other profile has its own history, so the suggestions and any completion change too.
+  if (typed && !untouched) {
+    mayComplete ||= !!completion()
+    requestSuggestions()
+  }
+  if (!suggest.hidden) showSuggestions()
 }
 
 /** Fills the address bar while it isn't being edited, masking private addresses. */
@@ -902,7 +969,7 @@ function forgetVisit(v: VisitItem) {
 /** The page hides while anything of jbrow's own covers it; see Panel.setOverlay. */
 let overlaySent = false
 function syncOverlay() {
-  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !certPop.hidden || !devicePop.hidden || !settingsEl.hidden || welcome.isOpen
+  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !certPop.hidden || !devicePop.hidden || !profilePop.hidden || !settingsEl.hidden || welcome.isOpen
   if (on !== overlaySent) {
     overlaySent = on
     send('overlay', { on })
@@ -1013,12 +1080,6 @@ omnibox.addEventListener('keydown', (e) => {
   } else if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey && (S?.profiles.length ?? 0) > 1) {
     e.preventDefault()
     cycleTypedProfile(e.shiftKey ? -1 : 1)
-    // The other profile has its own history, so the suggestions and any completion change too.
-    if (typed && !untouched) {
-      mayComplete ||= !!completion()
-      requestSuggestions()
-    }
-    if (!suggest.hidden) showSuggestions()
   }
 })
 // Clicks keep the keyboard in the text, except on a field of the layout's own.
@@ -2676,6 +2737,7 @@ document.addEventListener('keydown', (e) => {
     else applySearch()
   } else if (!rulesPop.hidden) closeRules()
   else if (!devicePop.hidden) answerDevice(null)
+  else if (!profilePop.hidden) setProfilePop(false)
   else if (!certPop.hidden) setCert(false)
   else if (!restylePane.hidden) setRestyle(false)
   else if (!extPop.hidden) setExtensions(false)

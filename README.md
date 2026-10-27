@@ -152,6 +152,11 @@ While you type in the address bar, Tab (⇧Tab goes back) switches the profile t
 profile in the address bar changes to match, and the foot of the suggestions says which profile Tab goes to next. On a new tab the tab itself moves over. On a tab with a page,
 the page stays where it is and what you typed opens in a new tab in the chosen profile.
 
+Click the profile's name in the address bar to move the tab itself to another profile: the page loads
+again there, with that profile's logins and cookies, and keeps its back and forward. With two
+profiles it goes to the other one; with more, a menu lists them by color and name. Clicking it while
+you type does what Tab does.
+
 The address bar suggests, as you type, matching open tabs, pages from your history, archived tabs
 and the search engine's suggestions. History is per profile, so it follows the profile what you type
 opens in (Tab switches it, and the suggestions change with it). Pages whose site starts with what you

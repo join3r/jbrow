@@ -1127,6 +1127,22 @@ export class Tabs {
     wc.close()
   }
 
+  /**
+   * Moves a tab to another profile in place. A page can't change its session, so a loaded one
+   * closes and loads again in the other profile's, back and forward kept.
+   */
+  setProfile(id: string, profile: string) {
+    const rec = this.get(id)
+    if (!rec || rec.profile === profile) return
+    const loaded = this.live.has(id)
+    this.dropView(rec)
+    rec.profile = profile
+    const live = loaded ? this.ensureView(rec) : undefined
+    if (live && id === this.activeId) this.deps.runtime(profile)?.extensions.selectTab(live.wc)
+    this.layout()
+    this.changed()
+  }
+
   closeWebContents(wc: WebContents) {
     if (this.droppingView) return
     const id = this.idForWebContents(wc)
