@@ -317,6 +317,81 @@ function shims(
     })
   }
 
+  // chrome.storage.onChanged in service workers (src/main/storage-events.ts). Electron never fires
+  // it there, so Bitwarden's worker never heard that it was unlocked. Each context reports what
+  // its writes changed, read just before the write: storage handles calls in order, so the read
+  // sees what the write replaces. Workers get the changes back from the main process; pages
+  // already get Chromium's own event.
+  const storage = chrome.storage
+  if (!skip.includes('storageEvents') && permitted('storage') && storage) {
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+    const copy = (value: unknown) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
+    const watch = (areaName: string, area: any) => {
+      const get = area.get?.bind(area)
+      if (!get) return
+      const report = (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>) => {
+        if (Object.keys(changes).length) void call('storage.changed', [changes, areaName]).catch(() => {})
+      }
+      /** Wraps a write: `changesOf` gets the values it replaced, and the write's own arguments. */
+      const wrap = (method: string, keysOf: (arg: any) => string[] | null, changesOf: (old: Record<string, unknown>, arg: any) => Record<string, object>) => {
+        const original = area[method]
+        if (typeof original !== 'function') return
+        define(area, method, (...args: any[]) => {
+          const cb = typeof args[args.length - 1] === 'function' ? args.pop() : undefined
+          const before: Promise<Record<string, unknown>> = get(keysOf(args[0])).catch(() => ({}))
+          const write = (done: (error?: { message?: string }) => void) =>
+            original.call(area, ...args, () => {
+              const error = chrome.runtime.lastError
+              if (!error) void before.then((old) => report(changesOf(old, args[0])))
+              done(error)
+            })
+          // A callback runs while lastError is set, as it would without the wrapper.
+          if (cb) return void write(() => cb())
+          return new Promise<void>((resolve, reject) => write((error) => (error ? reject(new Error(error.message)) : resolve())))
+        })
+      }
+      const list = (keys: unknown) => (keys == null ? [] : Array.isArray(keys) ? keys : [keys]) as string[]
+      wrap('set', (items) => Object.keys(items ?? {}), (old, items) => {
+        const changes: Record<string, object> = {}
+        for (const [key, value] of Object.entries(items ?? {})) {
+          if (value === undefined || (key in old && same(old[key], value))) continue
+          changes[key] = key in old ? { oldValue: old[key], newValue: copy(value) } : { newValue: copy(value) }
+        }
+        return changes
+      })
+      const removed = (old: Record<string, unknown>) => Object.fromEntries(Object.entries(old).map(([key, value]) => [key, { oldValue: value }]))
+      wrap('remove', list, removed)
+      wrap('clear', () => null, removed)
+    }
+    const areas = ['local', 'session'].filter((name) => storage[name])
+    for (const name of areas) watch(name, storage[name])
+
+    if (typeof g.ServiceWorkerGlobalScope === 'function') {
+      // chrome.storage.onChanged gets (changes, area); each area's own onChanged gets changes.
+      const all = event()
+      const perArea = new Map(areas.map((name) => [name, event()]))
+      const remote = remoteEvent('storage.onChanged')
+      let subscribed = false
+      const expose = (ev: ReturnType<typeof event>) => ({
+        addListener(fn: (...args: any[]) => void) {
+          if (!subscribed) {
+            subscribed = true
+            remote.addListener((changes: object, area: string) => {
+              all.dispatch(changes, area)
+              perArea.get(area)?.dispatch(changes)
+            })
+          }
+          ev.addListener(fn)
+        },
+        removeListener: ev.removeListener,
+        hasListener: ev.hasListener,
+        hasListeners: ev.hasListeners,
+      })
+      define(storage, 'onChanged', expose(all))
+      for (const [name, ev] of perArea) define(storage[name], 'onChanged', expose(ev))
+    }
+  }
+
   // chrome.sidePanel (src/main/side-panel.ts).
   if (!skip.includes('sidePanel') && permitted('sidePanel') && !chrome.sidePanel) {
     define(chrome, 'sidePanel', {

@@ -30,6 +30,7 @@ import { SitePermissions } from './permissions'
 import { MiniPlayer } from './pip'
 import { pickShareSource } from './screenshare'
 import { SidePanels } from './side-panel'
+import { attachStorageEvents } from './storage-events'
 import { installTestExtensions, loadUnpacked, partitionFor, setupProfile, setupProfiles, startWorker, type ProfileDeps, type ProfileRuntime, type TabHooks } from './profiles'
 import { Restyler } from './restyle'
 import { loadSettings, saveSettings, scopeForApp, settingsPath, type Settings } from './settings'
@@ -2562,6 +2563,7 @@ app.whenReady().then(async () => {
       extensionDebugger.attach(rt)
       sidePanels.attach(rt)
       userScripts.attach(rt)
+      attachStorageEvents(rt)
     },
   }
   runtimes = await setupProfiles(settings, profileDeps)

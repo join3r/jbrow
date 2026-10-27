@@ -73,6 +73,13 @@ in these places:
    unwritten setting means off. The service worker writes "on field focus", the value Bitwarden's
    install step writes, when the setting was never stored. It does this once per profile and
    remembers that under `jbrow.inlineMenuVisibility`. A setting you chose, off included, stays.
+8. `chrome.storage.onChanged` reaches service workers. Electron never fires it there, whether the
+   worker or one of the extension's pages wrote. Bitwarden's worker never heard that it had
+   unlocked, so after jbrow started its toolbar icon and field menu said locked while the popup
+   said unlocked, until the worker stopped and the next one read storage afresh. Each extension
+   context reports what its writes to `local` and `session` change, and `src/main/storage-events.ts`
+   sends it on to the extension's worker. Pages still get Chromium's own event. Writes from
+   content scripts aren't reported.
 
 **`src/main/installed.ts`** stands in for `chrome.runtime.onInstalled`, which Electron never
 fires. Bitwarden turns its inline menu on, and shows its welcome page, only on install, so the
