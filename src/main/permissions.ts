@@ -83,12 +83,39 @@ function originOf(url: string): string {
   }
 }
 
-/**
- * Extensions already listed what they use when you installed them. Camera, microphone and other
- * apps they're asked for like a site, as in Chrome.
- */
 const isExtension = (origin: string) => origin.startsWith('chrome-extension://')
-const extensionsAsk = (permission: string) => /^(camera|microphone|media|openExternal)\b/.test(permission)
+
+/**
+ * The web permissions an extension gets by listing them in its manifest, as in Chrome. Everything
+ * else it's asked for like a site: camera, microphone, other apps, and these when it didn't list them.
+ */
+const MANIFEST: Record<string, string> = {
+  geolocation: 'geolocation',
+  notifications: 'notifications',
+  'clipboard-read': 'clipboardRead',
+}
+
+/** The installed extension an origin belongs to, if it is one. */
+function extensionOf(sess: Session, origin: string): Electron.Extension | undefined {
+  return isExtension(origin) ? sess.extensions.getExtension(origin.slice('chrome-extension://'.length)) ?? undefined : undefined
+}
+
+/**
+ * Who the prompt says is asking: a site by its host, an extension as an extension, so one named
+ * like a site can't pass for it. The name is the extension's own, kept to one short line.
+ */
+function requester(origin: string, name?: string): string {
+  if (!isExtension(origin)) return origin.replace(/^https?:\/\//, '')
+  const clean = name?.replace(/[\p{C}\s]+/gu, ' ').trim().slice(0, 40)
+  return clean ? `The extension “${clean}”` : 'An extension'
+}
+
+/** Whether the extension behind `origin` listed `permission` in its manifest. */
+function listed(sess: Session, origin: string, permission: string): boolean {
+  const key = MANIFEST[permission]
+  const declared: unknown = key && extensionOf(sess, origin)?.manifest?.permissions
+  return Array.isArray(declared) && declared.includes(key)
+}
 
 /**
  * Only http(s) sites and extensions get remembered decisions. Others (data:, file:, sandboxed
@@ -143,15 +170,15 @@ export class SitePermissions {
     sess.setPermissionRequestHandler((wc, permission, callback, details) => {
       const origin = originOf(details.requestingUrl)
       const wanted = expand(permission, details as { mediaTypes?: string[]; externalURL?: string })
-      if (ALWAYS.has(permission) || (isExtension(origin) && !wanted.some(extensionsAsk))) return callback(true)
+      if (ALWAYS.has(permission) || wanted.every((p) => listed(sess, origin, p))) return callback(true)
       if (STORAGE_ACCESS.has(permission)) return callback(!thirdPartyCookiesBlocked())
       if (!wanted.every((p) => describe(p))) return callback(false)
       // The name is read when asking, so a profile renamed in settings asks under its new name.
-      void this.ask(wc, profileId, profile.name, origin, wanted).then(callback)
+      void this.ask(wc, profileId, profile.name, origin, wanted, extensionOf(sess, origin)?.name).then(callback)
     })
     sess.setPermissionCheckHandler((_wc, permission, requestingOrigin, details) => {
       const origin = originOf(requestingOrigin)
-      if (ALWAYS.has(permission) || (isExtension(origin) && !extensionsAsk(permission))) return true
+      if (ALWAYS.has(permission) || listed(sess, origin, permission)) return true
       if (STORAGE_ACCESS.has(permission)) return !thirdPartyCookiesBlocked()
       // A site may ask for a USB, HID or serial device. It sees only the ones you pick in the chooser.
       if (permission === 'usb' || permission === 'hid' || permission === 'serial') return true
@@ -233,7 +260,8 @@ export class SitePermissions {
     this.save()
   }
 
-  private async ask(wc: WebContents, profileId: string, profileName: string, origin: string, wanted: string[]): Promise<boolean> {
+  /** `name` is the extension's, for an extension: its origin is only an ID. */
+  private async ask(wc: WebContents, profileId: string, profileName: string, origin: string, wanted: string[], name?: string): Promise<boolean> {
     const remembers = isRememberable(origin)
     const decided = (remembers && this.store[profileId]?.[origin]) || {}
     const blocked = this.blockedOnPage.get(wc)
@@ -245,7 +273,7 @@ export class SitePermissions {
     const key = `${profileId} ${remembers ? origin : `page ${wc.id}`} ${open.join(',')}`
     let prompt = this.pending.get(key)
     if (!prompt) {
-      prompt = this.prompt(profileName, origin, open, remembers).then(({ allow, remember }) => {
+      prompt = this.prompt(profileName, requester(origin, name), open, remembers).then(({ allow, remember }) => {
         if (remember) {
           const site = ((this.store[profileId] ??= {})[origin] ??= {})
           for (const p of open) site[p] = allow
@@ -263,10 +291,11 @@ export class SitePermissions {
     return prompt
   }
 
-  private async prompt(profileName: string, origin: string, permissions: string[], remembers: boolean) {
+  /** `who` is what requester() makes of the origin. */
+  private async prompt(profileName: string, who: string, permissions: string[], remembers: boolean) {
     const what = permissions.map(describe)
     const list = what.length > 1 ? `${what.slice(0, -1).join(', ')} and ${what.at(-1)}` : what[0]
-    const host = remembers ? origin.replace(/^https?:\/\//, '') : 'This page'
+    const host = remembers ? who : 'This page'
     const options: Electron.MessageBoxOptions = {
       type: 'question',
       message: `${host} wants to ${list}`,

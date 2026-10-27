@@ -343,6 +343,14 @@ async function typeFor(ui: Cdp, text: string, kinds: string[]) {
   }, `rows of ${kinds.join(', ')}`)
 }
 
+/** Types 'alph' and walks down to the first history row, once the rows above it are all in. */
+async function toVisit(ui: Cdp) {
+  const shown = await typeFor(ui, 'alph', ['site', 'tab', 'visit'])
+  const i = shown.findIndex((x) => x.kind === 'visit')
+  for (let n = 0; n <= i; n++) await ui.press('ArrowDown')
+  await waitFor(async () => (await selected(ui))?.kind === 'visit', 'the history row')
+}
+
 test('the preview layout, with alpha.test/notes in the history and a tab on alpha.test/other', async () => {
   await jb.send('prefs', { urlBarStyle: 'preview', privateUrls: ['secret.test'] })
   await jb.waitForState((s) => s.prefs.urlBarStyle === 'preview' && s.prefs.privateUrls.includes('secret.test'), 'the preview layout')
@@ -444,11 +452,7 @@ test('Return on a search row searches, and the search field searches for what is
 
 test('the Site block says plain http and the IP address', async () => {
   const ui = await jb.ui()
-  await typeFor(ui, 'alph', ['visit'])
-  await ui.press('ArrowDown')
-  await ui.press('ArrowDown')
-  await ui.press('ArrowDown')
-  await waitFor(async () => (await selected(ui))?.kind === 'visit', 'the history row')
+  await toVisit(ui)
   const text = await waitFor(async () => {
     const t = await panel(ui)
     return /IP address/.test(t) ? t : null
@@ -480,11 +484,7 @@ test('a private row shows its address masked and is not looked up', async () => 
 test('the tools open the row in a new tab and in split view', async () => {
   const ui = await jb.ui()
   const before = (await jb.state()).tabs.length
-  await typeFor(ui, 'alph', ['visit'])
-  await ui.press('ArrowDown')
-  await ui.press('ArrowDown')
-  await ui.press('ArrowDown')
-  await waitFor(async () => (await selected(ui))?.kind === 'visit', 'the history row')
+  await toVisit(ui)
   await ui.press('ArrowRight')
   await ui.press('ArrowRight')
   await waitFor(async () => (await tool(ui)) === 'tab', 'the new tab button')
