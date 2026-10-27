@@ -183,6 +183,8 @@ const patches = [
   {
     file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
     why: "native messaging: a host ends with the page or service worker that opened it. It outlived both, so every extension reload or worker restart left one more running; Stem's stale hosts took turns knocking the live one off Stem's socket",
+    // The patch below inserts lines into this one's output, so its replace never matches whole again
+    applied: `/* jbrow: the host ends with its opener, see scripts/patch-deps.mjs */`,
     find: `        application
       );
       this.hostMap[connectionId] = host;
@@ -236,7 +238,7 @@ const patches = [
 let applied = 0
 for (const p of patches) {
   const src = readFileSync(p.file, 'utf8')
-  if (src.includes(p.replace)) continue
+  if (src.includes(p.applied ?? p.replace)) continue
   if (!src.includes(p.find)) {
     console.error(`patch-deps: can't apply "${p.why}" to ${p.file}. The library changed; update scripts/patch-deps.mjs.`)
     process.exit(1)
