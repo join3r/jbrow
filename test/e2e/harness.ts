@@ -244,6 +244,9 @@ export class Jbrow {
       'the UI page',
     )
     const cdp = await this.connect(target)
+    // The UI keeps the keyboard whatever app macOS has in front: tests run jbrows side by side, and
+    // one coming up takes the front from the others, which blurred the address bar mid-test.
+    await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true })
     await waitFor(() => cdp.eval('typeof window.jbrow === "object" && document.readyState === "complete"'), 'the UI to load')
     await cdp.eval(`(() => {
       if (window.__stateHooked) return
@@ -323,7 +326,7 @@ export class Jbrow {
    * would have its field blurred mid-way. Gives up quietly after `timeout` ms, for pages jbrow covers
    * with its own screen (a sign-in, a crash), which keep the keyboard in the UI.
    */
-  async pageFocused(url: string, timeout = 8000) {
+  async pageFocused(url: string, timeout = 3000) {
     let page: Cdp | undefined
     try {
       page = await this.page((t) => t.url === url, timeout)
