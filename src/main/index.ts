@@ -2459,6 +2459,14 @@ app.whenReady().then(async () => {
   })
   tabs = new Tabs({
     window: () => panel.win,
+    // A popup that closes itself takes you back to the page that opened it.
+    closedByPage: (id) => {
+      const opener = tabs.get(id)?.opener
+      const back = tabs.activeId === id && opener && tabs.get(opener) ? opener : undefined
+      void closeTab(id, false, false).then(() => {
+        if (back && tabs.get(back)) tabs.activate(back)
+      })
+    },
     runtime: (id) => runtimes.get(id),
     contentBounds: () => panel.contentBounds(),
     contentVisible: () => panel.pageVisible(),

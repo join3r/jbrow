@@ -69,6 +69,8 @@ export interface TabsDeps {
   confirmUnload: (id: string, kind: UnloadKind) => boolean
   /** The tab beside one in the sidebar that takes over when it closes, per settings. Asked before it goes. */
   besideClosed: (id: string) => string | undefined
+  /** The tab's page closed itself with window.close(): a popup that's done, say. */
+  closedByPage: (id: string) => void
 }
 
 /** What a page asking to stay would be left for: another page, the same one again, or nothing. */
@@ -630,11 +632,9 @@ export class Tabs {
     })
 
     wc.setWindowOpenHandler((details) => {
-      // window.open with size features is usually a sign-in or payment popup. It needs a real
-      // window so it can close itself and talk to its opener.
-      if (details.disposition === 'new-window' && details.features) {
-        return { action: 'allow', overrideBrowserWindowOptions: { parent: this.deps.window(), width: 520, height: 680 } }
-      }
+      // A popup (window.open with a size: a sign-in, a payment, a Proxmox console) is a tab too.
+      // It keeps its opener and can close itself, as a window could, and it gets what tabs have
+      // and windows don't: the certificate you trusted, sign-in sheets, keys.
       const background = details.disposition === 'background-tab'
       return {
         action: 'allow',
@@ -655,6 +655,13 @@ export class Tabs {
           return this.live.get(child.id)!.wc
         },
       }
+    })
+
+    // Electron emits this for window.close(), though its typings don't say so. Chromium only lets
+    // it through for a page a script opened, or one with nothing to go back to. jbrow closing the
+    // tab (closeAsking) emits it too; 'destroyed' handles that one.
+    ;(wc as unknown as NodeJS.EventEmitter).on('close', () => {
+      if (this.live.get(id)?.wc === wc && !this.closing.has(id)) this.deps.closedByPage(id)
     })
 
     wc.on('destroyed', () => {

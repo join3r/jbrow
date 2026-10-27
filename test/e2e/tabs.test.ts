@@ -15,10 +15,12 @@ before(async () => {
     '/links': html(
       'Links',
       `<a id="blank" href="/child" target="_blank" style="display:block;width:200px;height:40px">child</a>
-       <button id="open" onclick="window.open('/opened')">open</button>`,
+       <button id="open" onclick="window.open('/opened')">open</button>
+       <button id="popup" onclick="window.open('/popup', '_blank', 'width=800,height=420')">popup</button>`,
     ),
     '/child': html('Child'),
     '/opened': html('Opened'),
+    '/popup': html('Popup', `<button id="done" onclick="window.opener.postMessage('done', '*'); window.close()">done</button>`),
   })
   jb = await launch({ settings: offline(web) })
 })
@@ -108,6 +110,21 @@ test('window.open opens a tab too', async () => {
   assert.equal(await opened.eval('!!window.opener'), true)
   page.close()
   opened.close()
+})
+
+test('a sized popup from window.open opens a tab too', async () => {
+  const parent = await openTab(jb, `${web.url}/links`)
+  const page = await jb.page(`${web.url}/links`)
+  await page.eval('window.got = null; addEventListener("message", (e) => (window.got = e.data)); document.getElementById("popup").click()')
+  const s = await jb.waitForState((s) => s.tabs.some((t) => t.opener === parent.id && t.title === 'Popup'), 'the popup tab')
+  const popup = s.tabs.find((t) => t.opener === parent.id)!
+  assert.equal(s.activeId, popup.id)
+  // It talks to its opener, then closes itself, and jbrow goes back to the page that opened it.
+  const opened = await jb.page(`${web.url}/popup`)
+  await opened.eval('document.getElementById("done").click()')
+  await jb.waitForState((s) => !tabById(s, popup.id) && s.activeId === parent.id, 'the popup tab to close')
+  await waitFor(async () => (await page.eval('window.got')) === 'done', 'the message to its opener')
+  page.close()
 })
 
 test('a ⌘-click on a link opens it in the background, unread', async () => {

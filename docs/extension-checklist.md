@@ -104,7 +104,7 @@ but leaves every shortcut empty and never fires `onCommand`. jbrow takes your sh
 settings, or else the manifest's `suggested_key` (`mac`, then `default`, where Ctrl means ⌘),
 and drops a suggestion that clashes with jbrow's own keys or another command's. It matches key
 presses in the panel and side panel against the active tab's profile and sends `onCommand` with
-that tab. Key presses in jbrow's other windows (action popups, pop-outs, popups pages open) match
+that tab. Key presses in jbrow's other windows (action popups, pop-outs) match
 against that window's profile; a popup's commands act on the tab it opened for, the others' on the
 active tab. Chrome would pass a pop-out its own tab instead, which is rarely what the command wants.
 `_execute_action` opens the popup. Commands marked `global` go through `globalShortcut`.

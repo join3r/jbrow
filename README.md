@@ -179,7 +179,8 @@ tabs go to the top of Today, newest first (or to the bottom, oldest first, with 
 at** in settings or in the welcome). A tab opened from a page (a link opened in a new tab, ⌘-click,
 a script's `window.open`) is a tab of its own right beside the one it came from: above it with new tabs
 at the top, below it with new tabs at the bottom. Several opened from the same tab line up in the order
-they opened. A kept or pinned tab stays as it was and never collects the tabs opened from it: those go
+they opened. Popups a page asks for with a size (a sign-in, a payment, a Proxmox console) are tabs
+too; one that closes itself closes its tab and takes you back to the page that opened it. A kept or pinned tab stays as it was and never collects the tabs opened from it: those go
 where new tabs go. When a new tab lands outside what the sidebar shows, the sidebar scrolls to it.
 
 Tabs opened from an app with ⌥⇧Space get their own section in the sidebar, under the app's name and
@@ -249,7 +250,7 @@ tab: switching tabs hides it until you're back, and leaving the page closes it. 
 device with a serial number stays allowed for that site in that profile, in `permissions.json`, until
 **Reset site permissions** in the page menu or the site calls `forget()`; one without a serial number
 is allowed until jbrow quits, so a second one of its kind isn't allowed too. Bluetooth devices are
-allowed for the page only. Pages in popup windows and extension pages get no chooser. Bluetooth, and
+allowed for the page only. Extension pages get no chooser. Bluetooth, and
 Web Serial (which also lists Bluetooth serial ports), need macOS's Bluetooth permission: the first time,
 macOS asks whether jbrow may use Bluetooth, and jbrow waits for the answer.
 
@@ -267,9 +268,8 @@ zoom is remembered across restarts (on by default, kept in `zoom` in `settings.j
 listed there with **Reset**.
 
 A site that asks for a username and password (HTTP basic or digest auth) gets a sign-in form in the
-page area. Pages outside tabs get the same form on top of them, in their own window: sign-in popups
-a page opens, an extension's popup (which grows to fit the form and shrinks back after) and
-extension pop-out windows. Extension options pages open as tabs and use the tab's form. A page with
+page area. Pages outside tabs get the same form on top of them, in their own window: an extension's
+popup (which grows to fit the form and shrinks back after) and extension pop-out windows. Extension options pages open as tabs and use the tab's form. A page with
 no window on screen gets a small **Sign in** window of its own; closing it cancels. Cancel or Esc
 fails the request, as before. jbrow doesn't store the password; Chromium remembers it until jbrow
 quits, and other pages waiting on the same site get the same answer. If a page
@@ -452,7 +452,7 @@ register run in matching pages and are kept across restarts. Chrome also wants y
 
 Extension keyboard shortcuts are under **Shortcuts** in settings. They work while jbrow is
 open, for the profile of the tab you're on, in an extension's side panel, and inside an extension's
-popup or pop-out window or a popup a page opened. There they go to that window's profile and act on
+popup or pop-out window. There they go to that window's profile and act on
 the tab the popup opened for, or else the active tab. Shortcuts an extension suggests apply on their
 own, except ones jbrow already uses. Click a shortcut to record a new one.
 
