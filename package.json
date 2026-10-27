@@ -18,6 +18,7 @@
     "test:linux": "test/linux/run.sh",
     "dist": "npm run setup && electron-builder --mac",
     "top-sites": "node scripts/top-sites.mjs",
+    "urlbar-shots": "node scripts/urlbar-shots.mjs",
     "icon": "sips -s format png build/icon.svg --out build/icon.png",
     "install-app": "scripts/install.sh",
     "release": "scripts/release.sh"

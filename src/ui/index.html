@@ -8,6 +8,9 @@
     />
     <title>jbrow</title>
     <link rel="stylesheet" href="ui.css" />
+    <link rel="stylesheet" href="suggest/suggest.css" />
+    <link rel="stylesheet" href="suggest/columns.css" />
+    <link rel="stylesheet" href="suggest/preview.css" />
     <link rel="stylesheet" href="welcome.css" />
   </head>
   <body>
@@ -268,6 +271,11 @@
                     engine</b> as you type it, except anything that looks like an address or matches a private address.</span>
                 </label>
                 <p id="searchHelp" class="help"></p>
+              </div>
+              <div class="set-item" data-keywords="address bar layout url bar omnibox suggestions dropdown columns preview look style">
+                <h3>Address bar layout</h3>
+                <p class="help">How the address bar shows what it found for what you type.</p>
+                <div id="urlBarStyle" class="layout-picks" role="group" aria-label="Address bar layout"></div>
               </div>
               <div class="set-item" data-keywords="default browser links other apps">
                 <h3>Default browser</h3>

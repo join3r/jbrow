@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { after, test } from 'node:test'
-import { launch, removeDir, tempDir, waitFor, type Jbrow } from './harness'
+import { CMD, launch, removeDir, tempDir, waitFor, type Jbrow } from './harness'
 import { offline } from './ui-helpers'
 
 const running: Jbrow[] = []
@@ -195,4 +195,24 @@ test('a first launch writes the default settings.json', async () => {
   const s = await jb.state()
   assert.equal(s.prefs.theme, file.theme)
   assert.equal(s.prefs.defaultProfile, file.defaultProfile)
+})
+
+test('the address bar layout is picked from its pictures, and open suggestions follow at once', async () => {
+  const jb = await start({ settings: offline() })
+  const ui = await jb.ui()
+  await jb.send('focus-ui')
+  await ui.eval('omnibox.focus()')
+  await ui.type('a')
+  const layout = () => ui.eval<string>('document.getElementById("suggest").hidden ? "" : document.getElementById("suggest").dataset.layout')
+  await waitFor(async () => (await layout()) === 'columns', 'the columns layout')
+  await jb.send('prefs', { urlBarStyle: 'preview' })
+  await waitFor(async () => (await layout()) === 'preview', 'the open suggestions in the preview layout')
+  await ui.press('Escape')
+
+  await ui.press(',', { modifiers: CMD })
+  await waitFor(() => ui.eval('document.querySelector("#urlBarStyle [data-value=preview]")?.getAttribute("aria-pressed") === "true"'), 'preview pressed in settings')
+  assert.equal(await ui.eval('document.querySelectorAll("#urlBarStyle img").length'), 2)
+  await ui.eval('document.querySelector("#urlBarStyle [data-value=columns]").click()')
+  await jb.waitForState((s) => s.prefs.urlBarStyle === 'columns', 'the columns layout again')
+  await waitFor(() => saved(jb).urlBarStyle === 'columns', 'settings.json to have it')
 })

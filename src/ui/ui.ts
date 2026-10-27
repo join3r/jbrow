@@ -1,11 +1,15 @@
 import { cssEase } from '../shared/ease'
 import { engineOf, isSearchUrl, SEARCH_ENGINES, suggestUrlFor } from '../shared/engines'
 import { urlMatcher } from '../shared/patterns'
-import { awayFromHome, displayName, folderThreads, isAsleep, isFolder, isPinned, keptThreads, numberedThreads, samePage, sections, threadsOf, type AppView, type FolderView, type KeptItem, type ThreadView } from '../shared/threads'
+import { awayFromHome, displayName, folderThreads, isAsleep, isFolder, isPinned, keptThreads, numberedThreads, sections, threadsOf, type AppView, type FolderView, type KeptItem, type ThreadView } from '../shared/threads'
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { dragDivider, PANE_GAP, paneSpans, splitOf } from '../shared/split'
+import { DAY_MS, esc, HOUR_MS, icon, since } from './markup'
+import type { LayoutHost, OpenIn, Outcome, SuggestLayout } from './suggest/layout'
+import { LAYOUTS, layoutPictureHtml, URL_BAR_LAYOUTS } from './suggest/layouts'
+import { isEmpty, suggestModel, type Item, type SuggestModel, type VisitItem } from './suggest/model'
 import { initWelcome } from './welcome'
-import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type ExtensionView, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type UpdateView, type VisitView } from '../shared/types'
+import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type ExtensionView, type Prefs, type Profile, type SearchReply, type SiteInfoReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type UpdateView, type UrlBarStyle, type VisitView } from '../shared/types'
 import { afterRender, beforeRender, downloadsChanged, flourish, setWhimsy } from './whimsy'
 
 declare global {
@@ -17,59 +21,6 @@ declare global {
   }
 }
 
-/** 24×24 stroke icons. The puzzle, pin, eye, eye-off, folder, store, open, copy, wand, undo, trash, lock, warn, search, user, archive, list-tree, grid, sparkles, shield, keyboard, palette and columns paths are from Lucide (ISC). */
-const ICONS: Record<string, string> = {
-  back: '<path d="m15 18-6-6 6-6"/>',
-  forward: '<path d="m9 18 6-6-6-6"/>',
-  reload: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>',
-  close: '<path d="M18 6 6 18M6 6l12 12"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>',
-  pin: '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>',
-  puzzle:
-    '<path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/>',
-  settings: '<path d="M20 7h-9M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>',
-  eyeOff:
-    '<path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.53 13.53 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><path d="m2 2 20 20"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/>',
-  folderPlus:
-    '<path d="M12 10v6M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
-  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
-  folderOpen:
-    '<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>',
-  store: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>',
-  pause: '<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
-  play: '<path d="M6 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L7.5 3.64A1 1 0 0 0 6 4.5z"/>',
-  open: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
-  copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
-  check: '<path d="M20 6 9 17l-5-5"/>',
-  alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>',
-  wand:
-    '<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/>',
-  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
-  eye: '<path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/>',
-  trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
-  lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
-  warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
-  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
-  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
-  user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
-  archive: '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
-  listTree: '<path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/>',
-  grid: '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
-  sparkles:
-    '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>',
-  shield:
-    '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
-  pip: '<path d="M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h4"/><rect width="10" height="7" x="12" y="13" rx="2"/>',
-  palette:
-    '<path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>',
-  keyboard: '<path d="M10 8h.01M12 12h.01M14 8h.01M16 12h.01M18 8h.01M6 8h.01M7 16h10M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/>',
-  up: '<path d="m18 15-6-6-6 6"/>',
-  down: '<path d="m6 9 6 6 6-6"/>',
-  usb: '<circle cx="10" cy="7" r="1"/><circle cx="4" cy="20" r="1"/><path d="M4.7 19.3 19 5"/><path d="m21 3-3 1 2 2Z"/><path d="M9.26 7.68 5 12l2 5"/><path d="m10 14 5 2 3.5-3.5"/><path d="m18 12 1-1 1 1-1 1Z"/>',
-  bluetooth: '<path d="m7 7 10 10-5 5V2l5 5L7 17"/>',
-  columns: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/>',
-}
-const icon = (name: string) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`
 document.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => (el.innerHTML = icon(el.dataset.icon!)))
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -97,7 +48,6 @@ let S: UiState | null = null
 let renaming: string | null = null
 let dragId: string | null = null
 let dragFolder = false
-let highlighted = 0
 let isPrivate: (url: string) => boolean = () => false
 let privateKey = ''
 /** Folder whose auto-file rules are being edited. */
@@ -107,7 +57,6 @@ let typedProfile: string | null = null
 /** Settings is open as its own tab in the sidebar; settingsEl.hidden says whether it's the one showing. */
 let settingsTab = false
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const profile = (id: string): Profile | undefined => S?.profiles.find((p) => p.id === id)
 const activeTab = () => S?.tabs.find((t) => t.id === S!.activeId)
 /** The active tab's address, or the one a bad certificate or the dangerous-site lists stopped it from loading. */
@@ -116,17 +65,6 @@ const activeUrl = () => (S?.cert?.blocked ? S.cert.url : S?.danger ? S.danger.ur
 const pageCovered = () => !!(S?.cert?.blocked || S?.danger || S?.login || S?.crash)
 /** The address as it may be shown on screen. */
 const shownUrl = (url: string) => (isPrivate(url) ? 'Private' : url)
-const HOUR_MS = 60 * 60 * 1000
-const DAY_MS = 24 * HOUR_MS
-/** "just now", "5 minutes ago", "3 hours ago", "2 days ago". */
-function since(ms: number): string {
-  const ago = Date.now() - ms
-  const unit = (n: number, what: string) => `${n} ${what}${n === 1 ? '' : 's'} ago`
-  if (ago < 60 * 1000) return 'just now'
-  if (ago < HOUR_MS) return unit(Math.floor(ago / 60000), 'minute')
-  if (ago < DAY_MS) return unit(Math.floor(ago / HOUR_MS), 'hour')
-  return unit(Math.floor(ago / DAY_MS), 'day')
-}
 /** A command's key as a menu writes it, '' when it has none. */
 const keyLabel = (id: ActionId) => (S?.keys[id] ? shortcutLabel(S.keys[id]) : '')
 /** " (⌘T)" for a tooltip. */
@@ -231,7 +169,7 @@ function render() {
   $('settingsButton').title = `Settings${keyHint('settings')}`
   $('pin').setAttribute('aria-pressed', String(S.pinned))
   $('pin').title = `${S.pinned ? 'Pinned: a regular window' : 'Pin: keep as a regular window'} with a Dock icon${keyHint('pin')}`
-  if (document.activeElement !== omnibox) showAddress()
+  if (!barFocused()) showAddress()
   $('extHead').textContent = `Extensions · ${p?.name ?? ''}`
   $('newTab').title = `New tab${S.filter !== 'all' ? ` in ${profile(S.filter)?.name ?? S.filter}` : ''}${keyHint('newTab')}, right-click for a profile`
   renderSettings()
@@ -462,7 +400,6 @@ function refreshPinnedActions() {
   () => queueMicrotask(refreshPinnedActions),
 )
 
-/** Fills the address bar while it isn't being edited, masking private addresses. */
 /** The address bar's profile: the tab's own, or the one Tab picked for what's being typed. */
 function renderProfileBand() {
   const active = activeTab()
@@ -495,6 +432,7 @@ function cycleTypedProfile(step: number) {
   render()
 }
 
+/** Fills the address bar while it isn't being edited, masking private addresses. */
 function showAddress() {
   const url = activeUrl()
   const masked = isPrivate(url)
@@ -859,22 +797,14 @@ function row(t: UiTab, thread: ThreadView<UiTab>, number?: number, showApp = tru
 }
 
 // ---------- suggestions ----------
-
-interface Suggestion {
-  kind: 'tab' | 'archived' | 'go' | 'visit' | 'search'
-  id?: string
-  /** Where a history row, or the site the address bar completed to, goes. */
-  url?: string
-  title: string
-  sub: string
-  tag: string
-  favicon?: string
-  /** Shown instead of a favicon. */
-  icon?: string
-}
+// What the address bar offers is built in suggest/model.ts and drawn by the layout picked in
+// settings (suggest/layout.ts); this part keeps the address bar: focus, typing, the completion,
+// main's answers, and what picking something does.
 
 /** What was typed in the address bar, without the completion added after it. */
 let typed = ''
+/** The text is still the address the bar showed when it got focus, so nothing counts as typed. */
+let untouched = false
 /** The site the address bar completed `typed` to, its rest selected after the caret. */
 let completed: CompletionView | null = null
 /** The last key typed at the end of the text, so a completion may follow. Deleting never completes. */
@@ -884,119 +814,61 @@ let suggestSeq = 0
 /** Main's answers: history pages for `typed`, and the search engine's suggestions for recent text. */
 let visitHits: VisitView[] = []
 let searchHits: SearchReply | null = null
-/** The highlight was moved with the arrows, so ⇧Delete means that row, not the text. */
-let arrowed = false
+/** What the suggestions show now, and the layout showing it. */
+let model: SuggestModel | null = null
+let layout: SuggestLayout | null = null
+let layoutId: UrlBarStyle | null = null
 
 /** The profile what's typed opens in, whose history the suggestions come from. */
 const typedIn = () => typedProfile ?? activeTab()?.profile
 /** The completion, while it's still there as the address bar added it. Accepting it with → keeps it. */
 const completion = () => (completed && omnibox.value.toLowerCase() === completed.text.toLowerCase() ? completed : null)
-const tabMatches = (t: TabRecord, q: string) =>
-  `${displayName(t)} ${t.title} ${t.url}`.toLowerCase().includes(q)
 
 function requestSuggestions() {
   send('suggest', { input: typed, profile: typedIn(), seq: ++suggestSeq })
 }
 
-function suggestions(): Suggestion[] {
-  if (!S) return []
-  const q = typed.trim().toLowerCase()
-  const comp = completion()
-  const tabs = [...S.tabs]
-    .filter((t) => t.url && (!q || tabMatches(t, q)))
-    .sort((a, b) => b.lastSeen - a.lastSeen)
-    .slice(0, q ? 5 : 8)
-    .map<Suggestion>((t) => ({
-      kind: 'tab',
-      id: t.id,
-      title: displayName(t),
-      sub: shownUrl(t.url),
-      tag: profile(t.profile)?.name ?? t.profile,
-      favicon: t.favicon,
-    }))
-  // Archived threads only turn up when searched for.
-  const archivedTabs = !q ? [] : archived.filter((t) => t.url && tabMatches(t, q)).sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0))
-  const archivedRows = archivedTabs
-    .slice(0, 3)
-    .map<Suggestion>((t) => ({ kind: 'archived', id: t.id, title: displayName(t), sub: shownUrl(t.url), tag: 'archived', favicon: t.favicon }))
-  // History leaves out pages already open or archived: their own rows bring them back as they were.
-  const seen = new Set([...S.tabs, ...archivedTabs].map((t) => samePage(t.url)))
-  if (comp) seen.add(samePage(comp.url))
-  const visits = !q
-    ? []
-    : visitHits
-        .filter((v) => !seen.has(samePage(v.url)) && !!seen.add(samePage(v.url)))
-        .slice(0, 5)
-        .map<Suggestion>((v) => ({
-          kind: 'visit',
-          url: v.url,
-          title: v.title || (isPrivate(v.url) ? 'Private' : v.url.replace(/^https?:\/\/(www\.)?/, '')),
-          sub: shownUrl(v.url),
-          tag: 'history',
-          icon: 'clock',
-        }))
-  // Older search suggestions stay while you type on, as long as they still fit what's typed.
-  const sh = searchHits
-  const exact = !!sh && sh.input.trim().toLowerCase() === q
-  const searches =
-    !q || !sh || !S.prefs.searchSuggestions || !q.startsWith(sh.input.trim().toLowerCase())
-      ? []
-      : sh.searches
-          .filter((s) => s.toLowerCase() !== q && (exact || s.toLowerCase().startsWith(q)))
-          .slice(0, 4)
-          .map<Suggestion>((s) => ({ kind: 'search', title: s, sub: '', tag: 'search', icon: 'search' }))
-  const text = typed.trim()
-  const go: Suggestion[] = comp
-    ? [{ kind: 'go', url: comp.url, title: `Go to ${comp.text}`, sub: comp.url, tag: 'web' }]
-    : q
-      ? [{ kind: 'go', title: looksLikeUrl(q) ? `Go to ${text}` : `Search for "${text}"`, sub: '', tag: 'web' }]
-      : []
-  // A typed or completed address goes first; a typed word goes after matching tabs and history.
-  return comp || looksLikeUrl(q) ? [...go, ...tabs, ...visits, ...archivedRows, ...searches] : [...tabs, ...visits, ...archivedRows, ...go, ...searches]
-}
-
-const looksLikeUrl = (q: string) => /^[a-z][a-z0-9+.-]*:\/\//i.test(q) || (/^[\w-]+(\.[\w-]+)+(:\d+)?(\/\S*)?$/i.test(q) && !q.includes(' '))
-
-/** Identifies a row across re-renders, so the highlight stays on it when answers arrive. */
-const rowKey = (s: Suggestion | undefined) => (s ? `${s.kind}:${s.id ?? s.url ?? s.title}` : '')
-
-let current: Suggestion[] = []
-/** `keep` holds the highlight on the row the arrows picked, for answers that arrive later. */
-function showSuggestions(keep = false) {
-  const was = keep && arrowed ? rowKey(current[highlighted]) : ''
-  current = suggestions()
-  const at = was ? current.findIndex((s) => rowKey(s) === was) : -1
-  if (at >= 0) highlighted = at
-  else {
-    highlighted = 0
-    arrowed = false
+/** The layout settings picked, made anew when that changes. */
+function suggestLayout(): SuggestLayout {
+  const id = S?.prefs.urlBarStyle && LAYOUTS[S.prefs.urlBarStyle] ? S.prefs.urlBarStyle : 'columns'
+  if (!layout || id !== layoutId) {
+    layout = LAYOUTS[id](layoutHost)
+    layoutId = id
   }
-  if (!current.length) return hideSuggestions()
-  suggest.innerHTML =
-    current
-      .map((s, i) => {
-        const fav = s.favicon ? `<img src="${esc(s.favicon)}" alt="">` : `<span class="fav">${s.icon ? icon(s.icon) : ''}</span>`
-        const forget =
-          s.kind === 'visit'
-            ? `<span class="sg-x" role="button" data-forget="${i}" title="Remove from history (⇧Delete)" aria-label="Remove from history">${icon('close')}</span>`
-            : ''
-        return `<button class="sg ${i === highlighted ? 'hi' : ''} sg-${s.kind}" data-sg="${i}">
-        ${fav}<span class="sg-t">${esc(s.title)}</span>${s.sub ? `<span class="sg-s">${esc(s.sub)}</span>` : ''}<span class="sg-tag">${esc(s.tag)}</span>${forget}
-      </button>`
-      })
-      .join('') + switchHint()
+  return layout
+}
+const layoutHost: LayoutHost = {
+  askSite: (url, profile, seq) => send('site-info', { url, profile: profile ?? typedIn(), seq }),
+  focusText: () => omnibox.focus(),
+}
+/** The keyboard is in the address bar: its text, or a field of the layout's own in the suggestions. */
+const barFocused = () => document.activeElement === omnibox || suggest.contains(document.activeElement)
+/** Focus moving between the text and the suggestions' own fields, which keeps the address bar open. */
+const withinBar = (to: EventTarget | null) => to instanceof Node && (to === omnibox || suggest.contains(to))
+
+/** Draws the suggestions for what's there now. The layout keeps its selection on the same item where it can. */
+function showSuggestions() {
+  if (!S) return
+  model = suggestModel({
+    typed,
+    untouched,
+    completion: completion(),
+    tabs: S.tabs,
+    archived,
+    profiles: S.profiles,
+    opensIn: typedIn(),
+    visits: visitHits,
+    searchReply: searchHits,
+    searchSuggestions: S.prefs.searchSuggestions,
+    searchUrl: S.prefs.searchUrl,
+    isPrivate,
+  })
+  if (isEmpty(model)) return hideSuggestions()
+  const l = suggestLayout()
+  suggest.dataset.layout = layoutId!
+  l.render(suggest, model)
   suggest.hidden = false
   syncOverlay()
-}
-/** Under the suggestions, with more than one profile: Tab sends what's typed to the next one. */
-function switchHint(): string {
-  const ids = S?.profiles.map((p) => p.id) ?? []
-  const from = typedIn()
-  if (ids.length < 2 || !from) return ''
-  const next = profile(ids[(ids.indexOf(from) + 1) % ids.length])
-  if (!next) return ''
-  const dot = next.color ? `<span class="dot" style="background:${esc(next.color)}"></span>` : ''
-  return `<div class="sg-hint"><kbd>Tab</kbd>to open in ${dot}${esc(next.name)}</div>`
 }
 function hideSuggestions() {
   suggest.hidden = true
@@ -1005,32 +877,26 @@ function hideSuggestions() {
 
 /**
  * Completes what's typed to the site main found, Chrome's inline autocompletion: "git" becomes
- * "github.com" with "hub.com" selected, so typing on replaces it and Backspace removes it. Not
- * while an open tab matches, so Return still goes to the tab you're typing the name of.
+ * "github.com" with "hub.com" selected, so typing on replaces it and Backspace removes it. "you"
+ * means youtube.com's front page even with a YouTube tab open; that tab is a row further down.
+ * Only a name you gave a tab beats it, so Return still goes to the tab you're typing the name of.
  */
 function applyCompletion(c: CompletionView | null) {
   const q = typed.trim().toLowerCase()
-  const tabHit = !!S?.tabs.some((t) => t.url && tabMatches(t, q))
-  const fits = !!c && !tabHit && c.text.toLowerCase().startsWith(typed.toLowerCase()) && c.text.length > typed.length
+  const named = !!q && !!S?.tabs.some((t) => t.url && t.name?.toLowerCase().split(/\s+/).some((w) => w.startsWith(q)))
+  const fits = !!c && !named && c.text.toLowerCase().startsWith(typed.toLowerCase()) && c.text.length > typed.length
   completed = fits ? c : null
   const value = fits ? typed + c!.text.slice(typed.length) : typed
   if (omnibox.value !== value) omnibox.value = value
   if (fits) omnibox.setSelectionRange(typed.length, value.length)
 }
 
-/** ⇧Delete on a history row, or its ×: the page leaves the history and the suggestions. */
-function forgetVisit(s: Suggestion | undefined) {
-  if (s?.kind !== 'visit' || !s.url) return
-  send('forget-visit', { profile: typedIn(), url: s.url })
-  visitHits = visitHits.filter((v) => v.url !== s.url)
-  const at = highlighted
+/** ⇧Delete on a history page, or its ×: the page leaves the history and the suggestions. */
+function forgetVisit(v: VisitItem) {
+  send('forget-visit', { profile: typedIn(), url: v.url })
+  visitHits = visitHits.filter((x) => x.url !== v.url)
+  // The layout keeps the selection where it was, on the page that moved up.
   showSuggestions()
-  // The highlight stays where it was, on the row that moved up.
-  if (current.length && at > 0) {
-    highlighted = Math.min(at, current.length - 1)
-    arrowed = true
-    suggest.querySelectorAll('.sg').forEach((el, i) => el.classList.toggle('hi', i === highlighted))
-  }
 }
 
 /** The page hides while anything of jbrow's own covers it; see Panel.setOverlay. */
@@ -1048,26 +914,48 @@ function syncOverlay() {
 function syncCovering() {
   root.classList.toggle('covering', overlaySent && !!activeTab()?.url && !pageCovered())
 }
-function moveHighlight(delta: number) {
-  if (!current.length) return
-  arrowed = true
-  highlighted = (highlighted + delta + current.length) % current.length
-  suggest.querySelectorAll('.sg').forEach((el, i) => el.classList.toggle('hi', i === highlighted))
+/** Takes the keyboard out of the address bar, from its text or a field in the suggestions. */
+function leaveBar() {
+  if (barFocused()) (document.activeElement as HTMLElement).blur()
 }
-function pick(s: Suggestion | undefined) {
+/** Does what Return does with an item. Null: what's typed, as it's typed. With `open`, opens it somewhere else instead. */
+function pick(item: Item | null, open?: OpenIn) {
   const text = omnibox.value
   const opensIn = typedProfile ?? undefined
+  const from = typedIn()
+  const next = model?.nextProfile?.id
   hideSuggestions()
-  omnibox.blur()
-  if (s || text.trim()) showSettings(false)
-  if (s?.kind === 'tab' && s.id) send('activate', { id: s.id })
-  else if (s?.kind === 'archived' && s.id) send('restore', { id: s.id })
-  else if (s?.url) send('navigate', { input: s.url, profile: opensIn })
-  else if (s?.kind === 'search') send('navigate', { input: s.title, profile: opensIn, search: true })
+  leaveBar()
+  if (item || text.trim()) showSettings(false)
+  if (item && open) {
+    // An open tab goes beside the active one itself; anything else opens its page.
+    if (open === 'split' && item.kind === 'tab') return send('split-with', { id: item.id })
+    const input = item.kind === 'address' ? item.input : item.kind === 'search' ? item.query : item.url
+    const profile = open === 'profile' ? next : item.kind === 'tab' ? (item.profile?.id ?? from) : from
+    return send('navigate', { input, profile, search: item.kind === 'search', open: open === 'profile' ? undefined : open })
+  }
+  if (item?.kind === 'tab') send('activate', { id: item.id })
+  else if (item?.kind === 'archived') send('restore', { id: item.id })
+  else if (item?.kind === 'site' || item?.kind === 'visit') send('navigate', { input: item.url, profile: opensIn })
+  else if (item?.kind === 'address') send('navigate', { input: item.input, profile: opensIn })
+  else if (item?.kind === 'search') send('navigate', { input: item.query, profile: opensIn, search: true })
   else if (text.trim()) send('navigate', { input: text, profile: opensIn })
 }
+/** Acts on what the layout made of a key or a click. */
+function suggestOutcome(out: Outcome) {
+  if (out.do === 'moved' && model) layout?.render(suggest, model)
+  else if (out.do === 'pick') pick(out.item, out.open)
+  else if (out.do === 'forget') forgetVisit(out.item)
+  else if (out.do === 'copy') {
+    hideSuggestions()
+    leaveBar()
+    send('copy-link', { url: out.item.url })
+  }
+}
 
-omnibox.addEventListener('focus', () => {
+omnibox.addEventListener('focus', (e) => {
+  // Back from a field in the suggestions: everything stays as it was.
+  if (withinBar(e.relatedTarget)) return
   // Clicking the address bar is how a private address is revealed.
   omnibox.value = activeUrl()
   omnibox.placeholder = 'Search or type a tab name'
@@ -1076,24 +964,32 @@ omnibox.addEventListener('focus', () => {
   renderProfileBand()
   omnibox.select()
   typed = omnibox.value
+  untouched = true
   completed = null
   mayComplete = false
   visitHits = []
   searchHits = null
+  suggestLayout().reset()
   requestSuggestions()
   showSuggestions()
 })
 omnibox.addEventListener('input', (e) => {
   const ie = e as InputEvent
   typed = omnibox.value
+  untouched = false
   completed = null
   // Only typing at the end completes. Pasting doesn't, and deleting doesn't, or Backspace could
   // never take a completion away.
   mayComplete = ie.inputType === 'insertText' && !ie.isComposing && omnibox.selectionEnd === typed.length
+  suggestLayout().reset()
   requestSuggestions()
   showSuggestions()
 })
-omnibox.addEventListener('blur', () => {
+omnibox.addEventListener('blur', (e) => {
+  if (!withinBar(e.relatedTarget)) closeBar()
+})
+/** The keyboard left the address bar: the suggestions go, and it shows the page's address again. */
+function closeBar() {
   send('suggest-cancel')
   completed = null
   hideSuggestions()
@@ -1102,36 +998,48 @@ omnibox.addEventListener('blur', () => {
     typedProfile = null
     render()
   } else renderProfileBand()
-})
+}
 omnibox.addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowDown') (e.preventDefault(), moveHighlight(1))
-  else if (e.key === 'ArrowUp') (e.preventDefault(), moveHighlight(-1))
-  else if (e.key === 'Enter') {
+  if (e.key === 'Escape') return omnibox.blur()
+  // The layout has the keys first: moving through the suggestions, Return on what's selected.
+  const out = model && !suggest.hidden ? suggestLayout().key(e, model) : { do: 'none' as const }
+  if (out.do !== 'none') {
     e.preventDefault()
-    // With no suggestion chosen by the arrows, Enter takes the first: a completed or typed
-    // address, a matching tab, or the search.
-    pick(current[highlighted])
-  } else if (e.key === 'Escape') omnibox.blur()
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && e.shiftKey && arrowed && current[highlighted]?.kind === 'visit') {
+    return suggestOutcome(out)
+  }
+  if (e.key === 'Enter') {
     e.preventDefault()
-    forgetVisit(current[highlighted])
+    pick(null)
   } else if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey && (S?.profiles.length ?? 0) > 1) {
     e.preventDefault()
     cycleTypedProfile(e.shiftKey ? -1 : 1)
     // The other profile has its own history, so the suggestions and any completion change too.
-    if (typed) {
+    if (typed && !untouched) {
       mayComplete ||= !!completion()
       requestSuggestions()
     }
-    if (!suggest.hidden) showSuggestions(true)
+    if (!suggest.hidden) showSuggestions()
   }
 })
-suggest.addEventListener('mousedown', (e) => e.preventDefault())
+// Clicks keep the keyboard in the text, except on a field of the layout's own.
+suggest.addEventListener('mousedown', (e) => {
+  if (!(e.target instanceof HTMLInputElement)) e.preventDefault()
+})
 suggest.addEventListener('click', (e) => {
-  const x = (e.target as HTMLElement).closest<HTMLElement>('[data-forget]')
-  if (x) return forgetVisit(current[Number(x.dataset.forget)])
-  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-sg]')
-  if (el) pick(current[Number(el.dataset.sg)])
+  if (model) suggestOutcome(suggestLayout().click(e.target as HTMLElement, model))
+})
+// A field of the layout's own (preview's search field) passes its keys to the layout as the text does.
+suggest.addEventListener('keydown', (e) => {
+  if (!(e.target instanceof HTMLInputElement)) return
+  if (e.key === 'Escape') return e.target.blur()
+  const out = model ? suggestLayout().key(e, model) : { do: 'none' as const }
+  if (out.do !== 'none') {
+    e.preventDefault()
+    suggestOutcome(out)
+  }
+})
+suggest.addEventListener('focusout', (e) => {
+  if (!withinBar(e.relatedTarget)) closeBar()
 })
 
 // ---------- sidebar interaction ----------
@@ -1215,7 +1123,7 @@ function startRename(id: string) {
  * it would reveal a private address and open the suggestions.
  */
 function focusUi() {
-  if (document.activeElement === omnibox) omnibox.blur()
+  leaveBar()
   send('focus-ui')
 }
 function commitRename() {
@@ -1865,6 +1773,7 @@ function renderSettings(all = false) {
   keepLoadedPinned.checked = S.prefs.keepLoaded.pinned
   keepLoadedKept.checked = S.prefs.keepLoaded.kept
   renderSearchEngine(all)
+  renderUrlBarStyle()
   $('showHotkey').textContent = keyLabel('show') || 'its hotkey'
   $('appHotkey').textContent = keyLabel('showApp') || 'The app hotkey'
   renderActionKeys()
@@ -2420,6 +2329,22 @@ searchCustom.addEventListener('change', () => {
   sendPrefs({ searchUrl: url })
 })
 searchSuggestionsBox.addEventListener('change', () => sendPrefs({ searchSuggestions: searchSuggestionsBox.checked }))
+
+/** The address bar's layouts as pictures to pick from. */
+function renderUrlBarStyle() {
+  if (!S) return
+  const html = URL_BAR_LAYOUTS.map(
+    (l) => `<button class="layout-pick" data-value="${l.id}" aria-pressed="${l.id === S!.prefs.urlBarStyle}">
+      <span class="art">${layoutPictureHtml(l.id)}</span>
+      <span class="t">${esc(l.name)}</span><span class="d">${esc(l.about)}</span>
+    </button>`,
+  ).join('')
+  if ($('urlBarStyle').innerHTML !== html) $('urlBarStyle').innerHTML = html
+}
+$('urlBarStyle').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b) sendPrefs({ urlBarStyle: b.dataset.value as UrlBarStyle })
+})
 $('openSettingsFile').addEventListener('click', () => send('open-settings-file'))
 $('settingsButton').addEventListener('click', () => setSettings(!!settingsEl.hidden))
 $('closeSettings').addEventListener('click', () => setSettings(false))
@@ -3163,18 +3088,23 @@ window.jbrow.on('state', (state: UiState) => {
   document.documentElement.dataset.theme = state.prefs.theme
   document.documentElement.dataset.profileStyle = state.prefs.profileStyle
   render()
+  // Another layout picked in settings takes over the open suggestions right away.
+  if (!suggest.hidden && state.prefs.urlBarStyle !== layoutId) showSuggestions()
 })
 window.jbrow.on('suggestions', (r: SuggestReply) => {
-  if (r.seq !== suggestSeq || document.activeElement !== omnibox) return
+  if (r.seq !== suggestSeq || !barFocused()) return
   visitHits = r.visits
   // Only while the text is still what was typed (or what was typed plus the last completion).
   if (mayComplete && (omnibox.value === typed || completion())) applyCompletion(r.completion)
-  showSuggestions(true)
+  showSuggestions()
 })
 window.jbrow.on('search-suggestions', (r: SearchReply) => {
-  if (r.seq !== suggestSeq || document.activeElement !== omnibox) return
+  if (r.seq !== suggestSeq || !barFocused()) return
   searchHits = r
-  showSuggestions(true)
+  showSuggestions()
+})
+window.jbrow.on('site-info', (r: SiteInfoReply) => {
+  if (layout?.siteInfo?.(r) && model && !suggest.hidden) layout.render(suggest, model)
 })
 window.jbrow.on('focus-omnibox', () => {
   omnibox.focus()

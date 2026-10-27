@@ -2,7 +2,7 @@ import { app, type Rectangle } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ActionId } from '../shared/shortcuts'
-import { THEMES, type Appearance, type KeepLoaded, type MiniPlayerPrefs, type NewTabsAt, type NumberFrom, type Profile, type ProfileStyle, type RestyleAgent, type ThemeId } from '../shared/types'
+import { THEMES, URL_BAR_STYLES, type UrlBarStyle, type Appearance, type KeepLoaded, type MiniPlayerPrefs, type NewTabsAt, type NumberFrom, type Profile, type ProfileStyle, type RestyleAgent, type ThemeId } from '../shared/types'
 
 export type AnimationStyle = 'materialize' | 'slide' | 'scale' | 'fade' | 'off'
 export type AnimationEase = 'spring' | 'snappy' | 'smooth'
@@ -42,6 +42,8 @@ export interface Settings {
   searchUrl: string
   /** Ask the search engine for suggestions as you type in the address bar. Never for addresses or private ones. */
   searchSuggestions: boolean
+  /** How the address bar lays out its suggestions. */
+  urlBarStyle: UrlBarStyle
   /** Unpacked extension folders to load, per profile ID. */
   unpackedExtensions: Record<string, string[]>
   /** Extensions turned off, per profile ID: they stay installed but don't load. `path` is the folder to load when turned back on. */
@@ -117,6 +119,7 @@ const DEFAULTS: Settings = {
   whimsy: false,
   searchUrl: 'https://www.google.com/search?q=%s',
   searchSuggestions: true,
+  urlBarStyle: 'columns',
   unpackedExtensions: {},
   disabledExtensions: {},
   panel: { widthFraction: 0.72, heightFraction: 0.78, displays: {}, pinned: null },
@@ -180,6 +183,7 @@ export function loadSettings(): Settings {
     if (!Number.isFinite(settings.sidePanelWidth)) settings.sidePanelWidth = DEFAULTS.sidePanelWidth
     if (!['system', 'light', 'dark'].includes(settings.appearance)) settings.appearance = DEFAULTS.appearance
     if (!THEMES.some((t) => t.id === settings.theme)) settings.theme = DEFAULTS.theme
+    if (!URL_BAR_STYLES.includes(settings.urlBarStyle)) settings.urlBarStyle = DEFAULTS.urlBarStyle
     if (!['tint', 'edge', 'solid'].includes(settings.profileStyle)) settings.profileStyle = DEFAULTS.profileStyle
     if (hotkeys?.all && settings.shortcuts.show === undefined) settings.shortcuts.show = hotkeys.all
     if (hotkeys?.app && settings.shortcuts.showApp === undefined) settings.shortcuts.showApp = hotkeys.app

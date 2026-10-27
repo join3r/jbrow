@@ -4,6 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { bezier } from '../shared/ease'
+import { addressUrl, forcedSearch } from '../shared/engines'
 import { urlMatcher } from '../shared/patterns'
 import { MAX_PANES, PANE_HEAD, paneSpans, splitOf } from '../shared/split'
 import { byOrder, createdBeside, flatten, isAsleep, isInFolder, isRoot, parentFolder, samePage, subtree, threadsOf } from '../shared/threads'
@@ -127,6 +128,11 @@ const SLIDE_EASE: [number, number, number, number] = [0.34, 1.25, 0.64, 1]
 /** How many closed tabs ⇧⌘T can bring back. */
 const CLOSED_KEEP = 25
 
+/** How long a typed host gets to answer over https before the tab tries http, as in Chrome. */
+const UPGRADE_WAIT_MS = 3000
+/** No answer over http either: not online, the name doesn't resolve, or the load was stopped. */
+const UPGRADE_KEEP_ERRORS = new Set([-3, -105, -106, -137])
+
 /** A closed tab, with what it takes to put it back where it was. */
 interface ClosedTab {
   rec: TabRecord
@@ -185,6 +191,14 @@ export class Tabs {
   private historyTimer: NodeJS.Timeout | null = null
   /** Tabs whose back and forward list is being restored, with the address to end up on. */
   private restoring = new Map<string, string>()
+  /**
+   * Tabs going to a host typed without a scheme, which got https:// (see addressUrl). If the site
+   * fails over https, shows a bad certificate or hasn't answered in UPGRADE_WAIT_MS, the tab goes
+   * to http:// instead, as Chrome's HTTPS-Upgrades does. The wait starts once that load does.
+   */
+  private upgrades = new Map<string, { https: string; http: string; timer?: NodeJS.Timeout }>()
+  /** Tabs that fell back to http, with the https address whose error page is left in their history. */
+  private fellBack = new Map<string, string>()
 
   /** How far above (less than 0) or below its place the shown page is while it slides in. */
   private slideY = 0
@@ -501,6 +515,9 @@ export class Tabs {
       this.saveHistory()
     }
     wc.on('did-navigate', (e, url) => {
+      // The site answered, over https or after falling back: nothing left to wait for.
+      this.clearUpgrade(id)
+      this.dropFailedUpgrade(id, wc, url)
       onNav(e, url)
       this.deps.onVisit(rec()?.profile ?? rt.profile.id, url)
       this.deps.logins.loaded(id)
@@ -523,11 +540,14 @@ export class Tabs {
         this.deps.logins.clear(id)
         this.deps.devices.cancel(id)
         this.setCrashed(id, null)
+        this.upgradeStarted(id, wc, details.url)
         // A phishing or malware site: the page it's on stays, under jbrow's warning.
         if (this.deps.dangerous.check(id, rec()?.profile ?? rt.profile.id, details.url)) stopSoon()
       }
     })
     wc.on('did-redirect-navigation', (details) => {
+      // The site answered over https.
+      if (details.isMainFrame && this.upgrades.get(id)?.timer) this.clearUpgrade(id)
       if (details.isMainFrame && this.deps.dangerous.check(id, rec()?.profile ?? rt.profile.id, details.url)) stopSoon()
     })
     // HTTP auth for the page or a proxy. Logins answers once you sign in or cancel.
@@ -567,8 +587,14 @@ export class Tabs {
         closing.done(false)
       }
     })
+    wc.on('did-fail-load', (_e, code, _desc, url, isMainFrame) => {
+      if (isMainFrame && url === this.upgrades.get(id)?.https && !UPGRADE_KEEP_ERRORS.has(code)) this.fallBack(id, wc)
+    })
     wc.on('certificate-error', (event, url, error, certificate, callback, isMainFrame) => {
       event.preventDefault()
+      // jbrow added the https; a bad certificate there means trying http, not a warning.
+      const profileId = rec()?.profile ?? rt.profile.id
+      if (isMainFrame && url === this.upgrades.get(id)?.https && !this.deps.certs.trusted(profileId, url, certificate)) return callback(false)
       callback(this.deps.certs.onError(id, rec()?.profile ?? rt.profile.id, url, error, certificate, isMainFrame))
     })
     wc.on('did-start-loading', () => this.setLoading(id, true))
@@ -905,6 +931,14 @@ export class Tabs {
     const rec = this.active()
     if (!rec) return
     rec.url = url
+    this.clearUpgrade(rec.id)
+    const text = input.trim()
+    if (!search && url.startsWith('https://') && url !== text && url === addressUrl(text)) {
+      const https = new URL(url)
+      const http = new URL(url)
+      http.protocol = 'http:'
+      this.upgrades.set(rec.id, { https: https.href, http: http.href })
+    }
     // A tab without a page goes to the address once its view is made.
     const live = this.live.get(rec.id)
     if (!live) this.ensureView(rec)
@@ -912,6 +946,43 @@ export class Tabs {
     else if (this.restoring.has(rec.id)) this.restoring.set(rec.id, url)
     else if (live.wc.getURL() !== url) void live.wc.loadURL(url).catch(() => {})
     this.activate(rec.id)
+  }
+
+  /** A tab's page started a load: the https one an upgrade waits on, or something else instead. */
+  private upgradeStarted(id: string, wc: WebContents, url: string) {
+    const u = this.upgrades.get(id)
+    if (!u) return
+    // Restoring a back and forward list loads its own page first; only that one is let past.
+    if (url === u.https) u.timer ??= setTimeout(() => this.fallBack(id, wc), UPGRADE_WAIT_MS)
+    else if (u.timer) this.clearUpgrade(id)
+  }
+
+  private clearUpgrade(id: string) {
+    clearTimeout(this.upgrades.get(id)?.timer)
+    this.upgrades.delete(id)
+  }
+
+  /** The https address didn't work out: the tab goes to http instead. */
+  private fallBack(id: string, wc: WebContents) {
+    const u = this.upgrades.get(id)
+    this.clearUpgrade(id)
+    if (!u || wc.isDestroyed()) return
+    this.fellBack.set(id, u.https)
+    const rec = this.get(id)
+    if (rec) rec.url = u.http
+    // Still waiting on https.
+    if (wc.isLoading()) wc.stop()
+    void wc.loadURL(u.http).catch(() => {})
+  }
+
+  /** A failed https load leaves its error page in the history; Back shouldn't go there. */
+  private dropFailedUpgrade(id: string, wc: WebContents, url: string) {
+    const https = this.fellBack.get(id)
+    if (!https) return
+    this.fellBack.delete(id)
+    const nav = wc.navigationHistory
+    const prev = nav.getActiveIndex() - 1
+    if (url.startsWith('http:') && prev >= 0 && nav.getEntryAtIndex(prev)?.url === https) nav.removeEntryAtIndex(prev)
   }
 
   /**
@@ -943,6 +1014,8 @@ export class Tabs {
   close(id: string, remember = true, history?: NavHistory, remove = false) {
     const rec = this.get(id)
     if (!rec) return
+    this.clearUpgrade(id)
+    this.fellBack.delete(id)
     const panes = this.panesOf(id)
     const beside = this.activeId === id && !rec.kept ? this.deps.besideClosed(id) : undefined
     if (rec.kept && rec.home && !remove) {
@@ -1465,12 +1538,10 @@ function searchEngineName(searchUrl: string): string {
   }
 }
 
-/** `search` sends the text to the search engine even if it looks like an address. */
+/** `search` sends the text to the search engine even if it looks like an address, as a leading ? does. */
 export function toUrl(input: string, searchUrl: string, search = false): string {
   const text = input.trim()
-  if (search) return searchUrl.replace('%s', encodeURIComponent(text))
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text) || /^(about|chrome-extension|file):/i.test(text)) return text
-  // Hosts can be in any script (münchen.de, 例え.jp), and IPv6 addresses go in brackets.
-  if (/^(localhost|[\p{L}\p{N}_-]+(\.[\p{L}\p{N}_-]+)+|\[[\da-f:.]+\])(:\d+)?(\/.*)?$/iu.test(text) && !text.includes(' ')) return `https://${text}`
-  return searchUrl.replace('%s', encodeURIComponent(text))
+  const query = search ? text : forcedSearch(text)
+  const url = query === undefined ? addressUrl(text) : undefined
+  return url ?? searchUrl.replace('%s', encodeURIComponent(query ?? text))
 }

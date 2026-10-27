@@ -3,8 +3,8 @@ import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { urlMatcher } from '../shared/patterns'
 import { awayFromHome, besideClosed, isInFolder, isPinned, keptThreads, numberedThreads, sections, type FolderView } from '../shared/threads'
-import { isSearchUrl, looksLikeAddress, suggestUrlFor } from '../shared/engines'
-import { THEMES, type AppEntry, type AppLabel, type Folder, type ExtensionView, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
+import { forcedSearch, isSearchUrl, looksLikeAddress, suggestUrlFor } from '../shared/engines'
+import { THEMES, URL_BAR_STYLES, type AppEntry, type AppLabel, type Folder, type ExtensionView, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
 import { BACKGROUND } from './background'
 import { Certificates } from './certs'
@@ -12,6 +12,7 @@ import { DangerousSites } from './dangerous'
 import { DeviceChooser } from './devices'
 import { Logins } from './logins'
 import { SignInSheets } from './signin'
+import { isSearchPage, SiteInfo } from './site-info'
 import { ExtensionCommands } from './commands'
 import { eraseExtensionData, iconOf, localize, localizedName, messages, readFolder, type ExtensionFolder } from './extension-files'
 import { forgetInstall } from './installed'
@@ -60,6 +61,7 @@ let commands: ExtensionCommands
 let downloads: Downloads
 let restyler: Restyler
 let certs: Certificates
+let siteInfo: SiteInfo
 let dangerous: DangerousSites
 let logins: Logins
 let signIns: SignInSheets
@@ -205,6 +207,7 @@ function state(): UiState {
       zoom: { defaultPercent: settings.zoom.defaultPercent, remember: settings.zoom.remember },
       searchUrl: settings.searchUrl,
       searchSuggestions: settings.searchSuggestions,
+      urlBarStyle: settings.urlBarStyle,
       autoUpdate: settings.autoUpdate,
     },
     now: Date.now(),
@@ -942,6 +945,7 @@ function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.blockThirdPartyCookies !== undefined) settings.blockThirdPartyCookies = prefs.blockThirdPartyCookies
   if (prefs.searchUrl !== undefined && isSearchUrl(prefs.searchUrl.trim())) settings.searchUrl = prefs.searchUrl.trim()
   if (prefs.searchSuggestions !== undefined) settings.searchSuggestions = prefs.searchSuggestions
+  if (prefs.urlBarStyle && URL_BAR_STYLES.includes(prefs.urlBarStyle)) settings.urlBarStyle = prefs.urlBarStyle
   if (prefs.autoUpdate !== undefined) settings.autoUpdate = prefs.autoUpdate
   if (prefs.restyleAgent === 'claude' || prefs.restyleAgent === 'codex') settings.restyle = { ...settings.restyle, agent: prefs.restyleAgent }
   if (prefs.restyleModel) settings.restyle = { ...settings.restyle, model: prefs.restyleModel }
@@ -1466,12 +1470,12 @@ let searchTimer: NodeJS.Timeout | null = null
 let searchAbort: AbortController | null = null
 
 /**
- * Whether what's typed may go to the search engine, which sees every keystroke: words only, never
- * anything that looks like an address or matches a private address pattern.
+ * Whether `q` may go to the search engine, which sees every keystroke: words only, never anything
+ * that looks like an address or matches a private address pattern. `forced` is a search asked for
+ * with a leading ?, which may look like an address (?node.js) but still not like a private one.
  */
-function maySendToSearch(input: string, visited: boolean, profile: string): boolean {
-  const q = input.trim()
-  if (!settings.searchSuggestions || !q || q.length > 200 || looksLikeAddress(q)) return false
+function maySendToSearch(q: string, forced: boolean, visited: boolean, profile: string): boolean {
+  if (!settings.searchSuggestions || !q || q.length > 200 || (!forced && looksLikeAddress(q))) return false
   // Typing the start of a site you've been to is typing an address, not a search: "intr" on the
   // way to a private intranet host mustn't reach the search engine either. A popular site's name
   // tells it nothing about you.
@@ -1508,13 +1512,15 @@ function suggest({ input, profile, seq }: { input: string; profile?: string; seq
   panel.ui.send('suggestions', reply)
   cancelSearchSuggestions()
   const suggestUrl = suggestUrlFor(settings.searchUrl)
-  if (!suggestUrl || !maySendToSearch(input, !!visited, p)) return
+  const forced = forcedSearch(input)
+  const query = forced ?? input.trim()
+  if (!suggestUrl || !maySendToSearch(query, forced !== undefined, !!visited, p)) return
   searchTimer = setTimeout(async () => {
     searchTimer = null
     const ctrl = (searchAbort = new AbortController())
     const timeout = setTimeout(() => ctrl.abort(), 4000)
     try {
-      const searches = await fetchSearchSuggestions(suggestUrl, input.trim(), ctrl.signal)
+      const searches = await fetchSearchSuggestions(suggestUrl, query, ctrl.signal)
       const answer: SearchReply = { seq, input, searches: searches.slice(0, 6) }
       if (!ctrl.signal.aborted && !panel.win.isDestroyed()) panel.ui.send('search-suggestions', answer)
     } catch (error) {
@@ -1982,9 +1988,14 @@ function wireIpc() {
     tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
     focusAddressBar()
   })
-  on<{ input: string; profile?: string; search?: boolean }>('navigate', ({ input, profile, search }) => {
+  on<{ input: string; profile?: string; search?: boolean; open?: 'tab' | 'split' }>('navigate', ({ input, profile, search, open }) => {
     const cur = tabs.active()
-    if (!cur) tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
+    const known = !!profile && settings.profiles.some((p) => p.id === profile)
+    // The address bar's tools: in a new tab, or in a new pane beside the page (with no page to go beside, here).
+    if (open === 'split' && cur?.url) {
+      const error = tabs.splitNew()
+      if (error) return toast(error)
+    } else if (!cur || open === 'tab') tabs.newTab({ profile: known ? profile! : newTabProfile(), ...scopeFields() })
     else if (profile && profile !== cur.profile && settings.profiles.some((p) => p.id === profile)) {
       // Picked with Tab in the address bar. A loaded page stays put; what was typed opens next to it.
       if (cur.url) tabs.create({ profile, ...scopeFields() })
@@ -1995,6 +2006,18 @@ function wireIpc() {
   })
   on<{ input: string; profile?: string; seq: number }>('suggest', (request) => suggest(request))
   on('suggest-cancel', () => cancelSearchSuggestions())
+  on<{ url: string; profile?: string; seq: number }>('site-info', ({ url, profile, seq }) => {
+    const p = profile && settings.profiles.some((x) => x.id === profile) ? profile : (tabs.active()?.profile ?? settings.defaultProfile)
+    void siteInfo.ask(url, p, seq)
+  })
+  on<{ id: string }>('split-with', ({ id }) => {
+    const error = tabs.splitWith(id)
+    if (error) toast(error)
+  })
+  on<{ url: string }>('copy-link', ({ url }) => {
+    clipboard.writeText(url)
+    panel.ui.send('url-copied')
+  })
   on<{ profile?: string; url: string }>('forget-visit', ({ profile, url }) => visits.forget(profile ?? tabs.active()?.profile ?? settings.defaultProfile, url))
   on<{ id: string }>('close', ({ id }) => void closeTab(id))
   on<{ id: string }>('go-home', ({ id }) => tabs.goHome(id))
@@ -2393,6 +2416,15 @@ app.whenReady().then(async () => {
   certs = new Certificates(() => {
     tabs.layout()
     pushState()
+  })
+  siteInfo = new SiteInfo({
+    resolve: async (profile, host) => (await runtimes.get(profile)?.session.resolveHost(host))?.endpoints[0]?.address,
+    cert: (profile, host) => certs.seenOn(profile, host),
+    isPrivate: (url) => urlMatcher(settings.privateUrls)(url),
+    isSearch: (url) => isSearchPage(url, settings.searchUrl),
+    send: (reply) => {
+      if (!panel.win.isDestroyed()) panel.ui.send('site-info', reply)
+    },
   })
   dangerous = new DangerousSites({
     enabled: () => settings.dangerousSites,

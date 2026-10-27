@@ -264,26 +264,7 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 #restyleButton.styled { color: var(--accent); }
 #restyleButton.busy svg.i { animation: pulse 1s ease-in-out infinite; }
 
-.suggest { position: absolute; top: 36px; left: 0; right: 0; z-index: 20; background: var(--surface); backdrop-filter: blur(20px); border: 1px solid var(--line); border-radius: 10px; padding: 4px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25); }
-.sg { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 0 10px; align-items: center; width: 100%; border: 0; background: none; text-align: left; padding: 6px 8px; border-radius: 7px; }
-.sg.hi { background: var(--accent-soft); }
-.sg img, .sg .fav { width: 16px; height: 16px; border-radius: 3px; grid-row: 1 / 3; }
-.sg-t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sg-s { grid-column: 2; color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sg-tag { grid-column: 3; grid-row: 1 / 3; font: 11px var(--mono); color: var(--muted); }
-.sg .fav { display: inline-grid; place-items: center; color: var(--muted); }
-.sg .fav svg.i { width: 14px; height: 14px; }
-/* Search suggestions are one line of plain text, like Chrome's. */
-.sg-search .sg-t { font-weight: inherit; }
-/* A history row's tag turns into its remove button on hover. */
-.sg-x { grid-column: 3; grid-row: 1 / 3; display: none; place-items: center; width: 20px; height: 20px; justify-self: end; border-radius: 5px; color: var(--muted); }
-.sg-x:hover { background: var(--hover); color: var(--ink); }
-.sg-x svg.i { width: 13px; height: 13px; }
-.sg-visit:is(:hover, .hi) .sg-x { display: inline-grid; }
-.sg-visit:is(:hover, .hi) .sg-tag { visibility: hidden; }
-.sg-hint { display: flex; align-items: center; gap: 5px; margin-top: 4px; padding: 5px 8px 3px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
-.sg-hint kbd { font: 10.5px var(--mono); padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; }
-.sg-hint .dot { width: 7px; height: 7px; border-radius: 50%; }
+/* The address bar's suggestions are styled in suggest/suggest.css and each layout's own file next to it. */
 
 /* ---------- sidebar ---------- */
 #sidebar { position: absolute; z-index: 1; top: var(--toolbar); left: 0; bottom: 0; width: var(--sidebar); display: flex; flex-direction: column; padding: 0 8px var(--gutter); }
@@ -585,6 +566,16 @@ body.resizing, body.resizing * { cursor: col-resize !important; }
 .theme:hover .theme-preview { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .theme[aria-pressed='true'] { color: var(--ink); font-weight: 600; }
 .theme[aria-pressed='true'] .theme-preview { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The address bar's layouts, each a picture with its name and a line about it. */
+.layout-picks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.layout-pick { display: flex; flex-direction: column; gap: 4px; padding: 0 0 2px; border: 0; background: none; text-align: left; color: var(--ink); }
+.layout-pick .art { display: block; aspect-ratio: 8 / 5; margin-bottom: 4px; border: 1px solid var(--line); border-radius: 9px; background: var(--hover); overflow: hidden; }
+.layout-pick .art img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.layout-pick .t { font-size: 12.5px; }
+.layout-pick .d { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.layout-pick:hover .art { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.layout-pick[aria-pressed='true'] .t { font-weight: 600; }
+.layout-pick[aria-pressed='true'] .art { outline: 2px solid var(--accent); outline-offset: 1px; }
 .help { color: var(--muted); font-size: 12.5px; line-height: 1.5; margin: 0 0 10px; }
 .help b { color: var(--ink); font-weight: 600; }
 .help code, .settings textarea { font: 12px var(--mono); }

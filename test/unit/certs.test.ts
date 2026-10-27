@@ -149,3 +149,18 @@ test('a subject without a common name uses its full name', () => {
   certs.onError('t', 'p', 'https://x.example/', 'CERT_AUTHORITY_INVALID', c, true)
   assert.equal(certs.view('t', 'p', 'https://x.example/')?.chain[0].subject, 'O=Thing')
 })
+
+test('seenOn gives the certificate a host showed, its verdict and whether you trusted it', () => {
+  const { certs } = setup()
+  let proc: ((req: Record<string, unknown>, cb: (n: number) => void) => void) | undefined
+  certs.attach({ setCertificateVerifyProc: (p: typeof proc) => void (proc = p) } as unknown as Session, 'p')
+  const c = cert('AA')
+  assert.equal(certs.seenOn('p', 'bad.example'), null)
+  proc!({ hostname: 'bad.example', certificate: c, verificationResult: 'net::ERR_CERT_AUTHORITY_INVALID', errorCode: -202 }, () => {})
+  assert.deepEqual(certs.seenOn('p', 'bad.example'), { cert: c, error: 'CERT_AUTHORITY_INVALID', trusted: false })
+  certs.onError('t1', 'p', 'https://bad.example/', 'net::ERR_CERT_AUTHORITY_INVALID', c, true)
+  certs.proceed('t1', 'p')
+  assert.equal(certs.seenOn('p', 'bad.example')?.trusted, true)
+  // Another profile hasn't been there.
+  assert.equal(certs.seenOn('q', 'bad.example'), null)
+})

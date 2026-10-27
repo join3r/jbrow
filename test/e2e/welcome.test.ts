@@ -81,6 +81,13 @@ test('going through the welcome applies its choices, and ethereal unpins the win
   await jb.waitForState((s) => s.prefs.newTabsAt === 'bottom', 'new tabs at the bottom')
   await waitFor(() => jb.readJson('settings.json').newTabsAt === 'bottom', 'settings.json to have newTabsAt')
 
+  await click(ui, 'wl-next')
+  await waitFor(async () => /Address bar/.test(await stepLabel(ui)), 'the address bar step')
+  assert.equal(await ui.eval('document.getElementById("wl-urlbar-columns").getAttribute("aria-pressed")'), 'true')
+  await click(ui, 'wl-urlbar-preview')
+  await jb.waitForState((s) => s.prefs.urlBarStyle === 'preview', 'the preview layout')
+  await waitFor(() => jb.readJson('settings.json').urlBarStyle === 'preview', 'settings.json to have urlBarStyle')
+
   for (let guard = 0; !/Ready/.test(await stepLabel(ui)) && guard < 8; guard++) await click(ui, 'wl-next')
   assert.match(await stepLabel(ui), /Ready/)
   assert.match(await ui.eval('document.getElementById("wl-next").textContent'), /Start browsing/)

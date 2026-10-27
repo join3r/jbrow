@@ -143,6 +143,9 @@
 .wl-choice .dock .me { background: var(--accent); opacity: 1; }
 .wl-choice .ghost { position: absolute; left: 22%; top: 16%; width: 56%; height: 60%; border-radius: 5px; border: 1.5px dashed color-mix(in srgb, var(--accent) 60%, transparent); }
 .wl-choice .k { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+/* The address bar layouts: a picture of each. */
+.wl-layout .art { height: auto; aspect-ratio: 8 / 5; }
+.wl-layout .art img { display: block; width: 100%; height: 100%; object-fit: cover; }
 
 /* Keys */
 .wl-recorder { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }

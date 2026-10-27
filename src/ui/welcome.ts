@@ -1,6 +1,7 @@
 import { SEARCH_ENGINES } from '../shared/engines'
 import { shortcutFromKey, type ActionId } from '../shared/shortcuts'
-import { THEMES, type AppEntry, type Prefs, type Profile, type UiState } from '../shared/types'
+import { THEMES, type AppEntry, type Prefs, type Profile, type UiState, type UrlBarStyle } from '../shared/types'
+import { layoutPictureHtml, URL_BAR_LAYOUTS } from './suggest/layouts'
 
 /**
  * The welcome: a tour of jbrow that sets its main settings on the way. It shows over the whole
@@ -11,7 +12,7 @@ import { THEMES, type AppEntry, type Prefs, type Profile, type UiState } from '.
  */
 
 type Send = (channel: string, data?: unknown) => void
-type StepId = 'hello' | 'mode' | 'keys' | 'look' | 'profiles' | 'tabs' | 'privacy' | 'ready'
+type StepId = 'hello' | 'mode' | 'keys' | 'look' | 'profiles' | 'tabs' | 'urlbar' | 'privacy' | 'ready'
 
 const STEPS: { id: StepId; label: string }[] = [
   { id: 'hello', label: 'Hello' },
@@ -20,6 +21,7 @@ const STEPS: { id: StepId; label: string }[] = [
   { id: 'look', label: 'Look' },
   { id: 'profiles', label: 'Profiles' },
   { id: 'tabs', label: 'Tabs and links' },
+  { id: 'urlbar', label: 'Address bar' },
   { id: 'privacy', label: 'Search and privacy' },
   { id: 'ready', label: 'Ready' },
 ]
@@ -378,6 +380,20 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
       </div>`
     },
 
+    urlbar: () => `
+      <div class="wl-head">
+        <span class="wl-eyebrow">Address bar</span>
+        <h2>How the address bar shows what it finds</h2>
+        <p class="wl-lede">Type a site, the name of a tab or a search. Return goes where the top of the list says; the arrows, and Tab between sections, reach the rest.</p>
+      </div>
+      <div class="wl-grid2 top">${URL_BAR_LAYOUTS.map(
+        (l) => `<button id="wl-urlbar-${l.id}" class="wl-choice wl-layout" data-act="urlbar" data-v="${l.id}" aria-pressed="${l.id === S!.prefs.urlBarStyle}">
+          <span class="art">${layoutPictureHtml(l.id)}</span>
+          <span class="t">${esc(l.name)}${first && l.id === 'columns' ? ' <span class="wl-tag">How jbrow starts</span>' : ''}</span>
+          <span class="d">${esc(l.about)}</span>
+        </button>`,
+      ).join('')}</div>`,
+
     privacy: () => {
       const p = S!.prefs
       const cookiesLater = p.blockThirdPartyCookies !== S!.thirdPartyCookiesBlocked ? ' Takes effect when jbrow restarts.' : ''
@@ -429,6 +445,7 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
             <div><span>Look</span><b>${esc(theme)}, ${look}</b></div>
             <div><span>Profiles</span><b>${S!.profiles.map((x) => esc(x.name)).join(', ')} · default ${esc(def)}</b></div>
             <div><span>Search</span><b>${esc(engine)}</b></div>
+            <div><span>Address bar</span><b>${esc(URL_BAR_LAYOUTS.find((l) => l.id === p.urlBarStyle)?.name ?? p.urlBarStyle)}</b></div>
             <div><span>Tabs</span><b>sleep ${p.summarizeAfterDays ? `after ${days(p.summarizeAfterDays)}` : 'never'}, archive ${p.archiveAfterDays ? `after ${days(p.archiveAfterDays)}` : 'never'}</b></div>
           </div>
           ${browser}
@@ -573,6 +590,8 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
       }
       case 'engine':
         return prefs({ searchUrl: v })
+      case 'urlbar':
+        return prefs({ urlBarStyle: v as UrlBarStyle })
       case 'make-default':
         return send('make-default-browser')
     }

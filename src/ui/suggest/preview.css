@@ -1,0 +1,70 @@
+/* The preview layout (preview.ts): one list on the left, a panel about the highlighted row on the right. */
+.suggest[data-layout='preview'] { padding: 0; overflow: hidden; }
+.sp { display: grid; grid-template-columns: minmax(0, 1fr) 310px; min-height: 300px; }
+/* A narrow window keeps the list and drops the panel. */
+@container (max-width: 620px) {
+  .sp { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .sp-panel { display: none !important; }
+}
+
+.sp-left { display: flex; flex-direction: column; min-width: 0; padding: 6px 6px 8px; }
+.sp-list { display: flex; flex-direction: column; gap: 1px; }
+.sp-left > .sx-foot { margin-top: auto; padding-left: 8px; padding-right: 8px; }
+.sp-head { padding: 9px 10px 3px; color: var(--muted); font-size: 11px; font-weight: 600; }
+
+.sp-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto auto; gap: 0 10px; align-items: center; width: 100%; border: 0; background: none; text-align: left; font: inherit; padding: 6px 10px; border-radius: 7px; color: var(--ink); }
+.sp-row:hover { background: var(--hover); }
+.sp-row .sg-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-row.goal .sg-t { font-weight: 650; }
+.sp-row[data-kind='tab'] .sg-t { font-weight: 600; }
+/* With the caret in the text the top row is what Return does; a row picked with the keys is outlined while the keys are in the list. */
+.sp-row:is(.now, .hi) { background: var(--accent-soft); }
+.sp-row.cur { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sp-meta { display: inline-flex; align-items: center; gap: 5px; max-width: 160px; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-x { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; color: var(--muted); visibility: hidden; }
+.sp-x svg.i { width: 13px; height: 13px; }
+.sp-row:is(:hover, .hi) .sp-x { visibility: visible; }
+.sp-x:hover { background: var(--hover); color: var(--ink); }
+
+.sp-panel { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 12px 16px 16px; border-left: 1px solid var(--line); background: var(--hover); }
+.sp-tools { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.sp-find { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); color: var(--muted); cursor: text; }
+.sp-find svg.i { flex: none; width: 14px; height: 14px; }
+.sp-field { flex: 1; min-width: 0; border: 0; outline: none; background: none; font: 12.5px var(--font); color: var(--ink); }
+.sp-field::placeholder { color: var(--muted); }
+/* The field's box shows it has the keyboard, not the field. */
+.sp-field:focus-visible { outline: none; }
+.sp-find.hi { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sp-btns { display: flex; align-items: center; gap: 4px; }
+.sp-tool { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink); }
+.sp-tool svg.i { width: 15px; height: 15px; }
+.sp-tool:hover:not(:disabled) { background: var(--accent-soft); }
+.sp-tool:disabled { opacity: 0.4; }
+.sp-tool.hi { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sp-tool[hidden] { display: none; }
+
+/* What the panel is about sits at its bottom, under the tools. */
+.sp-about { margin-top: auto; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.sp-about:empty { display: none; }
+.sp-pill { align-self: flex-start; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 650; background: var(--hover); color: var(--muted); }
+.sp-pill[data-kind='site'] { background: var(--accent); color: var(--on-accent); }
+.sp-pill:is([data-kind='tab'], [data-kind='address']) { background: var(--accent-soft); color: var(--accent); }
+.sp-pill[data-kind='search'] { background: var(--accent-soft); color: var(--ink); }
+.sp-id { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.sp-id .sx-tile.big { width: 40px; height: 40px; border-radius: 10px; font-size: 18px; }
+.sp-id-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sp-title { font-size: 15px; font-weight: 650; color: var(--ink); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sp-url { color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.sp-facts { display: flex; flex-direction: column; gap: 5px; padding-top: 10px; border-top: 1px solid var(--line); }
+.sp-sub { padding-bottom: 2px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.sp-fact { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 12px; color: var(--ink); }
+.sp-fact > span:first-child { flex: none; color: var(--muted); }
+.sp-fact > span:last-child { min-width: 0; text-align: right; overflow-wrap: anywhere; }
+.sp-note { color: var(--muted); font-size: 12px; }
+.sp-cert { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+.sp-cert svg.i { flex: none; width: 12px; height: 12px; stroke-width: 2.4; }
+.sp-cert.ok { color: var(--accent); }
+.sp-cert:is(.warn, .bad) { color: var(--danger); }
+.sp-ip { font-family: var(--mono); font-size: 11.5px; }
+.sp-where { color: var(--muted); }

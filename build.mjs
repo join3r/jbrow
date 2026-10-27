@@ -84,4 +84,7 @@ await cp('src/ui/index.html', 'dist/ui/index.html')
 await cp('src/ui/signin.html', 'dist/ui/signin.html')
 await cp('src/ui/ui.css', 'dist/ui/ui.css')
 await cp('src/ui/welcome.css', 'dist/ui/welcome.css')
+// The address bar layouts' stylesheets, and the pictures of them settings and the welcome show.
+await cp('src/ui/suggest', 'dist/ui/suggest', { recursive: true, filter: (src) => !src.endsWith('.ts') })
+await cp('src/ui/img', 'dist/ui/img', { recursive: true })
 

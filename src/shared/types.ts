@@ -189,6 +189,8 @@ export interface Prefs {
   searchUrl: string
   /** Ask the search engine for suggestions while you type in the address bar. */
   searchSuggestions: boolean
+  /** How the address bar lays out its suggestions (see URL_BAR_STYLES). */
+  urlBarStyle: UrlBarStyle
   /** Check for, download and install new releases on its own. */
   autoUpdate: boolean
 }
@@ -459,4 +461,55 @@ export interface UserScriptInjection {
   runAt: 'document_start' | 'document_end' | 'document_idle'
   /** The script's sources, in order. */
   js: { code: string; url?: string }[]
+}
+
+/**
+ * Layouts for the address bar's suggestions. 'columns': the site you're typing on a card, searches
+ * under it, then history and your tabs side by side. 'preview': one list, with the highlighted
+ * row's details and tools beside it.
+ */
+export const URL_BAR_STYLES = ['columns', 'preview'] as const
+export type UrlBarStyle = (typeof URL_BAR_STYLES)[number]
+
+/**
+ * What jbrow knows about the site behind an address bar suggestion, for the preview layout's
+ * "Site" details. All of it comes from this machine: the system's DNS and the certificates the
+ * profile was shown this run. Nothing is looked up for a private address. Room for later:
+ * registrar, domain age and location, which need a lookup service.
+ */
+export interface SiteInfoReply {
+  /** The request's seq, so the UI can drop an answer to a row it has moved off. */
+  seq: number
+  url: string
+  /** Host name without the port, '' for an address without one. */
+  host: string
+  /** 'https', 'http', or another scheme without its colon (about, file, chrome-extension…). */
+  scheme: string
+  /** The address matches a private address pattern, so nothing was looked up and nothing else is filled in. */
+  private: boolean
+  /** The address the system's DNS gives for the host. Missing when it didn't resolve or wasn't looked up. */
+  ip?: string
+  /** The IP address is this machine or the local network (loopback, 10/8, 172.16/12, 192.168/16, link-local, fc00::/7). */
+  local?: boolean
+  /** Missing for private addresses and anything that isn't http or https. */
+  cert?: SiteCert
+}
+
+/**
+ * The site's certificate as the profile last saw it this run. 'valid': Chromium accepted it.
+ * 'error': it didn't (see `error`). 'unknown': jbrow hasn't connected to the host this run, and
+ * won't just to find out. 'none': plain http, no certificate.
+ */
+export interface SiteCert {
+  state: 'valid' | 'error' | 'unknown' | 'none'
+  /** Chromium's error without net::ERR_, such as CERT_DATE_INVALID or CERT_AUTHORITY_INVALID. */
+  error?: string
+  /** Who signed it: the issuer's common name, or its organization. */
+  issuer?: string
+  /** When it expires, in ms. */
+  validTo?: number
+  /** Whole days until it expires; negative once it has. */
+  daysLeft?: number
+  /** You chose to go ahead despite the error. */
+  trusted?: boolean
 }

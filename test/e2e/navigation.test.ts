@@ -66,12 +66,12 @@ test('search: true searches even for something that looks like an address', asyn
   assert.equal(activeTab(s)!.url, `${web.url}/search?q=example.com`)
 })
 
-test('a host name without a scheme goes to https', async () => {
+test('a host name without a scheme goes to https, localhost to http', async () => {
   // .invalid never resolves, so nothing leaves the machine.
   for (const [input, url] of [
     ['jbrow-test.invalid', 'https://jbrow-test.invalid'],
     ['jbrow-test.invalid/some/path?x=1', 'https://jbrow-test.invalid/some/path?x=1'],
-    ['localhost:9/x', 'https://localhost:9/x'],
+    ['localhost:9/x', 'http://localhost:9/x'],
   ]) {
     await jb.send('new')
     await jb.waitForState((s) => activeTab(s) && !activeTab(s)!.url, 'an empty tab')
