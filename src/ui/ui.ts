@@ -1328,8 +1328,13 @@ threadsEl.addEventListener('dragstart', (e) => {
 function startDrag(id: string, folder: boolean, e: DragEvent) {
   dragId = id
   dragFolder = folder
-  threadsEl.classList.add('dragging')
-  sidebarEl.classList.add('dragging')
+  // The drop strips for an empty Kept or no pins push the row down when they show. Chromium
+  // cancels a drag whose source moves during dragstart, so they wait until it's under way.
+  setTimeout(() => {
+    if (dragId !== id) return
+    threadsEl.classList.add('dragging')
+    sidebarEl.classList.add('dragging')
+  })
   e.dataTransfer!.effectAllowed = 'move'
   e.dataTransfer!.setData('text/plain', id)
 }
