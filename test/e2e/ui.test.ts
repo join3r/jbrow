@@ -2,7 +2,7 @@
 // something, and follows the appearance, theme and profile style settings.
 import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
-import { CMD, html, launch, serve, waitFor, type Cdp, type Jbrow, type TestServer } from './harness'
+import { CMD, html, launch, serve, sleep, waitFor, type Cdp, type Jbrow, type TestServer } from './harness'
 import { activeTab, isShown, offline, openTab, pngSize, record, settle } from './ui-helpers'
 
 let jb: Jbrow
@@ -147,4 +147,14 @@ test('the settings screen changes the theme and appearance', async () => {
   await ui.press(',', { modifiers: CMD })
   await waitFor(async () => !(await isShown(ui, 'settings')), 'settings to close')
   assert.deepEqual(errors, [])
+})
+
+test('the UI page never navigates away or opens windows, as a dropped link would make it', async () => {
+  const ui = await jb.ui()
+  const page = await ui.eval<string>('location.href')
+  await ui.eval(`window.open(${JSON.stringify(web.url)}); location.href = ${JSON.stringify(web.url)}`)
+  await sleep(1000)
+  await settle(jb)
+  assert.equal(await ui.eval('location.href'), page)
+  assert.equal(await ui.eval('typeof window.jbrow?.send'), 'function')
 })

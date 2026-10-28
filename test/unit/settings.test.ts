@@ -106,7 +106,7 @@ test('loaded settings never share objects with the defaults', () => {
   a.panel.displays['1'] = { x: 0, y: 0, width: 10, height: 10 }
   a.restyle.model = 'opus'
   a.profiles.push({ id: 'x', name: 'X', color: '#000' })
-  a.linkedApps[0].push('com.example')
+  a.linkedApps.push(['com.example', 'com.example.two'])
   a.appProfiles['com.example'] = 'work'
   const b = loadSettings()
   assert.deepEqual(b.zoom.sites, {})
@@ -114,8 +114,8 @@ test('loaded settings never share objects with the defaults', () => {
   assert.deepEqual(b.miniPlayer.exceptSites, [])
   assert.deepEqual(b.panel.displays, {})
   assert.equal(b.restyle.model, 'sonnet')
-  assert.equal(b.profiles.length, 2)
-  assert.equal(b.linkedApps[0].length, 2)
+  assert.equal(b.profiles.length, 1)
+  assert.deepEqual(b.linkedApps, [])
   assert.equal(b.appProfiles['com.example'], undefined)
   rmSync(settingsPath())
   // And the first-run file still holds the real defaults.

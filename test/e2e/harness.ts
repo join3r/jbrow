@@ -450,13 +450,19 @@ async function ownDisplay(): Promise<{ display: string; stop: () => void } | nul
  */
 const WINDOW = { widthFraction: 0.72, heightFraction: 0.78, displays: {}, pinned: { x: 0, y: 0, width: 1440, height: 900 } }
 
+/** Two profiles, for the tests about more than one; a fresh jbrow starts with only Personal. */
+const PROFILES = [
+  { id: 'work', name: 'Work', color: '#2f9aab' },
+  { id: 'personal', name: 'Personal', color: '#d0679a' },
+]
+
 export async function launch(opts: LaunchOptions = {}): Promise<Jbrow> {
   const userData = opts.userData ?? tempDir()
   mkdirSync(userData, { recursive: true })
   const settingsFile = path.join(userData, 'settings.json')
   const existing = existsSync(settingsFile) ? JSON.parse(readFileSync(settingsFile, 'utf8')) : {}
   if (!opts.userData || opts.settings) {
-    writeFileSync(settingsFile, JSON.stringify({ welcomed: true, panel: WINDOW, ...existing, ...opts.settings }, null, 2))
+    writeFileSync(settingsFile, JSON.stringify({ welcomed: true, panel: WINDOW, profiles: PROFILES, ...existing, ...opts.settings }, null, 2))
   }
   if (opts.tabs) writeFileSync(path.join(userData, 'tabs.json'), JSON.stringify(opts.tabs, null, 2))
   // Fresh, empty phishing and malware lists, so jbrow doesn't download the real ones. Tests

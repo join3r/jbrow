@@ -54,6 +54,9 @@ const AWAY_FRESH_MS = 4 * 60 * 60 * 1000
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
 const SWEEP_EVERY_MS = 10 * 60 * 1000
+/** jbrow from source or with JBROW_DEBUG: the test extensions and the UI's DevTools in the menu. */
+const DEV_TOOLS = !app.isPackaged || !!process.env.JBROW_DEBUG
+const BUG_REPORT_URL = 'https://github.com/join3r/jbrow/issues/new?template=bug_report.md'
 
 let settings: Settings
 let panel: Panel
@@ -137,6 +140,13 @@ app.on('before-quit', () => {
   // A move or resize from the last moment, while the window is still there.
   panel?.flush()
 })
+
+// A debugging port hands every profile's cookies and pages to whoever connects, and anything
+// that can start jbrow could ask for one. Only jbrow from source takes it.
+if (app.isPackaged && ['remote-debugging-port', 'remote-debugging-pipe'].some((s) => app.commandLine.hasSwitch(s))) {
+  console.error('[jbrow] refusing to start with remote debugging')
+  app.exit(1)
+}
 
 if (!app.requestSingleInstanceLock()) app.quit()
 
@@ -2067,6 +2077,16 @@ const tabHooks: TabHooks = (profileId) => ({
       webPreferences: { session: rt?.session, sandbox: true, contextIsolation: true },
     })
     const url = Array.isArray(details.url) ? details.url[0] : details.url
+    // The window has no address bar: links and popups from it open as tabs, where you see where you are.
+    win.webContents.setWindowOpenHandler(({ url }) => {
+      void tabs.create({ profile: profileId, url })
+      return { action: 'deny' }
+    })
+    win.webContents.on('will-navigate', (e, to) => {
+      if (to.startsWith('chrome-extension:')) return
+      e.preventDefault()
+      void tabs.create({ profile: profileId, url: to })
+    })
     if (url) void win.loadURL(url)
     rt?.extensions.addTab(win.webContents, win)
     return win
@@ -2119,7 +2139,7 @@ const tabHooks: TabHooks = (profileId) => ({
 // ---------- UI messages ----------
 
 function wireIpc() {
-  const on = <T>(name: string, fn: (data: T) => void) => ipcMain.on(`ui:${name}`, (_e, data: T) => fn(data))
+  const on = <T>(name: string, fn: (data: T) => void) => ipcMain.on(`ui:${name}`, (e, data: T) => e.sender === panel.ui && fn(data))
   on('ready', () => {
     pushState()
     sendDownloads()
@@ -2332,18 +2352,22 @@ function buildTray() {
       ...quietMenuItems(),
       { label: `Show jbrow (${shortcutLabel(actionKeys(settings.shortcuts).show)})`, click: () => void onHotkey() },
       { type: 'separator' },
-      {
-        label: 'Install test extensions',
-        submenu: [...runtimes.values()].map((rt) => ({
-          label: `Into ${rt.profile.name}`,
-          click: async () => {
-            new Notification({ title: 'jbrow', body: `Installing test extensions into ${rt.profile.name}…` }).show()
-            const results = await installTestExtensions(rt)
-            console.log(`[extensions] ${rt.profile.id}:\n  ${results.join('\n  ')}`)
-            new Notification({ title: `Extensions in ${rt.profile.name}`, body: results.join('\n') }).show()
-          },
-        })),
-      },
+      ...(DEV_TOOLS
+        ? [
+            {
+              label: 'Install test extensions',
+              submenu: [...runtimes.values()].map((rt) => ({
+                label: `Into ${rt.profile.name}`,
+                click: async () => {
+                  new Notification({ title: 'jbrow', body: `Installing test extensions into ${rt.profile.name}…` }).show()
+                  const results = await installTestExtensions(rt)
+                  console.log(`[extensions] ${rt.profile.id}:\n  ${results.join('\n  ')}`)
+                  new Notification({ title: `Extensions in ${rt.profile.name}`, body: results.join('\n') }).show()
+                },
+              })),
+            },
+          ]
+        : []),
       {
         label: 'Open Chrome Web Store',
         submenu: [...runtimes.values()].map((rt) => ({
@@ -2365,7 +2389,8 @@ function buildTray() {
       { label: 'Welcome to jbrow', click: () => void showWelcome() },
       { label: 'Open settings.json', click: () => void shell.openPath(settingsPath()) },
       { label: 'Show log file', click: () => { const f = logPath(); if (f) shell.showItemInFolder(f) } },
-      { label: 'Open UI DevTools', click: () => panel.ui.openDevTools({ mode: 'detach' }) },
+      { label: 'Report a Bug…', click: () => void shell.openExternal(BUG_REPORT_URL) },
+      ...(DEV_TOOLS ? [{ label: 'Open UI DevTools', click: () => panel.ui.openDevTools({ mode: 'detach' }) }] : []),
       { label: 'Restart jbrow', click: () => void requestQuit(true) },
       { type: 'separator' },
       { label: 'Quit jbrow', click: () => void requestQuit() },
@@ -2490,6 +2515,7 @@ function buildAppMenu() {
           { type: 'separator' },
           { label: 'Open settings.json', click: () => void shell.openPath(settingsPath()) },
           { label: 'Show Log File', click: () => { const f = logPath(); if (f) shell.showItemInFolder(f) } },
+          { label: 'Report a Bug…', click: () => void shell.openExternal(BUG_REPORT_URL) },
         ],
       },
     ]),
@@ -2776,7 +2802,7 @@ app.whenReady().then(async () => {
   const keys = actionKeys(settings.shortcuts)
   console.log(`[jbrow] ready. ${keys.show} for everything, ${keys.showApp || 'no key'} for the app in front.`)
   // `npm start -- --install-extensions=personal` installs the test extensions into that profile.
-  const installArg = process.argv.find((a) => a.startsWith('--install-extensions='))
+  const installArg = DEV_TOOLS && process.argv.find((a) => a.startsWith('--install-extensions='))
   const installInto = installArg && runtimes.get(installArg.split('=')[1])
   if (installInto) {
     const results = await installTestExtensions(installInto)

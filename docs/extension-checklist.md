@@ -1,10 +1,15 @@
 # Extension checklist
 
-Your must-have extensions, tested in jbrow's Personal profile. "Automated" is what I could check
-from the command line on 2026-10-22. "By hand" is what only real use can tell.
+Extensions jbrow is tested with, in a profile called Personal. "Automated" is what could be
+checked from the command line on 2026-10-22. "By hand" is what only real use can tell.
 
-Install them all into a profile with `npm start -- --install-extensions=personal` (or `work`), or
-from the jb menu bar item: right-click, **Install test extensions**.
+The automation extension in the last row is an unpacked extension of the author's own. It drives
+tabs through `chrome.debugger` and talks to a desktop app over native messaging, so it stands in for
+any extension that does the same. Test yours the same way.
+
+When running from source (see [CONTRIBUTING.md](../CONTRIBUTING.md)), install the Web Store ones
+into a profile with `npm start -- --install-extensions=personal` (any profile's id works), or from
+the jb menu bar item: right-click, **Install test extensions**.
 
 | Extension | Automated result | Test by hand |
 |---|---|---|
@@ -17,7 +22,7 @@ from the jb menu bar item: right-click, **Install test extensions**.
 | **Consent-O-Matic** | Service worker runs; opened its welcome page on first install. | Visit a few sites with cookie banners. |
 | **Canvas Blocker** | Service worker runs. Electron warns that `notifications` and `contextMenus` are unknown permissions, but the library provides both. | Check a canvas fingerprinting test page. |
 | **SideHN** | Works: on a page opened with `?hnid=`, the sidebar loads the HN thread, and with an HN login cookie the frame's request carries it (its `modifyHeaders` rule sets `Cookie`, `Sec-Fetch-*` and `Referer`). Its "Method not implemented" error was `cookies.onChanged.hasListener`, not the header rule. | Log in to HN, open a story link from HN and check that the sidebar shows you logged in and lets you vote and reply. |
-| **Stem** (yours, unpacked) | Connects: its native host (`com.stem.browser`) starts and Stem answers with the profile's name. It never did before 2026-10-26: `chrome.debugger` was missing, so its service worker threw on its first line and never started (see `debugger.ts` below). Through `chrome.debugger`, in a background tab: attach, the `Page`/`Runtime`/`Network`/`Log` enables, focus emulation, the file chooser intercept, an isolated world and binding, the accessibility tree, typing (diacritics included), clicks, keys and a clipped screenshot all work. | Ask Stem to do something in a jbrow tab: open a page, fill a form, take a screenshot. Check that each profile shows in Stem's Settings. Downloads won't reach Stem (see Known gaps). |
+| **An automation extension** (unpacked, your own) | Connects: its native messaging host starts and the desktop app answers with the profile's name. It never did before 2026-10-26: `chrome.debugger` was missing, so its service worker threw on its first line and never started (see `debugger.ts` below). Through `chrome.debugger`, in a background tab: attach, the `Page`/`Runtime`/`Network`/`Log` enables, focus emulation, the file chooser intercept, an isolated world and binding, the accessibility tree, typing (diacritics included), clicks, keys and a clipped screenshot all work. | Have it do something in a jbrow tab: open a page, fill a form, take a screenshot. Check that the desktop app sees each profile. Downloads won't reach it (see Known gaps). |
 
 ## What jbrow had to fix
 
@@ -48,15 +53,17 @@ in these places:
    between fill, copy username and copy password by the submenu, so its items did nothing.
 10. A native messaging host ends when the page or service worker that opened it goes away.
     Before, every extension reload or worker restart left the old host running. On 2026-10-27
-    jbrow had six Stem hosts for two profiles. Each one reconnected to Stem every two seconds
-    and knocked the previous one off, so Stem's actions failed with "disconnected".
+    jbrow had six of the automation extension's hosts for two profiles. Each one reconnected to
+    the desktop app every two seconds and knocked the previous one off, so its actions failed
+    with "disconnected".
 11. An open native messaging host keeps its service worker running, as in Chrome, and ends when
     its extension unloads. Electron stops an idle worker after 30 seconds. With item 10 alone
-    that ended Stem's host, and since jbrow's `chrome.alarms` runs on the worker's own timers,
-    nothing woke the worker again: Stem had no jbrow tabs until jbrow restarted.
+    that ended the automation extension's host, and since jbrow's `chrome.alarms` runs on the
+    worker's own timers, nothing woke the worker again: the desktop app saw no jbrow tabs until
+    jbrow restarted.
 12. `windows.get` and `windows.getAll` describe the window afresh each time. The library kept the
     description it made when the window was added, before its tabs had details, so a window
-    listed no tabs until it was resized. Stem lists tabs through `windows.getAll` and reported
+    listed no tabs until it was resized. The automation extension lists tabs through `windows.getAll` and reported
     0 open tabs, though opening and driving tabs worked.
 13. Tabs without a page (asleep, or not opened since launch) are listed by `tabs.query` and
     `windows.getAll` as Chrome's discarded tabs (`discarded: true`, `status: "unloaded"`). A tab
@@ -118,7 +125,7 @@ installed earlier have stored data, so they get neither.
 so Video Speed Controller never got its settings and never attached to videos. Before an extension
 from the Web Store loads, jbrow writes `jbrow-content-shim.js` into its folder and lists it first in
 each isolated-world content script, pointing `sync` at local storage. Updates get it
-too. Unpacked folders such as Stem are left alone, since they're your own source. `managed` is
+too. Unpacked folders are left alone, since they're your own source. `managed` is
 empty here as well.
 
 **`src/main/jbrow-extension.ts`** is jbrow's own extension, loaded into every profile. Electron
@@ -167,7 +174,7 @@ again. Only domains that act on the page are let through (`Page`, `Runtime`, `DO
 page's own `Network.getCookies`,
 `Network.clearBrowserCache`, `Page.setDownloadBehavior`, and `Page.navigate` to such a place.
 `DOM.setFileInputFiles` and `Network.loadNetworkResource` need file access, which jbrow gives
-unpacked extensions only (Stem's uploads use the first). A hidden tab (any background tab, and every tab while jbrow is hidden) draws no frames,
+unpacked extensions only (the automation extension's uploads use the first). A hidden tab (any background tab, and every tab while jbrow is hidden) draws no frames,
 so a CDP screenshot of it waited forever. Chrome counts a debugger as a capturer and keeps the tab
 drawing; Electron 44 has no such count, so while `Page.captureScreenshot` runs jbrow keeps the page
 drawing with `capturePage` every 100 ms. For that, and so pages opened in the background measure a
@@ -212,5 +219,5 @@ These are worth sending upstream to electron-browser-shell once they've proven t
 - `chrome.debugger` reaches tabs only, not extension or browser targets, and has no `getTargets`.
   Instead of Chrome's "is debugging this browser" bar, the tab's favicon carries the extension's
   icon. Files are off limits even for an extension allowed file access.
-- `chrome.downloads` is the library's stub: `search` answers nothing and no events fire, so Stem
-  never sees a download a page started.
+- `chrome.downloads` is the library's stub: `search` answers nothing and no events fire, so an
+  automation extension never sees a download a page started.

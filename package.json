@@ -64,6 +64,7 @@
         }
       ],
       "category": "public.app-category.productivity",
+      "minimumSystemVersion": "13.0",
       "icon": "build/icon.png",
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
@@ -111,7 +112,8 @@
       "enableNodeOptionsEnvironmentVariable": false,
       "enableNodeCliInspectArguments": false,
       "grantFileProtocolExtraPrivileges": false,
-      "onlyLoadAppFromAsar": true
+      "onlyLoadAppFromAsar": true,
+      "enableEmbeddedAsarIntegrityValidation": true
     },
     "asarUnpack": [
       "dist/ui/**"
