@@ -217,14 +217,14 @@
             </label>
             <div id="setNav" class="set-nav-list">
               <button class="set-nav-item" data-section="general"><span data-icon="settings"></span>General</button>
+              <button class="set-nav-item" data-section="addressBar"><span data-icon="search"></span>Address bar</button>
               <button class="set-nav-item" data-section="appearance"><span data-icon="palette"></span>Appearance</button>
-              <button class="set-nav-item" data-section="profiles"><span data-icon="user"></span>Profiles</button>
-              <button class="set-nav-item" data-section="extensions"><span data-icon="puzzle"></span>Extensions</button>
               <button class="set-nav-item" data-section="threads"><span data-icon="listTree"></span>Tabs</button>
               <button class="set-nav-item" data-section="archived"><span data-icon="archive"></span>Archived</button>
+              <button class="set-nav-item" data-section="profiles"><span data-icon="user"></span>Profiles</button>
               <button class="set-nav-item" data-section="apps"><span data-icon="grid"></span>Apps</button>
+              <button class="set-nav-item" data-section="extensions"><span data-icon="puzzle"></span>Extensions</button>
               <button class="set-nav-item" data-section="miniPlayer"><span data-icon="pip"></span>Mini player</button>
-              <button class="set-nav-item" data-section="animation"><span data-icon="sparkles"></span>Animation</button>
               <button class="set-nav-item" data-section="restyling"><span data-icon="wand"></span>Restyling</button>
               <button class="set-nav-item" data-section="privacy"><span data-icon="shield"></span>Privacy</button>
               <button class="set-nav-item" data-section="shortcuts"><span data-icon="keyboard"></span>Shortcuts</button>
@@ -251,12 +251,40 @@
                   it keeps them separately for each display and comes up on the one the pointer is on.</p>
                 <button id="resetWindow" class="chip">Reset size and position</button>
               </div>
+              <div class="set-item" data-keywords="default browser links other apps">
+                <h3>Default browser</h3>
+                <p id="defaultBrowser" class="help"></p>
+                <button id="makeDefault" class="chip" hidden>Make jbrow the default browser</button>
+              </div>
+              <div class="set-item" data-keywords="quiet links background menu bar badge scripts notifications other apps focus">
+                <h3>Quiet links</h3>
+                <label class="check">
+                  <input id="quietLinks" type="checkbox" />
+                  <span>Open links you didn't click in the background. When a script or another app opens a link on its
+                    own, jbrow stays hidden, marks the tab with a dot and counts it next to jb in the menu bar.</span>
+                </label>
+              </div>
+              <div class="set-item" data-keywords="updates update version release new upgrade automatic restart">
+                <h3>Updates</h3>
+                <label class="check">
+                  <input id="autoUpdate" type="checkbox" />
+                  <span>Update jbrow on its own. New releases download in the background and install when you quit, or
+                    once jbrow has been hidden for a while, with nothing playing or downloading. It comes back with your
+                    tabs as they were.</span>
+                </label>
+                <p id="updateStatus" class="help"></p>
+                <button id="updateButton" class="chip" hidden></button>
+              </div>
               <div class="set-item" data-keywords="welcome tour introduction start setup first launch onboarding">
                 <h3>Welcome</h3>
                 <p class="help">The tour from jbrow's first launch, with its choices for the window, keys, look, profiles and
                   privacy. It's also under Help → Welcome to jbrow.</p>
                 <button id="showWelcome" class="chip">Show the welcome</button>
               </div>
+            </section>
+
+            <section class="set-section" data-section="addressBar">
+              <h2 class="set-section-title">Address bar</h2>
               <div class="set-item" data-keywords="search engine google duckduckgo bing brave kagi ecosia custom address bar omnibox suggestions autocomplete queries">
                 <h3>Search</h3>
                 <div class="field">
@@ -275,33 +303,9 @@
                 <p id="searchHelp" class="help"></p>
               </div>
               <div class="set-item" data-keywords="address bar layout url bar omnibox suggestions dropdown columns preview look style">
-                <h3>Address bar layout</h3>
+                <h3>Layout</h3>
                 <p class="help">How the address bar shows what it found for what you type.</p>
                 <div id="urlBarStyle" class="layout-picks" role="group" aria-label="Address bar layout"></div>
-              </div>
-              <div class="set-item" data-keywords="default browser links other apps">
-                <h3>Default browser</h3>
-                <p id="defaultBrowser" class="help"></p>
-                <button id="makeDefault" class="chip" hidden>Make jbrow the default browser</button>
-              </div>
-              <div class="set-item" data-keywords="updates update version release new upgrade automatic restart">
-                <h3>Updates</h3>
-                <label class="check">
-                  <input id="autoUpdate" type="checkbox" />
-                  <span>Update jbrow on its own. New releases download in the background and install when you quit, or
-                    once jbrow has been hidden for a while, with nothing playing or downloading. It comes back with your
-                    tabs as they were.</span>
-                </label>
-                <p id="updateStatus" class="help"></p>
-                <button id="updateButton" class="chip" hidden></button>
-              </div>
-              <div class="set-item" data-keywords="quiet links background menu bar badge scripts notifications other apps focus">
-                <h3>Quiet links</h3>
-                <label class="check">
-                  <input id="quietLinks" type="checkbox" />
-                  <span>Open links you didn't click in the background. When a script or another app opens a link on its
-                    own, jbrow stays hidden, marks the tab with a dot and counts it next to jb in the menu bar.</span>
-                </label>
               </div>
             </section>
 
@@ -323,18 +327,6 @@
                 <h3>Theme</h3>
                 <div id="themes" class="themes" role="group" aria-label="Theme"></div>
               </div>
-              <div class="set-item" data-keywords="profile color colour address bar url tint edge solid">
-                <h3>Profile color</h3>
-                <div class="field">
-                  <span class="label">Address bar</span>
-                  <div id="profileStyle" class="seg" role="group" aria-label="Profile color in the address bar">
-                    <button data-value="tint">Tint</button>
-                    <button data-value="edge">Edge</button>
-                    <button data-value="solid">Solid</button>
-                  </div>
-                </div>
-                <p class="help">The left end of the address bar, behind back and reload, takes the color of the tab's profile. Edge adds a solid line where the color ends. Shown when you have more than one profile.</p>
-              </div>
               <div class="set-item" data-keywords="zoom page size bigger smaller text font scale percent default site remember">
                 <h3>Page zoom</h3>
                 <div class="field">
@@ -355,51 +347,45 @@
                 </label>
                 <div id="zoomSites" class="styled-sites"></div>
               </div>
-            </section>
-
-            <section class="set-section" data-section="profiles">
-              <h2 class="set-section-title">Profiles</h2>
-              <div class="set-item" data-keywords="profile profiles color rename delete default work personal logins cookies">
-                <p class="help">
-                  Each profile has its own logins, cookies and extensions. Click a name to rename it, the dot to change its
-                  color and the box next to it to pick an emoji, or type a letter or two. Right-click a profile to
-                  make it the default, for links from other apps and for new tabs when nothing else decides, or to delete it.
-                </p>
-                <div id="profileList" class="profile-list"></div>
-                <div id="emojiPop" class="pop emoji-pop" hidden role="dialog" aria-label="Profile icon">
-                  <input id="emojiSearch" type="search" spellcheck="false" placeholder="Search, or type a letter" aria-label="Search emoji" />
-                  <div id="emojiGrid" class="emoji-grid"></div>
-                  <div class="emoji-foot">
-                    <button id="emojiMore" class="link">More emoji…</button>
-                    <button id="emojiNone" class="link">Use the color dot</button>
-                  </div>
-                </div>
-                <button id="addProfile" class="chip">Add profile</button>
-              </div>
-              <div class="set-item" data-keywords="profile switcher filter all menu dropdown icons emoji compact">
-                <h3>Profile switcher</h3>
+              <div class="set-item" data-keywords="summon animation style duration speed feel ease preview">
+                <h3>Animation</h3>
+                <p class="help">How jbrow appears when you summon it.</p>
                 <div class="field">
                   <span class="label">Style</span>
-                  <div id="profileSwitcher" class="seg" role="group" aria-label="Profile switcher">
-                    <button data-value="auto">Auto</button>
-                    <button data-value="menu">Menu</button>
+                  <div id="animStyle" class="seg" role="group" aria-label="Animation style">
+                    <button data-value="materialize">Materialize</button>
+                    <button data-value="slide">Slide</button>
+                    <button data-value="scale">Scale</button>
+                    <button data-value="fade">Fade</button>
+                    <button data-value="off">Off</button>
                   </div>
                 </div>
-                <p class="help">
-                  Auto shows every profile's name while they fit, then only the selected one's next to the others' icons, then
-                  only icons, and a menu when even those don't fit. Menu always shows a menu. Hidden with a single profile.
-                </p>
+                <div class="field">
+                  <label class="label" for="animSpeed">Duration</label>
+                  <input id="animSpeed" type="range" min="80" max="400" step="10" />
+                  <output id="animSpeedOut" for="animSpeed"></output>
+                </div>
+                <div class="field">
+                  <span class="label">Feel</span>
+                  <div id="animEase" class="seg" role="group" aria-label="Animation feel">
+                    <button data-value="spring">Spring</button>
+                    <button data-value="snappy">Snappy</button>
+                    <button data-value="smooth">Smooth</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <span class="label"></span>
+                  <button id="animPreview" class="chip">Preview</button>
+                </div>
               </div>
-            </section>
-
-            <section class="set-section" data-section="extensions">
-              <h2 class="set-section-title">Extensions</h2>
-              <div class="set-item" data-keywords="extension extensions add-ons plugins turn off disable enable remove uninstall delete">
-                <p class="help">
-                  Every extension in each profile, including the ones without a toolbar button. Uncheck one to turn it off; it
-                  stays installed with its settings. Removing one erases what it stored.
-                </p>
-                <div id="extList" class="ext-list"></div>
+              <div class="set-item" data-keywords="whimsy whimsical playful fun delight bounce poof hop slide tab switch animation">
+                <h3>Whimsy</h3>
+                <label class="check">
+                  <input id="whimsy" type="checkbox" />
+                  <span>Add some play to the sidebar. New tabs pop in, closed ones vanish in a puff, rows glide into
+                    place, the tab you switch to hops and its page slides in, and finished downloads wiggle. Reduce
+                    motion in macOS turns it off.</span>
+                </label>
               </div>
             </section>
 
@@ -523,6 +509,53 @@
               </div>
             </section>
 
+            <section class="set-section" data-section="profiles">
+              <h2 class="set-section-title">Profiles</h2>
+              <div class="set-item" data-keywords="profile profiles color rename delete default work personal logins cookies">
+                <p class="help">
+                  Each profile has its own logins, cookies and extensions. Click a name to rename it, the dot to change its
+                  color and the box next to it to pick an emoji, or type a letter or two. Right-click a profile to
+                  make it the default, for links from other apps and for new tabs when nothing else decides, or to delete it.
+                </p>
+                <div id="profileList" class="profile-list"></div>
+                <div id="emojiPop" class="pop emoji-pop" hidden role="dialog" aria-label="Profile icon">
+                  <input id="emojiSearch" type="search" spellcheck="false" placeholder="Search, or type a letter" aria-label="Search emoji" />
+                  <div id="emojiGrid" class="emoji-grid"></div>
+                  <div class="emoji-foot">
+                    <button id="emojiMore" class="link">More emoji…</button>
+                    <button id="emojiNone" class="link">Use the color dot</button>
+                  </div>
+                </div>
+                <button id="addProfile" class="chip">Add profile</button>
+              </div>
+              <div class="set-item" data-keywords="profile switcher filter all menu dropdown icons emoji compact">
+                <h3>Profile switcher</h3>
+                <div class="field">
+                  <span class="label">Style</span>
+                  <div id="profileSwitcher" class="seg" role="group" aria-label="Profile switcher">
+                    <button data-value="auto">Auto</button>
+                    <button data-value="menu">Menu</button>
+                  </div>
+                </div>
+                <p class="help">
+                  Auto shows every profile's name while they fit, then only the selected one's next to the others' icons, then
+                  only icons, and a menu when even those don't fit. Menu always shows a menu. Hidden with a single profile.
+                </p>
+              </div>
+              <div class="set-item" data-keywords="profile color colour address bar url tint edge solid">
+                <h3>Profile color</h3>
+                <div class="field">
+                  <span class="label">Address bar</span>
+                  <div id="profileStyle" class="seg" role="group" aria-label="Profile color in the address bar">
+                    <button data-value="tint">Tint</button>
+                    <button data-value="edge">Edge</button>
+                    <button data-value="solid">Solid</button>
+                  </div>
+                </div>
+                <p class="help">The left end of the address bar, behind back and reload, takes the color of the tab's profile. Edge adds a solid line where the color ends. Shown when you have more than one profile.</p>
+              </div>
+            </section>
+
             <section class="set-section" data-section="apps">
               <h2 class="set-section-title">Apps</h2>
               <div class="set-item" data-keywords="apps app hotkey link linked profile bundle">
@@ -533,6 +566,17 @@
                 </p>
                 <div id="appList" class="app-list"></div>
                 <button id="addApp" class="chip">Add app…</button>
+              </div>
+            </section>
+
+            <section class="set-section" data-section="extensions">
+              <h2 class="set-section-title">Extensions</h2>
+              <div class="set-item" data-keywords="extension extensions add-ons plugins turn off disable enable remove uninstall delete">
+                <p class="help">
+                  Every extension in each profile, including the ones without a toolbar button. Uncheck one to turn it off; it
+                  stays installed with its settings. Removing one erases what it stored.
+                </p>
+                <div id="extList" class="ext-list"></div>
               </div>
             </section>
 
@@ -577,49 +621,6 @@
               </div>
             </section>
 
-            <section class="set-section" data-section="animation">
-              <h2 class="set-section-title">Animation</h2>
-              <div class="set-item" data-keywords="summon animation style duration speed feel ease preview">
-                <p class="help">How jbrow appears when you summon it.</p>
-                <div class="field">
-                  <span class="label">Style</span>
-                  <div id="animStyle" class="seg" role="group" aria-label="Animation style">
-                    <button data-value="materialize">Materialize</button>
-                    <button data-value="slide">Slide</button>
-                    <button data-value="scale">Scale</button>
-                    <button data-value="fade">Fade</button>
-                    <button data-value="off">Off</button>
-                  </div>
-                </div>
-                <div class="field">
-                  <label class="label" for="animSpeed">Duration</label>
-                  <input id="animSpeed" type="range" min="80" max="400" step="10" />
-                  <output id="animSpeedOut" for="animSpeed"></output>
-                </div>
-                <div class="field">
-                  <span class="label">Feel</span>
-                  <div id="animEase" class="seg" role="group" aria-label="Animation feel">
-                    <button data-value="spring">Spring</button>
-                    <button data-value="snappy">Snappy</button>
-                    <button data-value="smooth">Smooth</button>
-                  </div>
-                </div>
-                <div class="field">
-                  <span class="label"></span>
-                  <button id="animPreview" class="chip">Preview</button>
-                </div>
-              </div>
-              <div class="set-item" data-keywords="whimsy whimsical playful fun delight bounce poof hop slide tab switch animation">
-                <h3>Whimsy</h3>
-                <label class="check">
-                  <input id="whimsy" type="checkbox" />
-                  <span>Add some play to the sidebar. New tabs pop in, closed ones vanish in a puff, rows glide into
-                    place, the tab you switch to hops and its page slides in, and finished downloads wiggle. Reduce
-                    motion in macOS turns it off.</span>
-                </label>
-              </div>
-            </section>
-
             <section class="set-section" data-section="restyling">
               <h2 class="set-section-title">Restyling</h2>
               <div class="set-item" data-keywords="restyle restyling css wand claude codex agent model sonnet opus haiku sites">
@@ -661,35 +662,6 @@
 
             <section class="set-section" data-section="privacy">
               <h2 class="set-section-title">Privacy</h2>
-              <div class="set-item" data-keywords="private addresses urls mask hide">
-                <h3>Private addresses</h3>
-                <p class="help">
-                  Addresses that contain one of these show as <b>Private</b> in the address bar and the tab list until you click
-                  the address bar. One per line; <code>*</code> matches anything, so <code>*.corp.example</code> covers every
-                  site under corp.example.
-                </p>
-                <textarea id="privateUrls" rows="5" spellcheck="false" placeholder="*.corp.example&#10;grafana.internal"></textarea>
-              </div>
-              <div class="set-item" data-keywords="dangerous sites phishing malware safe browsing deceptive warning blocklist">
-                <h3>Dangerous sites</h3>
-                <label class="check">
-                  <input id="dangerousSites" type="checkbox" />
-                  <span>Warn before opening a site known for phishing or malware. jbrow checks addresses against lists it
-                    downloads every 12 hours, so the sites you visit never leave your Mac.</span>
-                </label>
-                <p id="dangerLists" class="help"></p>
-              </div>
-              <div class="set-item" data-keywords="third party cookies tracking trackers cross site embedded sign in block">
-                <h3>Third-party cookies</h3>
-                <label class="check">
-                  <input id="blockThirdPartyCookies" type="checkbox" />
-                  <span>Block cookies from sites embedded in the page you're on, so ads and trackers can't follow you from
-                    site to site. Some sign-in buttons, comment boxes and embedded videos won't know who you are, and
-                    extensions lose their own sites' cookies. Applies to every profile.</span>
-                </label>
-                <p id="cookiesRestart" class="help" hidden>Takes effect when jbrow restarts.</p>
-                <button id="restartJbrow" class="chip" hidden>Restart jbrow</button>
-              </div>
               <div class="set-item" data-keywords="clear browsing data history visited pages suggestions cookies cache site data delete sign out storage">
                 <h3>Browsing data</h3>
                 <div class="field">
@@ -710,6 +682,35 @@
                 </label>
                 <button id="clearData" class="chip">Clear data…</button>
                 <p class="help">To clear one site, click the lock or warning icon next to the address bar.</p>
+              </div>
+              <div class="set-item" data-keywords="third party cookies tracking trackers cross site embedded sign in block">
+                <h3>Third-party cookies</h3>
+                <label class="check">
+                  <input id="blockThirdPartyCookies" type="checkbox" />
+                  <span>Block cookies from sites embedded in the page you're on, so ads and trackers can't follow you from
+                    site to site. Some sign-in buttons, comment boxes and embedded videos won't know who you are, and
+                    extensions lose their own sites' cookies. Applies to every profile.</span>
+                </label>
+                <p id="cookiesRestart" class="help" hidden>Takes effect when jbrow restarts.</p>
+                <button id="restartJbrow" class="chip" hidden>Restart jbrow</button>
+              </div>
+              <div class="set-item" data-keywords="dangerous sites phishing malware safe browsing deceptive warning blocklist">
+                <h3>Dangerous sites</h3>
+                <label class="check">
+                  <input id="dangerousSites" type="checkbox" />
+                  <span>Warn before opening a site known for phishing or malware. jbrow checks addresses against lists it
+                    downloads every 12 hours, so the sites you visit never leave your Mac.</span>
+                </label>
+                <p id="dangerLists" class="help"></p>
+              </div>
+              <div class="set-item" data-keywords="private addresses urls mask hide">
+                <h3>Private addresses</h3>
+                <p class="help">
+                  Addresses that contain one of these show as <b>Private</b> in the address bar and the tab list until you click
+                  the address bar. One per line; <code>*</code> matches anything, so <code>*.corp.example</code> covers every
+                  site under corp.example.
+                </p>
+                <textarea id="privateUrls" rows="5" spellcheck="false" placeholder="*.corp.example&#10;grafana.internal"></textarea>
               </div>
               <div class="set-item" data-keywords="screen sharing screenshots capture recording hide">
                 <h3>Screen sharing</h3>

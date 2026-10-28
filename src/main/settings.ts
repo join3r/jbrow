@@ -42,7 +42,7 @@ export interface Settings {
   animation: { style: AnimationStyle; durationMs: number; ease: AnimationEase }
   /** Playful animations in jbrow's own UI: tabs popping in and puffing away, pages sliding in as you switch tabs. */
   whimsy: boolean
-  /** %s is replaced by the encoded query. Pick one under General in settings, or any address with %s. */
+  /** %s is replaced by the encoded query. Pick one under Address bar in settings, or any address with %s. */
   searchUrl: string
   /** Ask the search engine for suggestions as you type in the address bar. Never for addresses or private ones. */
   searchSuggestions: boolean

@@ -1740,14 +1740,14 @@ const settingsSearch = $<HTMLInputElement>('settingsSearch')
 const shortcutSearch = $<HTMLInputElement>('shortcutSearch')
 const SECTION_NAMES: Record<string, string> = {
   general: 'General',
+  addressBar: 'Address bar',
   appearance: 'Appearance',
-  profiles: 'Profiles',
-  extensions: 'Extensions',
   threads: 'Tabs',
   archived: 'Archived',
+  profiles: 'Profiles',
   apps: 'Apps',
+  extensions: 'Extensions',
   miniPlayer: 'Mini player',
-  animation: 'Animation',
   restyling: 'Restyling',
   privacy: 'Privacy',
   shortcuts: 'Shortcuts',
