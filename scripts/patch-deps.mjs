@@ -380,6 +380,14 @@ const patches = [
     }
     const result = await this.impl.createTab(details, extension);`,
   },
+  {
+    file: 'node_modules/electron-chrome-web-store/dist/cjs/browser/index.js',
+    why: "extension updates: a failed check is logged, not left unhandled. It runs each time jbrow becomes active, and offline (or just after wake) its fetch timed out into a \"jbrow hit an error: fetch failed\" notification",
+    find: `  lastUpdateCheck = Date.now();
+  void updateExtensions(session);`,
+    replace: `  lastUpdateCheck = Date.now();
+  updateExtensions(session).catch((error) => console.warn("[extensions] update check failed:", error?.cause?.code ?? error?.message ?? error));`,
+  },
 ]
 
 let applied = 0
