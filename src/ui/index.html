@@ -106,6 +106,7 @@
           <button id="settingsButton" class="icon" data-icon="settings" title="Settings" aria-label="Settings" aria-pressed="false"></button>
         </div>
       </header>
+      <div id="filterPop" class="pop filter-pop" hidden role="menu" aria-label="Show profile"></div>
       <aside id="sidebar">
         <div id="pins" class="pins" role="list" aria-label="Pinned tabs"></div>
         <div id="pinDivider" class="pin-divider" role="separator" aria-orientation="horizontal" hidden
@@ -360,12 +361,26 @@
               <h2 class="set-section-title">Profiles</h2>
               <div class="set-item" data-keywords="profile profiles color rename delete default work personal logins cookies">
                 <p class="help">
-                  Each profile has its own logins, cookies and extensions. Click a name to rename it and the dot to change its
-                  color. Right-click a profile to make it the default, for links from other apps and for new tabs when nothing
-                  else decides, or to delete it.
+                  Each profile has its own logins, cookies and extensions. Click a name to rename it, the dot to change its
+                  color and the box next to it to give it an emoji (⌃⌘Space opens the emoji picker). Right-click a profile to
+                  make it the default, for links from other apps and for new tabs when nothing else decides, or to delete it.
                 </p>
                 <div id="profileList" class="profile-list"></div>
                 <button id="addProfile" class="chip">Add profile</button>
+              </div>
+              <div class="set-item" data-keywords="profile switcher filter all menu dropdown icons emoji compact">
+                <h3>Profile switcher</h3>
+                <div class="field">
+                  <span class="label">Style</span>
+                  <div id="profileSwitcher" class="seg" role="group" aria-label="Profile switcher">
+                    <button data-value="auto">Auto</button>
+                    <button data-value="menu">Menu</button>
+                  </div>
+                </div>
+                <p class="help">
+                  Auto shows every profile's name while they fit, then only the selected one's next to the others' icons, then
+                  only icons, and a menu when even those don't fit. Menu always shows a menu. Hidden with a single profile.
+                </p>
               </div>
             </section>
 

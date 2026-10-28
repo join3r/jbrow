@@ -42,6 +42,7 @@ const folderRules = $<HTMLTextAreaElement>('folderRules')
 const certPop = $('certPop')
 const devicePop = $('devicePop')
 const profilePop = $('profilePop')
+const filterPop = $('filterPop')
 const send = window.jbrow.send
 const welcome = initWelcome($('welcome'), send, () => syncOverlay())
 
@@ -140,11 +141,8 @@ function render() {
   if (!S) return
   const active = activeTab()
 
-  // The dots double as the legend for the colored bars on tab rows.
+  renderFilter()
   const dot = (p: { color?: string }) => (p.color ? `<span class="dot" style="background:${esc(p.color)}"></span>` : '')
-  $('filter').innerHTML = [{ id: 'all', name: 'All', color: '' }, ...S.profiles]
-    .map((p) => `<button data-filter="${esc(p.id)}" aria-pressed="${S!.filter === p.id}">${dot(p)}${esc(p.name)}</button>`)
-    .join('')
 
   const key = S.prefs.privateUrls.join('\n')
   if (key !== privateKey) {
@@ -402,6 +400,108 @@ function refreshPinnedActions() {
 )
 
 /** The address bar's profile: the tab's own, or the one Tab picked for what's being typed. */
+// ---------- profile switcher ----------
+
+/** How much of each profile the switcher shows, from most to least room needed. */
+type FilterFit = 'full' | 'selected' | 'icons' | 'menu'
+const FILTER_FITS: FilterFit[] = ['full', 'selected', 'icons', 'menu']
+const filterEl = $('filter')
+/** What the switcher was last fitted for, so it's only measured again when that changes. */
+let filterKey = ''
+
+const filterChoices = (): Profile[] => [{ id: 'all', name: 'All', color: '' }, ...S!.profiles]
+
+/** A profile's emoji, else its color dot, which doubles as the legend for the colored bars on tab rows. All gets a grid. */
+function profileMark(p: Profile) {
+  if (p.icon) return `<span class="mark emoji">${esc(p.icon)}</span>`
+  if (p.color) return `<span class="mark"><span class="dot" style="background:${esc(p.color)}"></span></span>`
+  return `<span class="mark">${icon('grid')}</span>`
+}
+
+function filterHtml(fit: FilterFit) {
+  const choices = filterChoices()
+  if (fit === 'menu') {
+    const cur = choices.find((p) => p.id === S!.filter) ?? choices[0]
+    return `<button class="filter-menu" aria-haspopup="menu" aria-expanded="${!filterPop.hidden}" title="Show profile">${profileMark(cur)}<span class="name">${esc(cur.name)}</span>${icon('down')}</button>`
+  }
+  return choices
+    .map((p) => {
+      const on = S!.filter === p.id
+      // In full, All stays a plain word, as the profiles' dots are what tells them apart.
+      const mark = fit === 'full' && p.id === 'all' ? '' : profileMark(p)
+      const label = fit === 'full' || (fit === 'selected' && on) ? esc(p.name) : ''
+      const title = label ? '' : ` title="${esc(p.name)}" aria-label="${esc(p.name)}"`
+      return `<button data-filter="${esc(p.id)}" aria-pressed="${on}"${title}>${mark}${label}</button>`
+    })
+    .join('')
+}
+
+/** Nothing cut off: no name in an ellipsis, no button pushed past the end. */
+const filterFits = () => filterEl.scrollWidth <= filterEl.clientWidth && [...filterEl.children].every((b) => b.scrollWidth <= b.clientWidth)
+
+/**
+ * The profile switcher above the tabs, hidden with a single profile. Every name while they fit,
+ * then only the selected one's beside the others' marks, then marks alone, then a menu; or always
+ * the menu, if you picked it in settings.
+ */
+function renderFilter() {
+  if (!S) return
+  filterEl.hidden = S.profiles.length < 2
+  if (filterEl.hidden) {
+    filterKey = ''
+    return setFilterPop(false)
+  }
+  const key = JSON.stringify([S.profiles, S.filter, S.prefs.profileSwitcher, !filterPop.hidden])
+  if (key === filterKey) return
+  const fits = S.prefs.profileSwitcher === 'menu' ? (['menu'] as const) : FILTER_FITS
+  for (const fit of fits) {
+    filterEl.dataset.fit = fit
+    filterEl.innerHTML = filterHtml(fit)
+    if (fit === 'menu' || filterFits()) break
+  }
+  // Not laid out yet, so nothing measured: fit again next time.
+  filterKey = filterEl.clientWidth ? key : ''
+  if (!filterPop.hidden) renderFilterPop()
+}
+const refitFilter = () => {
+  filterKey = ''
+  renderFilter()
+}
+new ResizeObserver(refitFilter).observe(filterEl)
+void document.fonts.ready.then(refitFilter)
+
+function renderFilterPop() {
+  filterPop.innerHTML = filterChoices()
+    .map(
+      (p) =>
+        `<button class="pop-item" role="menuitemradio" aria-checked="${S!.filter === p.id}" data-filter="${esc(p.id)}">${profileMark(p)}<span class="name">${esc(p.name)}</span></button>`,
+    )
+    .join('')
+}
+
+function setFilterPop(open: boolean) {
+  if (open === !filterPop.hidden) return
+  filterPop.hidden = !open
+  if (open) renderFilterPop()
+  filterEl.querySelector('.filter-menu')?.setAttribute('aria-expanded', String(open))
+}
+
+filterEl.addEventListener('click', (e) => {
+  const target = e.target as HTMLElement
+  if (target.closest('.filter-menu')) return setFilterPop(!!filterPop.hidden)
+  const b = target.closest<HTMLElement>('[data-filter]')
+  if (b) send('filter', { filter: b.dataset.filter })
+})
+filterPop.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-filter]')
+  if (!b) return
+  setFilterPop(false)
+  send('filter', { filter: b.dataset.filter })
+})
+document.addEventListener('mousedown', (e) => {
+  if (!filterPop.hidden && !(e.target as HTMLElement).closest('#filterPop, .filter-menu')) setFilterPop(false)
+})
+
 function renderProfileBand() {
   const active = activeTab()
   const p = active && profile(typedProfile ?? active.profile)
@@ -1327,10 +1427,6 @@ document.addEventListener('mousedown', (e) => {
 
 // ---------- toolbar ----------
 
-$('filter').addEventListener('click', (e) => {
-  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-filter]')
-  if (b) send('filter', { filter: b.dataset.filter })
-})
 $('scope').addEventListener('click', (e) => {
   if ((e.target as HTMLElement).closest('[data-unscope]')) send('unscope')
 })
@@ -1789,6 +1885,7 @@ function renderSettings(all = false) {
   seg('appearance', S.prefs.appearance)
   seg('themes', S.prefs.theme)
   seg('profileStyle', S.prefs.profileStyle)
+  seg('profileSwitcher', S.prefs.profileSwitcher)
   seg('animStyle', animation.style)
   seg('animEase', animation.ease)
   seg('summarizeAfter', String(S.prefs.summarizeAfterDays))
@@ -1939,6 +2036,10 @@ $('themes').innerHTML = THEMES.map(
 $('themes').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ theme: b.dataset.value as Prefs['theme'] })
+})
+$('profileSwitcher').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b) sendPrefs({ profileSwitcher: b.dataset.value as Prefs['profileSwitcher'] })
 })
 $('profileStyle').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
@@ -2458,6 +2559,7 @@ function renderProfiles() {
       .map(
         (p) => `<div class="profile-row" data-profile="${esc(p.id)}">
           <label class="swatch" title="Color"><input type="color" aria-label="Color of ${esc(p.name)}"></label>
+          <input class="emoji" spellcheck="false" placeholder="☺" title="Emoji, shown in the profile switcher in place of the dot" aria-label="Emoji of ${esc(p.name)}">
           <input class="name" spellcheck="false" aria-label="Name">
           <em></em>
         </div>`,
@@ -2470,6 +2572,8 @@ function renderProfiles() {
     const color = row.querySelector<HTMLInputElement>('input[type=color]')!
     if (document.activeElement !== name) name.value = p.name
     if (document.activeElement !== color) color.value = p.color
+    const emoji = row.querySelector<HTMLInputElement>('.emoji')!
+    if (document.activeElement !== emoji) emoji.value = p.icon ?? ''
     row.querySelector<HTMLElement>('.swatch')!.style.background = color.value
     const n = counts.get(p.id) ?? 0
     const notes = [n ? `${n} ${n === 1 ? 'tab' : 'tabs'}` : 'no tabs', p.id === S.prefs.defaultProfile ? 'default' : '']
@@ -2494,6 +2598,7 @@ function saveProfileName(input: HTMLInputElement) {
 profileListEl.addEventListener('change', (e) => {
   const input = e.target as HTMLInputElement
   if (input.classList.contains('name')) saveProfileName(input)
+  else if (input.classList.contains('emoji')) send('profile', { id: profileOf(input), icon: input.value })
   else if (input.type === 'color') send('profile', { id: profileOf(input), color: input.value })
 })
 // The color well updates live while you pick, and is saved when the picker closes.
@@ -2503,11 +2608,13 @@ profileListEl.addEventListener('input', (e) => {
 })
 profileListEl.addEventListener('keydown', (e) => {
   const input = e.target as HTMLInputElement
-  if (!input.classList.contains('name')) return
+  const emoji = input.classList.contains('emoji')
+  if (!emoji && !input.classList.contains('name')) return
   if (e.key === 'Enter') input.blur()
   else if (e.key === 'Escape') {
     e.stopPropagation()
-    input.value = S?.profiles.find((p) => p.id === profileOf(input))?.name ?? input.value
+    const p = S?.profiles.find((x) => x.id === profileOf(input))
+    if (p) input.value = emoji ? (p.icon ?? '') : p.name
     input.blur()
   }
 })
@@ -2770,6 +2877,7 @@ document.addEventListener('keydown', (e) => {
   } else if (!rulesPop.hidden) closeRules()
   else if (!devicePop.hidden) answerDevice(null)
   else if (!profilePop.hidden) setProfilePop(false)
+  else if (!filterPop.hidden) setFilterPop(false)
   else if (!certPop.hidden) setCert(false)
   else if (!restylePane.hidden) setRestyle(false)
   else if (!extPop.hidden) setExtensions(false)

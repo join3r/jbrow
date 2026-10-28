@@ -196,6 +196,7 @@ function state(): UiState {
       appearance: settings.appearance,
       theme: settings.theme,
       profileStyle: settings.profileStyle,
+      profileSwitcher: settings.profileSwitcher,
       animation: settings.animation,
       whimsy: settings.whimsy,
       privateUrls: settings.privateUrls,
@@ -976,6 +977,7 @@ function updatePrefs(prefs: Partial<Prefs>) {
   }
   if (THEMES.some((t) => t.id === prefs.theme)) settings.theme = prefs.theme!
   if (prefs.profileStyle === 'tint' || prefs.profileStyle === 'edge' || prefs.profileStyle === 'solid') settings.profileStyle = prefs.profileStyle
+  if (prefs.profileSwitcher === 'auto' || prefs.profileSwitcher === 'menu') settings.profileSwitcher = prefs.profileSwitcher
   if (prefs.animation) settings.animation = { ...settings.animation, ...prefs.animation }
   if (typeof prefs.whimsy === 'boolean') settings.whimsy = prefs.whimsy
   if (prefs.privateUrls) settings.privateUrls = prefs.privateUrls.map((p) => p.trim()).filter(Boolean)
@@ -1752,12 +1754,18 @@ async function addProfile(rename = true) {
   }
 }
 
-function updateProfile(id: string, change: { name?: string; color?: string }) {
+function updateProfile(id: string, change: { name?: string; color?: string; icon?: string }) {
   const profile = settings.profiles.find((p) => p.id === id)
   if (!profile) return
   const name = change.name?.trim()
   if (name) profile.name = name
   if (change.color && /^#[0-9a-f]{6}$/i.test(change.color)) profile.color = change.color
+  if (typeof change.icon === 'string') {
+    // One emoji, even one built from several code points (flags, skin tones, families), or two letters.
+    const icon = [...new Intl.Segmenter().segment(change.icon.trim())].slice(0, 2).map((s) => s.segment).join('')
+    if (icon) profile.icon = icon
+    else delete profile.icon
+  }
   saveSettings(settings)
   sendProfiles()
 }
@@ -2215,7 +2223,7 @@ function wireIpc() {
   on('add-app', () => void addApp())
   on<{ rename?: boolean } | undefined>('add-profile', (data) => void addProfile(data?.rename !== false))
   on<{ id: string }>('delete-profile', ({ id }) => void deleteProfile(id))
-  on<{ id: string; name?: string; color?: string }>('profile', ({ id, ...change }) => updateProfile(id, change))
+  on<{ id: string; name?: string; color?: string; icon?: string }>('profile', ({ id, ...change }) => updateProfile(id, change))
   on<{ id: string }>('profile-menu', ({ id }) => profileMenu(id))
   on<{ id: string }>('default-profile', ({ id }) => setDefaultProfile(id))
   on('default-browser', () => sendDefaultBrowser())

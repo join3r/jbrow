@@ -150,11 +150,29 @@ button:focus-visible, input:focus-visible, [role='button']:focus-visible { outli
 /* ---------- toolbar ---------- */
 #toolbar { position: absolute; z-index: 1; top: 0; left: 0; right: 0; height: var(--toolbar); display: flex; align-items: center; -webkit-app-region: drag; }
 #toolbar > *, .tools > * { -webkit-app-region: no-drag; }
-.side-tools { width: calc(var(--sidebar) - 16px); margin: 0 8px; display: flex; align-items: center; gap: 4px; }
+.side-tools { width: calc(var(--sidebar) - 16px); margin: 0 8px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 #filter { flex: 1; min-width: 0; }
 /* Sized by label and never bold when selected, so picking one doesn't push "Personal" into an ellipsis. */
 #filter button { flex: 1 1 auto; padding: 4px 6px; }
 #filter button[aria-pressed='true'] { font-weight: inherit; }
+/* Short of room, profiles shrink to their mark (emoji, else color dot) with the name on hover; see renderFilter. */
+#filter .mark { flex: none; display: inline-grid; place-items: center; vertical-align: middle; }
+#filter .mark .dot { margin: 0; width: 8px; height: 8px; vertical-align: 0; }
+#filter .mark svg.i { width: 13px; height: 13px; }
+#filter .emoji { font-size: 13px; line-height: 1; }
+#filter[data-fit='full'] .mark, #filter[data-fit='selected'] [aria-pressed='true'] .mark { margin-right: 5px; }
+#filter[data-fit='selected'] button:not([aria-pressed='true']) { flex: 0 0 26px; }
+#filter[data-fit='icons'] button { flex: 1 1 0; min-width: 24px; }
+#filter .filter-menu { display: flex; align-items: center; gap: 5px; padding: 4px 6px; text-align: left; color: var(--ink); }
+#filter .filter-menu .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#filter .filter-menu > svg.i { flex: none; width: 13px; height: 13px; color: var(--muted); }
+#filter .filter-menu:hover, #filter .filter-menu[aria-expanded='true'] { background: var(--hover); }
+/* Outside the toolbar, which the sidebar would paint over. */
+.pop.filter-pop { top: calc(var(--toolbar) - 4px); left: 8px; right: auto; width: auto; min-width: 180px; max-width: calc(var(--sidebar) - 16px); }
+.filter-pop .pop-item .mark { flex: none; width: 15px; display: inline-grid; place-items: center; }
+.filter-pop .pop-item .dot { width: 8px; height: 8px; border-radius: 50%; }
+.filter-pop .pop-item .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-pop .pop-item[aria-checked='true'] { font-weight: 600; }
 .tools { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding-right: var(--gutter); -webkit-app-region: drag; }
 .seg { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; }
 .seg button { flex: 1; min-width: 0; border: 0; background: none; border-radius: 6px; padding: 4px 2px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -673,7 +691,12 @@ body.resizing, body.resizing * { cursor: col-resize !important; }
 .ext-row:hover .ext-acts, .ext-acts:focus-within { visibility: visible; }
 
 .profile-list { margin-bottom: 10px; }
-.profile-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 3px 0; }
+.profile-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 3px 0; }
+.profile-row .emoji { width: 28px; height: 24px; padding: 0; text-align: center; font-size: 14px; color: var(--ink); background: none; border: 1px dashed var(--line); border-radius: 6px; }
+.profile-row .emoji:not(:placeholder-shown) { border-style: solid; border-color: transparent; }
+.profile-row .emoji:hover { border-color: var(--line); }
+.profile-row .emoji:focus { border: 1px solid var(--accent); background: var(--selected); outline: none; }
+.profile-row .emoji::placeholder { color: var(--muted); opacity: 0.6; }
 .swatch { position: relative; width: 22px; height: 22px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--line); cursor: pointer; }
 .swatch input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
 .profile-row .name { font: inherit; color: var(--ink); background: none; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; margin-left: -6px; min-width: 0; }

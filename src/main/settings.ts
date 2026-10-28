@@ -2,7 +2,7 @@ import { app, type Rectangle } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ActionId } from '../shared/shortcuts'
-import { THEMES, URL_BAR_STYLES, type UrlBarStyle, type Appearance, type KeepLoaded, type MiniPlayerPrefs, type NewTabsAt, type NumberFrom, type Profile, type ProfileStyle, type RestyleAgent, type ThemeId } from '../shared/types'
+import { THEMES, URL_BAR_STYLES, type UrlBarStyle, type Appearance, type KeepLoaded, type MiniPlayerPrefs, type NewTabsAt, type NumberFrom, type Profile, type ProfileStyle, type ProfileSwitcher, type RestyleAgent, type ThemeId } from '../shared/types'
 
 export type AnimationStyle = 'materialize' | 'slide' | 'scale' | 'fade' | 'off'
 export type AnimationEase = 'spring' | 'snappy' | 'smooth'
@@ -28,6 +28,8 @@ export interface Settings {
   theme: ThemeId
   /** How the address bar shows the tab's profile. */
   profileStyle: ProfileStyle
+  /** How the profile switcher above the tabs shows the profiles. */
+  profileSwitcher: ProfileSwitcher
   /** Your keys for jbrow's own commands, as Electron accelerators, '' for none. Unlisted commands use their defaults (see ACTIONS). */
   shortcuts: Partial<Record<ActionId, string>>
   profiles: Profile[]
@@ -106,6 +108,7 @@ const DEFAULTS: Settings = {
   appearance: 'system',
   theme: 'teal',
   profileStyle: 'tint',
+  profileSwitcher: 'auto',
   shortcuts: {},
   profiles: [
     { id: 'work', name: 'Work', color: '#2f9aab' },
@@ -189,6 +192,7 @@ export function loadSettings(): Settings {
     if (!THEMES.some((t) => t.id === settings.theme)) settings.theme = DEFAULTS.theme
     if (!URL_BAR_STYLES.includes(settings.urlBarStyle)) settings.urlBarStyle = DEFAULTS.urlBarStyle
     if (!['tint', 'edge', 'solid'].includes(settings.profileStyle)) settings.profileStyle = DEFAULTS.profileStyle
+    if (!['auto', 'menu'].includes(settings.profileSwitcher)) settings.profileSwitcher = DEFAULTS.profileSwitcher
     if (hotkeys?.all && settings.shortcuts.show === undefined) settings.shortcuts.show = hotkeys.all
     if (hotkeys?.app && settings.shortcuts.showApp === undefined) settings.shortcuts.showApp = hotkeys.app
     return settings

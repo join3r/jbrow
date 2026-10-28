@@ -4,6 +4,8 @@ export interface Profile {
   id: string
   name: string
   color: string
+  /** An emoji or a character or two, shown in place of the color dot in the profile switcher. */
+  icon?: string
 }
 
 /** One tab as persisted. A tab without a parent is a thread; tabs with children are sub-threads. */
@@ -150,11 +152,15 @@ export type Appearance = 'system' | 'light' | 'dark'
 /** How the address bar shows the tab's profile: a tint behind back, reload and its name, the tint with a solid edge, or the full color. */
 export type ProfileStyle = 'tint' | 'edge' | 'solid'
 
+/** The profile switcher above the tabs: labels, then icons, as room allows (auto), or always a menu. */
+export type ProfileSwitcher = 'auto' | 'menu'
+
 /** The settings the settings screen edits. Everything else stays in settings.json. */
 export interface Prefs {
   appearance: Appearance
   theme: ThemeId
   profileStyle: ProfileStyle
+  profileSwitcher: ProfileSwitcher
   animation: { style: AnimMessage['style']; durationMs: number; ease: AnimMessage['ease'] }
   /** Playful animations in jbrow's own UI. */
   whimsy: boolean
