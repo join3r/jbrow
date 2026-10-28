@@ -1,6 +1,6 @@
 import { app, BrowserWindow, Menu, WebContentsView, clipboard, shell, type Rectangle, type WebContents } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { bezier } from '../shared/ease'
@@ -16,6 +16,7 @@ import { faviconUrl } from './favicons'
 import type { Logins } from './logins'
 import type { SitePermissions } from './permissions'
 import type { ProfileRuntime } from './profiles'
+import { setAside, writeAtomic } from './json-file'
 
 interface LiveTab {
   view: WebContentsView
@@ -272,6 +273,7 @@ export class Tabs {
       this.renumber()
     } catch (error) {
       console.error('[tabs] could not read tabs.json, starting empty:', error)
+      setAside(storePath())
     }
     if (!existsSync(historyPath())) return
     try {
@@ -279,6 +281,7 @@ export class Tabs {
       for (const [id, h] of Object.entries(histories)) if (h.entries?.length) this.histories.set(id, h)
     } catch (error) {
       console.error('[tabs] could not read history.json, tabs start without back and forward:', error)
+      setAside(historyPath())
     }
   }
 
@@ -291,7 +294,7 @@ export class Tabs {
     if (this.saveTimer) clearTimeout(this.saveTimer)
     this.saveTimer = null
     const data = { tabs: this.records, activeId: this.activeId, folders: this.folders, splits: this.splits, archived: this.archived }
-    writeFileSync(storePath(), JSON.stringify(data, null, 2))
+    writeAtomic(storePath(), JSON.stringify(data, null, 2))
     this.flushHistory()
   }
 
@@ -307,7 +310,7 @@ export class Tabs {
     for (const id of this.live.keys()) this.captureHistory(id)
     const ids = new Set([...this.records, ...this.archived].map((t) => t.id))
     for (const id of this.histories.keys()) if (!ids.has(id)) this.histories.delete(id)
-    writeFileSync(historyPath(), JSON.stringify(Object.fromEntries(this.histories)))
+    writeAtomic(historyPath(), JSON.stringify(Object.fromEntries(this.histories)))
   }
 
   /** The back and forward list of a tab's page, or the saved one if it has no page. */
@@ -727,7 +730,9 @@ export class Tabs {
     })
 
     wc.on('destroyed', () => {
-      this.sentAt.delete(id)
+      // A view that was replaced (moved to another profile, woken after sleeping, reopened) goes
+      // after its successor started: what's kept by tab is the new page's then, not this one's.
+      if (this.live.has(id) && this.live.get(id)?.wc !== wc) return
       // A page that agreed to close: now the tab goes.
       const closing = this.closing.get(id)
       if (closing) {
@@ -735,8 +740,8 @@ export class Tabs {
         if (this.live.get(id)?.wc === wc) this.close(id, closing.remember, closing.history, closing.remove)
         closing.done(true)
       }
+      this.sentAt.delete(id)
       if (this.fullscreenId === id) this.setFullscreen(null)
-      // A crashed page's view may have been replaced by now; only forget this one.
       if (this.live.get(id)?.wc === wc) this.live.delete(id)
       this.killing.delete(id)
       this.deps.certs.clear(id)
@@ -773,10 +778,11 @@ export class Tabs {
     if (crash) this.crashed.set(id, crash)
     else if (!this.crashed.delete(id)) return
     this.deps.onChange()
-    if (id !== this.activeId) return
+    // A pane beside the active tab is on screen too.
+    if (!this.shown().includes(id)) return
     this.layout()
     // Keyboard focus moves to jbrow's crash screen, so ⌘R still works, and back to the page after.
-    this.deps.onActivated()
+    if (id === this.activeId) this.deps.onActivated()
   }
 
   /** Why the tab's page is gone or stuck, if it is. */
@@ -1042,6 +1048,8 @@ export class Tabs {
     // Its back and forward list is still coming back, which would take over; it goes there after.
     else if (this.restoring.has(rec.id)) this.restoring.set(rec.id, url)
     else if (live.wc.getURL() !== url) void live.wc.loadURL(url).catch(() => {})
+    // The same address again loads it again, as in Chrome: it may have failed (offline) the first time.
+    else live.wc.reload()
     this.activate(rec.id)
   }
 
@@ -1061,9 +1069,11 @@ export class Tabs {
 
   /** The https address didn't work out: the tab goes to http instead. */
   private fallBack(id: string, wc: WebContents) {
+    // A timer from a page that's gone since (slept, moved) leaves its successor's upgrade alone.
+    if (wc.isDestroyed() || this.live.get(id)?.wc !== wc) return
     const u = this.upgrades.get(id)
     this.clearUpgrade(id)
-    if (!u || wc.isDestroyed()) return
+    if (!u) return
     this.fellBack.set(id, u.https)
     const rec = this.get(id)
     if (rec) rec.url = u.http

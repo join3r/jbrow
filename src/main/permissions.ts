@@ -1,8 +1,9 @@
 import { app, dialog, type BrowserWindow, type Session, type WebContents } from 'electron'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { Profile } from '../shared/types'
 import { thirdPartyCookiesBlocked } from './third-party-cookies'
+import { setAside, writeAtomic } from './json-file'
 
 /** Granted without asking, as Chrome does. display-capture asks with its own menu (see screenshare.ts). */
 const ALWAYS = new Set([
@@ -161,6 +162,7 @@ export class SitePermissions {
       this.store = JSON.parse(readFileSync(storePath(), 'utf8')) as Store
     } catch (error) {
       console.error('[permissions] permissions.json is not valid JSON, starting over:', error)
+      setAside(storePath())
     }
   }
 
@@ -174,7 +176,11 @@ export class SitePermissions {
       if (STORAGE_ACCESS.has(permission)) return callback(!thirdPartyCookiesBlocked())
       if (!wanted.every((p) => describe(p))) return callback(false)
       // The name is read when asking, so a profile renamed in settings asks under its new name.
-      void this.ask(wc, profileId, profile.name, origin, wanted, extensionOf(sess, origin)?.name).then(callback)
+      // A prompt that fails denies, rather than leaving the page waiting for an answer.
+      void this.ask(wc, profileId, profile.name, origin, wanted, extensionOf(sess, origin)?.name).then(callback, (error) => {
+        console.error('[permissions] could not ask:', error)
+        callback(false)
+      })
     })
     sess.setPermissionCheckHandler((_wc, permission, requestingOrigin, details) => {
       const origin = originOf(requestingOrigin)
@@ -285,7 +291,7 @@ export class SitePermissions {
         }
         return allow
       })
-      prompt.finally(() => this.pending.delete(key))
+      void prompt.finally(() => this.pending.delete(key)).catch(() => {})
       this.pending.set(key, prompt)
     }
     return prompt
@@ -312,7 +318,12 @@ export class SitePermissions {
     return { allow: response === 1, remember: remembers && checkboxChecked }
   }
 
+  /** A disk that won't take it costs the remembering, not the answer you gave. */
   private save() {
-    writeFileSync(storePath(), JSON.stringify(this.store, null, 2))
+    try {
+      writeAtomic(storePath(), JSON.stringify(this.store, null, 2))
+    } catch (error) {
+      console.error('[permissions] could not save permissions.json:', error)
+    }
   }
 }

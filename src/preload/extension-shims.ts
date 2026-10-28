@@ -219,13 +219,17 @@ function shims(
       if (entry) clearTimeout(entry.timer)
       return alarms.delete(name)
     }
+    // A timer longer than this fires at once, so a far alarm waits in steps.
+    const LONGEST = 2 ** 31 - 1
     const schedule = (alarm: Alarm) => {
+      const wait = Math.max(0, alarm.scheduledTime - Date.now())
       const timer = setTimeout(() => {
+        if (wait > LONGEST) return schedule(alarm)
         if (alarm.periodInMinutes) {
           schedule({ ...alarm, scheduledTime: Date.now() + alarm.periodInMinutes * 60_000 })
         } else alarms.delete(alarm.name)
         onAlarm.dispatch({ ...alarm })
-      }, Math.max(0, alarm.scheduledTime - Date.now()))
+      }, Math.min(wait, LONGEST))
       alarms.set(alarm.name, { alarm, timer })
     }
     // Callers may pass a callback or use the promise.

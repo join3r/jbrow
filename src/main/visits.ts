@@ -1,7 +1,8 @@
 import { app, net } from 'electron'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { CompletionView, VisitView } from '../shared/types'
+import { setAside, writeAtomic } from './json-file'
 
 /** One page in the browsing history. */
 interface Visit {
@@ -63,6 +64,7 @@ export class BrowsingHistory {
       this.prune()
     } catch (error) {
       console.error('[visits] could not read visits.json, starting without history:', error)
+      setAside(visitsPath())
     }
   }
 
@@ -77,7 +79,7 @@ export class BrowsingHistory {
     this.timer = null
     this.prune()
     const data = Object.fromEntries([...this.profiles].map(([profile, map]) => [profile, [...map.values()]]))
-    writeFileSync(visitsPath(), JSON.stringify(data))
+    writeAtomic(visitsPath(), JSON.stringify(data))
   }
 
   /** Drops pages older than 90 days, then the lowest-ranked ones over the cap. */

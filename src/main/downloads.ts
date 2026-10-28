@@ -145,7 +145,8 @@ export class Downloads {
     if (this.entries.size !== before) this.push(true)
   }
 
-  private add(sess: Session, profile: string, item: DownloadItem, wc: WebContents) {
+  /** `wc` is missing for a download with no page, as a retry is (Session.downloadURL). */
+  private add(sess: Session, profile: string, item: DownloadItem, wc: WebContents | null | undefined) {
     const id = `d${++this.seq}`
     const dir = app.getPath('downloads')
     mkdirSync(dir, { recursive: true })
@@ -170,7 +171,6 @@ export class Downloads {
     }
     this.entries.set(id, e)
     console.log(`[downloads] ${profile}: from ${origin(item.getURL())} -> ${savePath}`)
-    this.checkPage(e, wc)
 
     item.on('updated', (_event, state) => {
       if (!this.entries.has(id)) return
@@ -200,8 +200,9 @@ export class Downloads {
       this.push(true)
     })
 
+    if (wc) this.checkPage(e, wc)
     this.push(true)
-    if (!wc.isDestroyed()) this.hooks.onStarted(wc)
+    if (wc && !wc.isDestroyed()) this.hooks.onStarted(wc)
   }
 
   /**

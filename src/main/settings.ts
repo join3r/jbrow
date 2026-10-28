@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ActionId } from '../shared/shortcuts'
 import { THEMES, URL_BAR_STYLES, type UrlBarStyle, type Appearance, type KeepLoaded, type MiniPlayerPrefs, type NewTabsAt, type NumberFrom, type Profile, type ProfileStyle, type ProfileSwitcher, type RestyleAgent, type ThemeId } from '../shared/types'
+import { setAside, writeAtomic } from './json-file'
 
 export type AnimationStyle = 'materialize' | 'slide' | 'scale' | 'fade' | 'off'
 export type AnimationEase = 'spring' | 'snappy' | 'smooth'
@@ -202,6 +203,7 @@ export function loadSettings(): Settings {
     return settings
   } catch (error) {
     console.error(`[settings] ${file} is not valid JSON, using defaults:`, error)
+    setAside(file)
     return structuredClone(DEFAULTS)
   }
 }
@@ -217,7 +219,7 @@ function hasStyledSites(): boolean {
 
 /** Writes settings back to settings.json, for changes made in the settings screen. */
 export function saveSettings(settings: Settings) {
-  writeFileSync(settingsPath(), JSON.stringify(settings, null, 2))
+  writeAtomic(settingsPath(), JSON.stringify(settings, null, 2))
 }
 
 /** The scope key for an app: its linked group if it has one, otherwise its own bundle ID. */

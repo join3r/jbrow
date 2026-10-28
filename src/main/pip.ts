@@ -49,6 +49,9 @@ const EXIT = `document.pictureInPictureElement ? document.exitPictureInPicture()
 export class MiniPlayer {
   private frame: WebFrameMain | null = null
   private wc: WebContents | null = null
+  /** Counts enter() and exit() calls, so an enter that finishes after an exit undoes itself. */
+  private attempt = 0
+  private entering: WebContents | null = null
 
   /** `backToTab` runs with the video's page when the PiP window's "back to tab" button closes it. */
   constructor(private backToTab: (wc: WebContents) => void) {}
@@ -57,15 +60,27 @@ export class MiniPlayer {
     return this.frame !== null
   }
 
-  /** The page whose video is in PiP, if jbrow put it there. */
+  /** The page whose video is in PiP, if jbrow put it there, or on its way there. */
   get webContents() {
-    return this.frame ? this.wc : null
+    return this.frame ? this.wc : this.entering
   }
 
   async enter(wc: WebContents | null, mutedToo = false) {
     if (!wc || wc.isDestroyed() || wc.isCrashed() || (this.frame && this.wc === wc) || (!mutedToo && wc.isAudioMuted())) return
+    // exit() while this still waits on the page means jbrow is back: the video stays in it.
+    const attempt = ++this.attempt
+    this.entering = wc
+    try {
+      await this.tryEnter(wc, mutedToo, attempt)
+    } finally {
+      if (attempt === this.attempt) this.entering = null
+    }
+  }
+
+  private async tryEnter(wc: WebContents, mutedToo: boolean, attempt: number) {
     const frames = wc.mainFrame.framesInSubtree
     const sizes = await Promise.all(frames.map((f) => f.executeJavaScript(probe(mutedToo)).catch(() => 0) as Promise<number>))
+    if (attempt !== this.attempt) return
     const best = sizes.indexOf(Math.max(...sizes))
     if (best < 0 || !sizes[best]) return
     const frame = frames[best]
@@ -80,6 +95,10 @@ export class MiniPlayer {
       if (!(await run(enter(mutedToo), true))) return
     } catch (err) {
       debug('enter failed', err)
+      return
+    }
+    if (attempt !== this.attempt) {
+      void frame.executeJavaScript(EXIT).catch(() => {})
       return
     }
     debug('entered', frame.url)
@@ -98,6 +117,8 @@ export class MiniPlayer {
   }
 
   exit() {
+    this.attempt++
+    this.entering = null
     const { frame, wc } = this
     this.frame = null
     if (!frame || !wc || wc.isDestroyed()) return

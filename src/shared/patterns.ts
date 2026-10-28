@@ -21,10 +21,13 @@ export function urlMatcher(patterns: string[]): (url: string) => boolean {
  */
 export function siteProfile(sites: Record<string, string[]>, url: string): string | undefined {
   let target: string
+  let withPort: string
   try {
     const u = new URL(url)
     if (u.protocol !== 'https:' && u.protocol !== 'http:') return undefined
     target = u.hostname + u.pathname
+    // `localhost:3000` is only that port; `localhost` is any.
+    withPort = u.host + u.pathname
   } catch {
     return undefined
   }
@@ -32,7 +35,7 @@ export function siteProfile(sites: Record<string, string[]>, url: string): strin
   for (const [profile, patterns] of Object.entries(sites)) {
     for (const raw of patterns) {
       const p = raw.trim().replace(/^[a-z]+:\/\//i, '')
-      if (!p || (best && p.length <= best.length) || !siteRegExp(p).test(target)) continue
+      if (!p || (best && p.length <= best.length) || !siteRegExp(p).test(/^[^/]*:/.test(p) ? withPort : target)) continue
       best = { profile, length: p.length }
     }
   }

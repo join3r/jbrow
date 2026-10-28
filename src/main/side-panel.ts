@@ -1,11 +1,12 @@
 import { app, Menu, WebContentsView, type BrowserWindow, type Rectangle, type WebContents } from 'electron'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { SidePanelState } from '../shared/types'
 import { iconOf } from './extension-files'
 import { libraryOf, permissionsOf } from './library'
 import { GUTTER, SIDE_GAP, SIDEBAR_WIDTH } from './panel'
 import type { ProfileRuntime } from './profiles'
+import { setAside, writeAtomic } from './json-file'
 
 /** The side panel never gets narrower than this, and leaves the page at least PAGE_MIN. */
 const MIN_WIDTH = 240
@@ -74,11 +75,12 @@ export class SidePanels {
       if (existsSync(storePath())) this.saved = JSON.parse(readFileSync(storePath(), 'utf8'))
     } catch (error) {
       console.error('[side-panel] could not read side-panel.json:', error)
+      setAside(storePath())
     }
   }
 
   private save() {
-    writeFileSync(storePath(), JSON.stringify(this.saved, null, 2))
+    writeAtomic(storePath(), JSON.stringify(this.saved, null, 2))
   }
 
   private savedFor(profile: string, extId: string): Saved {
@@ -254,7 +256,8 @@ export class SidePanels {
     if (!this.shown()) return 0
     const [w] = this.hooks.window().getContentSize()
     const max = w - SIDEBAR_WIDTH - GUTTER - SIDE_GAP - PAGE_MIN
-    return Math.max(Math.min(MIN_WIDTH, max), Math.min(this.hooks.width(), max))
+    // A window too narrow for the page and the panel leaves the panel no room at all, not less than none.
+    return Math.max(0, Math.min(MIN_WIDTH, max), Math.min(this.hooks.width(), max))
   }
 
   resize(width: number, save: boolean) {

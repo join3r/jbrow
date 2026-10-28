@@ -293,7 +293,11 @@ function extensionViews(): ExtensionView[] {
   return views.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-const isInside = (file: string, dir: string) => !path.relative(dir, file).startsWith('..')
+const isInside = (file: string, dir: string) => {
+  const rel = path.relative(dir, file)
+  // On Windows another drive's path comes back whole; `..foo` is a name inside.
+  return !path.isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${path.sep}`)
+}
 
 let extensionsQueued = false
 function sendExtensions() {
@@ -1097,12 +1101,16 @@ function printPage(wc: Electron.WebContents) {
   app.focus({ steal: true })
   void whileDialog(
     () =>
-      new Promise<void>((resolve) =>
+      new Promise<void>((resolve) => {
+        // A page closed while its print dialog is up may never call back; the dialog still ends.
+        const gone = () => resolve()
+        wc.once('destroyed', gone)
         wc.print({}, (ok, reason) => {
+          if (!wc.isDestroyed()) wc.off('destroyed', gone)
           if (!ok && reason && !/cancel/i.test(reason)) toast(`Couldn't print: ${reason}`)
           resolve()
-        }),
-      ),
+        })
+      }),
   )
 }
 
@@ -1391,7 +1399,10 @@ function certAction(action: 'proceed' | 'back' | 'distrust') {
     if (!view) return
     certs.distrust(rec.profile, view.host)
     // An open connection would carry on without checking the certificate again.
-    void wc.session.closeAllConnections().then(() => wc.reload())
+    void wc.session
+      .closeAllConnections()
+      .then(() => !wc.isDestroyed() && wc.reload())
+      .catch(() => {})
   }
 }
 
@@ -1528,7 +1539,9 @@ async function clearSiteData() {
       await rt.session.cookies.remove(`http${c.secure ? 's' : ''}://${c.domain.replace(/^\./, '')}${c.path ?? '/'}`, c.name)
     }
     const hosts = new Set([host, site, `www.${site}`])
-    const origins = [...hosts].flatMap((h) => [`https://${h}`, `http://${h}`])
+    // An origin includes its port: localhost:5173's storage isn't localhost's.
+    const port = new URL(rec.url).port
+    const origins = [...hosts].flatMap((h) => [`https://${h}`, `http://${h}`]).map((o) => (port ? `${o}:${port}` : o))
     await rt.session.clearData({ dataTypes: SITE_DATA.filter((t) => t !== 'cookies'), origins })
     if (!wc.isDestroyed()) wc.reload()
     toast(`Cleared cookies and site data for ${site}.`)
@@ -2533,8 +2546,13 @@ app.whenReady().then(async () => {
   panel.setPinned(settings.pinned)
   panel.ui.on('render-process-gone', (_e, details) => console.error('[jbrow] UI renderer gone:', details))
   // A UI that (re)loads has no archived list yet, and one sent while it was loading went nowhere.
+  // Nor is it recording a shortcut, showing settings or covering the page any more, whatever the
+  // old one said last.
   panel.ui.on('did-finish-load', () => {
     archivedSent = -1
+    setRecording(false)
+    settingsShown = false
+    panel.setOverlay(false)
     pushState()
   })
   panel.ui.on('before-input-event', (event, input) => {

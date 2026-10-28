@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { beforeEach, test } from 'node:test'
 import { userData } from '../mocks/electron'
@@ -37,11 +37,21 @@ test('a fresh install after the first run is still unwelcomed', () => {
   assert.equal(loadSettings().welcomed, false)
 })
 
-test('corrupt JSON falls back to defaults without touching the file', () => {
+test('corrupt JSON falls back to defaults and keeps the file aside, for the next save not to overwrite', () => {
   write('{"theme": "ocean",')
   const s = quiet(() => loadSettings())
   assert.equal(s.theme, 'teal')
-  assert.equal(readFileSync(settingsPath(), 'utf8'), '{"theme": "ocean",')
+  assert.ok(!existsSync(settingsPath()))
+  const aside = readdirSync(userData).filter((f) => f.startsWith('settings.json.bad-'))
+  assert.equal(aside.length, 1)
+  assert.equal(readFileSync(path.join(userData, aside[0]), 'utf8'), '{"theme": "ocean",')
+  rmSync(path.join(userData, aside[0]))
+})
+
+test('saving writes the whole file in one go, leaving no temporary file', () => {
+  saveSettings(loadSettings())
+  assert.ok(!existsSync(`${settingsPath()}.tmp`))
+  assert.equal(JSON.parse(readFileSync(settingsPath(), 'utf8')).theme, 'teal')
 })
 
 test('JSON that is not an object falls back to defaults', () => {

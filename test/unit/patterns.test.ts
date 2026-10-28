@@ -92,6 +92,13 @@ describe('siteProfile', () => {
     assert.equal(siteProfile({ work: ['https://jira.example'] }, 'https://jira.example/browse/X-1'), 'work')
   })
 
+  test('a port in the site is only that port; without one, any port', () => {
+    const sites = { dev: ['localhost:3000'], other: ['intranet'] }
+    assert.equal(siteProfile(sites, 'http://localhost:3000/app'), 'dev')
+    assert.equal(siteProfile(sites, 'http://localhost:4000/app'), undefined)
+    assert.equal(siteProfile(sites, 'https://intranet:8443/x'), 'other')
+  })
+
   test('only web addresses', () => {
     assert.equal(siteProfile({ p: ['*'] }, 'about:blank'), undefined)
     assert.equal(siteProfile({ p: ['*'] }, 'not a url'), undefined)

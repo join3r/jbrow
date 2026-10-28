@@ -167,6 +167,28 @@ test('a page gets its site’s latest stylesheet when it navigates', async () =>
   assert.deepEqual([...wc.inserted.values()], ['a { color: blue; }'])
 })
 
+test('two styles at once leave one stylesheet on the page', async () => {
+  store({ 'example.com': { enabled: true, changes: [change('red', 'a { color: red; }')] } })
+  const wc = fakePage('https://example.com/')
+  const { r } = restyler([wc])
+  r.load()
+  r.onNavigate(wc as unknown as WebContents)
+  r.onNavigate(wc as unknown as WebContents)
+  await settle()
+  assert.deepEqual([...wc.inserted.values()], ['a { color: red; }'])
+})
+
+test('a page that goes to another site while its stylesheet is checked gets none', async () => {
+  store({ 'example.com': { enabled: true, changes: [change('red', 'a { color: red; }')] } })
+  const wc = fakePage('https://example.com/')
+  const { r } = restyler([wc])
+  r.load()
+  r.onNavigate(wc as unknown as WebContents)
+  wc.url = 'https://other.com/'
+  await settle()
+  assert.equal(wc.inserted.size, 0)
+})
+
 test('other sites, disabled sites and non-web pages get nothing', async () => {
   store({ 'example.com': { enabled: false, changes: [change('red', 'a { color: red; }')] } })
   const { r } = restyler()

@@ -228,8 +228,9 @@ const sidePanelEl = $('sidePanel')
 let sideDrag: { x: number; width: number } | null = null
 function renderSidePanel() {
   const side = S?.sidePanel
-  sidePanelEl.hidden = !side
-  if (!side) {
+  // A window too narrow for it leaves the panel no width; its header goes with it.
+  sidePanelEl.hidden = !side?.width
+  if (!side?.width) {
     root.style.removeProperty('--side')
     root.style.removeProperty('--side-w')
     return
@@ -787,10 +788,27 @@ pinsEl.addEventListener('dragstart', (e) => {
   startDrag(tile.dataset.id!, false, e)
 })
 
+/**
+ * The icon a drop between icons (in the gap, or past the end of the last row) goes beside: the
+ * nearest one in the pointer's row, else the nearest of all.
+ */
+function nearestPin(e: DragEvent): HTMLElement | null {
+  let best: { tile: HTMLElement; far: number; inRow: boolean } | null = null
+  for (const tile of pinsEl.querySelectorAll<HTMLElement>('.pin-tile')) {
+    const box = tile.getBoundingClientRect()
+    const inRow = e.clientY >= box.top && e.clientY <= box.bottom
+    const dx = Math.max(box.left - e.clientX, 0, e.clientX - box.right)
+    const dy = Math.max(box.top - e.clientY, 0, e.clientY - box.bottom)
+    const far = Math.hypot(dx, dy)
+    if (!best || (inRow && !best.inRow) || (inRow === best.inRow && far < best.far)) best = { tile, far, inRow }
+  }
+  return best?.tile ?? null
+}
+
 /** Where a drag over the icons would land: beside an icon, by which half it's over, or after the last. */
 function pinDrop(e: DragEvent): { el: HTMLElement; target: string | null; after: boolean } | null {
   if (!dragId || dragFolder) return null
-  const tile = (e.target as HTMLElement).closest<HTMLElement>('.pin-tile')
+  const tile = (e.target as HTMLElement).closest<HTMLElement>('.pin-tile') ?? nearestPin(e)
   if (!tile) return { el: pinsEl, target: null, after: true }
   if (tile.dataset.id === dragId) return null
   const box = tile.getBoundingClientRect()
@@ -822,7 +840,7 @@ let pinDrag: { y: number; height: number } | null = null
 pinDivider.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return
   pinDrag = { y: e.clientY, height: pinLayout(pinCount, pinRows()).total }
-  pinRowsDraft = pinRows()
+  pinRowsDraft = null
   pinDivider.setPointerCapture(e.pointerId)
   pinDivider.classList.add('dragging')
 })
@@ -833,7 +851,8 @@ pinDivider.addEventListener('pointermove', (e) => {
   for (let r = 1; r <= pinCount; r++) {
     if (Math.abs(pinLayout(pinCount, r).total - want) < Math.abs(pinLayout(pinCount, best).total - want)) best = r
   }
-  if (best !== pinRowsDraft) {
+  // Until it changes the rows, it's a click: what was set stays, even with fewer icons to show it.
+  if (best !== pinRows()) {
     pinRowsDraft = best
     layoutPins()
   }
@@ -842,7 +861,7 @@ const endPinDrag = () => {
   if (!pinDrag) return
   pinDrag = null
   pinDivider.classList.remove('dragging')
-  setPinnedRows(pinRowsDraft ?? 1)
+  if (pinRowsDraft !== null) setPinnedRows(pinRowsDraft)
 }
 pinDivider.addEventListener('pointerup', endPinDrag)
 pinDivider.addEventListener('pointercancel', endPinDrag)
@@ -1185,6 +1204,8 @@ function closeBar() {
   } else renderProfileBand()
 }
 omnibox.addEventListener('keydown', (e) => {
+  // Return or Escape while an input method composes picks or drops its candidate, nothing else.
+  if (e.isComposing) return
   if (e.key === 'Escape') return omnibox.blur()
   // The layout has the keys first: moving through the suggestions, Return on what's selected.
   const out = model && !suggest.hidden ? suggestLayout().key(e, model) : { do: 'none' as const }
@@ -1264,8 +1285,11 @@ threadsEl.addEventListener('contextmenu', (e) => {
 threadsEl.addEventListener('keydown', (e) => {
   const el = e.target as HTMLElement
   if (el.id === 'ren') {
+    if (e.isComposing) return
     if (e.key === 'Enter') commitRename()
     if (e.key === 'Escape') {
+      // Only the rename ends: the document's Escape would close settings or a popover too.
+      e.stopPropagation()
       renaming = null
       renderThreads()
     }
@@ -1320,7 +1344,8 @@ function commitRename() {
 
 threadsEl.addEventListener('dragstart', (e) => {
   const r = (e.target as HTMLElement).closest<HTMLElement>('.row')
-  if (!r) return
+  // Text dragged out of the rename field is text, not the row.
+  if (!r || e.target instanceof HTMLInputElement) return
   startDrag(r.dataset.id ?? r.dataset.folder!, !!r.dataset.folder, e)
 })
 
@@ -2731,7 +2756,7 @@ profileListEl.addEventListener('input', (e) => {
 })
 profileListEl.addEventListener('keydown', (e) => {
   const input = e.target as HTMLInputElement
-  if (!input.classList.contains('name')) return
+  if (!input.classList.contains('name') || e.isComposing) return
   if (e.key === 'Enter') input.blur()
   else if (e.key === 'Escape') {
     e.stopPropagation()
@@ -2759,7 +2784,8 @@ profileListEl.addEventListener('pointerdown', (e) => {
   if (row) row.draggable = !!(e.target as HTMLElement).closest('.grip')
 })
 profileListEl.addEventListener('dragstart', (e) => {
-  dragProfile = profileOf(e.target) ?? null
+  // Text dragged out of a name field is text, not the profile.
+  dragProfile = e.target instanceof HTMLInputElement ? null : (profileOf(e.target) ?? null)
   if (!dragProfile) return
   e.dataTransfer!.effectAllowed = 'move'
   e.dataTransfer!.setData('text/plain', dragProfile)
@@ -2859,7 +2885,7 @@ emojiSearch.addEventListener('input', () => {
   renderEmojiGrid()
 })
 emojiSearch.addEventListener('keydown', (e) => {
-  if (e.key !== 'Enter') return
+  if (e.key !== 'Enter' || e.isComposing) return
   const b = emojiGrid.querySelector<HTMLElement>('.on')
   if (b) pickEmoji(b.dataset.emoji!)
 })

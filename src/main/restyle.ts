@@ -6,6 +6,7 @@ import path from 'node:path'
 import type { RestyleAgent, RestyleView, StyledSite } from '../shared/types'
 import { serveTools, type McpServer, type Tool } from './restyle-mcp'
 import type { RestyleSettings } from './settings'
+import { setAside, writeAtomic } from './json-file'
 
 /**
  * Restyling sites with Claude Code or Codex. You describe how a site should look; jbrow hands the
@@ -552,6 +553,8 @@ export class Restyler {
   private running = new Map<string, Run>()
   /** The stylesheet inserted into each page, by WebContents ID, so it can be swapped out. */
   private inserted = new Map<number, { site: string; key: string }>()
+  /** Counts each page's stylesheet swaps, so one that finishes after a later one gives way. */
+  private turns = new Map<number, number>()
   /** Where each agent's command was found, looked up once. */
   private bins = new Map<RestyleAgent, Promise<string | null>>()
   private checker = new CssChecker()
@@ -568,11 +571,12 @@ export class Restyler {
       this.sites = JSON.parse(readFileSync(storePath(), 'utf8'))
     } catch (error) {
       console.error('[restyle] could not read styles.json, starting empty:', error)
+      setAside(storePath())
     }
   }
 
   private save() {
-    writeFileSync(storePath(), JSON.stringify(this.sites, null, 2))
+    writeAtomic(storePath(), JSON.stringify(this.sites, null, 2))
   }
 
   // ---------- applying ----------
@@ -593,19 +597,33 @@ export class Restyler {
   private async apply(wc: WebContents) {
     if (wc.isDestroyed()) return
     const site = siteOf(wc.getURL())
-    const old = this.inserted.get(wc.id)
-    if (old) {
-      this.inserted.delete(wc.id)
-      await wc.removeInsertedCSS(old.key).catch(() => {})
-    }
     // Checked again here too, for styles.json edited by hand or saved before the check existed.
-    const css = site ? await this.safe(this.cssFor(site)) : ''
-    if (!site || !css || wc.isDestroyed()) return
+    await this.swap(wc, site, async () => (site ? await this.safe(this.cssFor(site)) : ''), 'style')
+  }
+
+  /**
+   * Takes a page's stylesheet out and puts `css` in for `site`. Swaps overlap (a navigation while
+   * a restyle finishes, a check that waits on its window): only the latest one's stylesheet stays,
+   * and none goes on a page that's on another site by then.
+   */
+  private async swap(wc: WebContents, site: string | null, css: () => Promise<string | null>, what: string) {
+    const turn = (this.turns.get(wc.id) ?? 0) + 1
+    this.turns.set(wc.id, turn)
+    const stale = () => wc.isDestroyed() || this.turns.get(wc.id) !== turn || siteOf(wc.getURL()) !== site
+    const old = this.inserted.get(wc.id)
+    this.inserted.delete(wc.id)
+    if (old) await wc.removeInsertedCSS(old.key).catch(() => {})
+    const sheet = site ? await css() : null
+    if (!site || !sheet || stale()) return
     try {
-      const key = await wc.insertCSS(css)
+      const key = await wc.insertCSS(sheet)
+      if (stale()) {
+        if (!wc.isDestroyed()) await wc.removeInsertedCSS(key).catch(() => {})
+        return
+      }
       this.inserted.set(wc.id, { site, key })
     } catch (error) {
-      console.error(`[restyle] could not style ${site}:`, error)
+      console.error(`[restyle] could not ${what} ${site}:`, error)
     }
   }
 
@@ -870,16 +888,7 @@ export class Restyler {
 
   /** Puts a stylesheet that isn't saved yet on one page, in place of its site's. */
   private async preview(wc: WebContents, site: string, css: string) {
-    const old = this.inserted.get(wc.id)
-    this.inserted.delete(wc.id)
-    if (old) await wc.removeInsertedCSS(old.key).catch(() => {})
-    // The page may have gone to another site while the old stylesheet came out; this one is only for `site`.
-    if (wc.isDestroyed() || siteOf(wc.getURL()) !== site) return
-    try {
-      this.inserted.set(wc.id, { site, key: await wc.insertCSS(css) })
-    } catch (error) {
-      console.error(`[restyle] could not preview on ${site}:`, error)
-    }
+    await this.swap(wc, site, async () => css, 'preview on')
   }
 
   // ---------- talking to the agent ----------

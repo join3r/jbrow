@@ -103,6 +103,17 @@ test('a download goes into Downloads under its own name', () => {
   assert.deepEqual(started, [page])
 })
 
+test('a download with no page (a retry) still finishes', async () => {
+  const { sess, d, started } = setup()
+  const item = new Item('again.zip')
+  sess.emit('will-download', {}, item, null)
+  const info = d.list().at(-1)!
+  assert.equal(info.state, 'progressing')
+  assert.deepEqual(started, [])
+  item.emit('done', {}, 'cancelled')
+  assert.equal(d.list().length, 0)
+})
+
 test('names never clash with files there or still downloading', () => {
   const { download } = setup()
   mkdirSync(downloads, { recursive: true })
