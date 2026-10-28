@@ -44,6 +44,7 @@ const certPop = $('certPop')
 const devicePop = $('devicePop')
 const profilePop = $('profilePop')
 const filterPop = $('filterPop')
+const soundPop = $('soundPop')
 const send = window.jbrow.send
 const welcome = initWelcome($('welcome'), send, () => syncOverlay())
 
@@ -174,6 +175,7 @@ function render() {
   $('newTab').title = `New tab${S.filter !== 'all' ? ` in ${profile(S.filter)?.name ?? S.filter}` : ''}${keyHint('newTab')}, right-click for a profile`
   renderSettings()
   renderDownloadPop()
+  renderSound()
 
   if (S.activePartition) actions.setAttribute('partition', S.activePartition)
   if (S.activeWebContentsId != null) actions.setAttribute('tab', String(S.activeWebContentsId))
@@ -753,16 +755,19 @@ function renderPins(pinned: ThreadView<UiTab>[], numbered: Map<string, number>) 
       const letter = esc((hostOf(t.url) || displayName(t)).charAt(0).toUpperCase())
       const away = awayFromHome(t)
       const title = `${away ? `${t.home!.title || t.home!.url} / ` : ''}${displayName(t)}${n ? ` (⌘${n})` : ''}${away && open ? '\nClick to go back to the pinned page' : ''}`
+      const snd = soundOf(v.all)
       return `<button class="${classes}" role="listitem" draggable="true" data-id="${t.id}" data-target="${open ? t.id : v.last.id}"${away ? ' data-away' : ''}
         title="${esc(title)}" aria-label="${esc(displayName(t))}" style="--pc:${esc(profile(t.profile)?.color ?? '')}">${
           fav ? `<img class="fav" src="${esc(fav)}" alt="">` : `<span class="fav letter">${letter}</span>`
-        }</button>`
+        }${snd ? `<span class="snd-badge${snd.muted ? ' muted' : ''}" data-mute="${snd.id}" title="${snd.muted ? 'Unmute' : 'Mute'}">${icon(snd.muted ? 'volumeX' : 'volume')}</span>` : ''}</button>`
     })
     .join('')
   layoutPins()
 }
 
 pinsEl.addEventListener('click', (e) => {
+  const mute = (e.target as HTMLElement).closest<HTMLElement>('[data-mute]')
+  if (mute) return toggleMute(mute.dataset.mute!)
   const tile = (e.target as HTMLElement).closest<HTMLElement>('.pin-tile')
   if (!tile) return
   showSettings(false)
@@ -875,7 +880,7 @@ function appSection(a: AppView<UiTab>, block: (v: ThreadView<UiTab>) => string):
   const count = a.threads.length + a.earlier.length
   const icons = (S?.apps[a.scope]?.icons ?? []).map((src) => `<img src="${esc(src)}" alt="">`).join('')
   let html = `<div class="head app-head" role="button" tabindex="0" aria-expanded="${open}" data-app-head="${esc(a.scope)}" title="${esc(a.name)}">
-    <span class="chev">${icon('forward')}</span>${icons ? `<span class="app-icons">${icons}</span>` : ''}<span class="app-name">${esc(a.name)}</span><span class="meta">${count}</span>
+    <span class="chev">${icon('forward')}</span>${icons ? `<span class="app-icons">${icons}</span>` : ''}<span class="app-name">${esc(a.name)}</span>${!open && playingIn([...a.threads, ...a.earlier]) ? soundMark : ''}<span class="meta">${count}</span>
   </div>`
   const shown = (v: ThreadView<UiTab>) => open || holdsActive(v)
   html += a.threads.filter(shown).map(block).join('')
@@ -902,7 +907,7 @@ function folderRow(v: FolderView<UiTab>, block: (v: ThreadView<UiTab>) => string
       ? `<input class="ren" id="ren" value="${esc(f.name)}" aria-label="Folder name">`
       : `<span class="t">${esc(f.name)}</span>`
   const html = `<div class="row frow" role="button" tabindex="0" draggable="true" aria-expanded="${open}" data-folder="${f.id}">
-    <span class="fav">${icon(open ? 'folderOpen' : 'folder')}</span>${name}<span class="end"><span class="meta">${count || ''}</span></span>
+    <span class="fav">${icon(open ? 'folderOpen' : 'folder')}</span>${name}<span class="end">${!open && playingIn(folderThreads(v)) ? soundMark : ''}<span class="meta">${count || ''}</span></span>
   </div>`
   // A collapsed folder still shows the thread you're on, and the folders down to it.
   const shown = (i: KeptItem<UiTab>) =>
@@ -967,8 +972,10 @@ function row(t: UiTab, thread: ThreadView<UiTab>, number?: number, showApp = tru
   const split = splitOf(S.splits, t.id)
   const partners = split?.tabs.filter((id) => id !== t.id).map((id) => S!.tabs.find((x) => x.id === id)).filter((x) => !!x) ?? []
   const mark = split ? `<span class="split-mark" title="${esc(`Split view with ${partners.map(displayName).join(', ')}`)}">${icon('columns')}</span>` : ''
+  const snd = soundOf(thread.all)
+  const sound = snd ? `<button class="snd${snd.muted ? ' muted' : ''}" data-mute="${snd.id}" title="${snd.muted ? 'Unmute' : 'Mute'}" aria-label="${snd.muted ? 'Unmute' : 'Mute'}">${icon(snd.muted ? 'volumeX' : 'volume')}</button>` : ''
   return `<div class="${classes}" role="button" tabindex="0" draggable="true" data-id="${t.id}" data-target="${t.id}" style="--pc:${esc(color)}">
-    ${fav}${name}<span class="end">${mark}<span class="meta">${esc(meta || key)}</span>${closable ? `<button class="act" data-close="${t.id}" title="Close" aria-label="Close">${icon('close')}</button>` : ''}</span>
+    ${fav}${name}<span class="end">${sound}${mark}<span class="meta">${esc(meta || key)}</span>${closable ? `<button class="act" data-close="${t.id}" title="Close" aria-label="Close">${icon('close')}</button>` : ''}</span>
     ${asleep ? `<span class="sum">${esc(sleepSummary(thread, S.now))}</span>` : ''}
   </div>`
 }
@@ -1079,7 +1086,7 @@ function forgetVisit(v: VisitItem) {
 /** The page hides while anything of jbrow's own covers it; see Panel.setOverlay. */
 let overlaySent = false
 function syncOverlay() {
-  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !certPop.hidden || !devicePop.hidden || !profilePop.hidden || !settingsEl.hidden || welcome.isOpen
+  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !certPop.hidden || !devicePop.hidden || !profilePop.hidden || !soundPop.hidden || !settingsEl.hidden || welcome.isOpen
   if (on !== overlaySent) {
     overlaySent = on
     send('overlay', { on })
@@ -1221,6 +1228,8 @@ threadsEl.addEventListener('click', (e) => {
   if (el.closest('#ren')) return
   const closeBtn = el.closest<HTMLElement>('[data-close]')
   if (closeBtn) return send('close', { id: closeBtn.dataset.close })
+  const mute = el.closest<HTMLElement>('[data-mute]')
+  if (mute) return toggleMute(mute.dataset.mute!)
   const home = el.closest<HTMLElement>('[data-home]')
   if (home) {
     showSettings(false)
@@ -1455,6 +1464,69 @@ $('pin').addEventListener('click', () => send('pin'))
 $('newTab').addEventListener('click', () => {
   flourish($('newTab').querySelector('svg'), 'twirl')
   send('new')
+})
+
+// ---------- sound ----------
+// A page can play sound from anywhere: a tab in a closed folder, another profile, or the Earlier
+// section. Each tab says so with a speaker, and so does the toolbar, with a list to go there from.
+
+const heard = (t: UiTab) => !!t.audible && !t.muted
+
+/** The tab of a thread whose speaker shows: one making sound, or else a muted one. */
+const soundOf = (tabs: UiTab[]) => tabs.find(heard) ?? tabs.find((t) => t.muted)
+
+const playingIn = (threads: ThreadView<UiTab>[]) => threads.some((v) => v.all.some(heard))
+const soundMark = `<span class="snd-mark" title="A tab in here is playing sound">${icon('volume')}</span>`
+
+function toggleMute(id: string) {
+  const t = S?.tabs.find((x) => x.id === id)
+  if (t) send('mute', { id, muted: !t.muted })
+}
+
+function renderSound() {
+  if (!S) return
+  const playing = S.tabs.filter((t) => t.audible)
+  const loud = playing.filter(heard)
+  // Muting the last one from the list leaves the list up, to take it back.
+  const shown = loud.length > 0 || (!soundPop.hidden && playing.length > 0)
+  $('sound').hidden = !shown
+  if (!shown) return setSoundPop(false)
+  const button = $('soundButton')
+  button.title = loud.length === 1 ? `Playing sound: ${displayName(loud[0])}` : `${loud.length || 'No'} tabs playing sound`
+  $('soundList').innerHTML = playing
+    .map((t) => {
+      const img = t.favicon ? `<img class="fav" src="${esc(t.favicon)}" alt="">` : `<span class="fav none"></span>`
+      const p = profile(t.profile)
+      return `<div class="sound-item${t.muted ? ' muted' : ''}" style="--pc:${esc(p?.color ?? '')}">
+        <button class="pop-item" data-go="${t.id}" title="${esc(isPrivate(t.url) ? displayName(t) : t.url)}">${img}<span class="name">${esc(displayName(t))}</span>${S!.profiles.length > 1 && p ? `<span class="prof">${esc(p.name)}</span>` : ''}</button>
+        <button class="icon sm" data-mute="${t.id}" title="${t.muted ? 'Unmute' : 'Mute'}" aria-label="${t.muted ? 'Unmute' : 'Mute'}">${icon(t.muted ? 'volumeX' : 'volume')}</button>
+      </div>`
+    })
+    .join('')
+}
+
+function setSoundPop(open: boolean) {
+  if (open === !soundPop.hidden) return
+  soundPop.hidden = !open
+  $('soundButton').setAttribute('aria-expanded', String(open))
+  if (open) focusUi()
+  syncOverlay()
+  // Closed with nothing heard, the button goes too.
+  if (!open) renderSound()
+}
+$('soundButton').addEventListener('click', () => setSoundPop(!!soundPop.hidden))
+soundPop.addEventListener('click', (e) => {
+  const el = e.target as HTMLElement
+  const mute = el.closest<HTMLElement>('[data-mute]')
+  if (mute) return toggleMute(mute.dataset.mute!)
+  const go = el.closest<HTMLElement>('[data-go]')
+  if (!go) return
+  setSoundPop(false)
+  showSettings(false)
+  send('activate', { id: go.dataset.go })
+})
+document.addEventListener('mousedown', (e) => {
+  if (!soundPop.hidden && !(e.target as HTMLElement).closest('.sound')) setSoundPop(false)
 })
 
 // ---------- extensions popover ----------
@@ -3054,6 +3126,7 @@ document.addEventListener('keydown', (e) => {
   else if (!profilePop.hidden) setProfilePop(false)
   else if (!filterPop.hidden) setFilterPop(false)
   else if (!certPop.hidden) setCert(false)
+  else if (!soundPop.hidden) setSoundPop(false)
   else if (!restylePane.hidden) setRestyle(false)
   else if (!extPop.hidden) setExtensions(false)
   else if (dlOpen) setDownload(null)

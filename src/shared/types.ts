@@ -80,6 +80,10 @@ export interface UiTab extends TabRecord {
   crashed?: boolean
   /** ID of the extension working in its page now (its chrome.debugger is attached). */
   drivenBy?: string
+  /** Its page is making sound right now. */
+  audible?: boolean
+  /** Its page's sound is muted. */
+  muted?: boolean
 }
 
 export interface UiState {

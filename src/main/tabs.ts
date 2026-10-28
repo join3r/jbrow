@@ -391,7 +391,24 @@ export class Tabs {
     return undefined
   }
   uiTabs(): UiTab[] {
-    return this.records.map((t) => ({ ...t, loading: this.live.get(t.id)?.loading ?? false, loaded: this.live.has(t.id), crashed: this.crashed.get(t.id)?.reason ? true : undefined }))
+    return this.records.map((t) => {
+      const wc = this.webContentsFor(t.id)
+      return {
+        ...t,
+        loading: this.live.get(t.id)?.loading ?? false,
+        loaded: this.live.has(t.id),
+        crashed: this.crashed.get(t.id)?.reason ? true : undefined,
+        audible: wc?.isCurrentlyAudible() || undefined,
+        muted: wc?.isAudioMuted() || undefined,
+      }
+    })
+  }
+  /** Mutes a tab's page, or lets it be heard again. */
+  setMuted(id: string, muted: boolean) {
+    const wc = this.webContentsFor(id)
+    if (!wc || wc.isAudioMuted() === muted) return
+    wc.setAudioMuted(muted)
+    this.deps.onChange()
   }
   navState() {
     const wc = this.activeWebContents()
@@ -622,6 +639,8 @@ export class Tabs {
       if (isMainFrame && url === this.upgrades.get(id)?.https && !this.deps.certs.trusted(profileId, url, certificate)) return callback(false)
       callback(this.deps.certs.onError(id, rec()?.profile ?? rt.profile.id, url, error, certificate, isMainFrame))
     })
+    // The sidebar shows which tabs make sound, so a page playing somewhere out of sight can be found.
+    wc.on('audio-state-changed', () => this.deps.onChange())
     wc.on('did-start-loading', () => this.setLoading(id, true))
     wc.on('did-stop-loading', () => this.setLoading(id, false))
     wc.on('before-input-event', (event, input) => {

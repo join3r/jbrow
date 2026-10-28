@@ -1250,6 +1250,11 @@ function threadMenu(id: string) {
     { label: 'Rename', click: () => panel.ui.send('rename-tab', id) },
   ]
   if (rec.url) items.push({ label: 'Copy link', click: () => clipboard.writeText(rec.url) })
+  const wc = tabs.webContentsFor(id)
+  if (wc) {
+    const muted = wc.isAudioMuted()
+    items.push({ label: muted ? 'Unmute' : 'Mute', click: () => tabs.setMuted(id, !muted) })
+  }
   if (rec.kept && rec.home) {
     const away = awayFromHome(rec)
     items.push(
@@ -2150,6 +2155,7 @@ function wireIpc() {
   on<{ profile?: string; url: string }>('forget-visit', ({ profile, url }) => visits.forget(profile ?? tabs.active()?.profile ?? settings.defaultProfile, url))
   on<{ id: string }>('close', ({ id }) => void closeTab(id))
   on<{ id: string }>('go-home', ({ id }) => tabs.goHome(id))
+  on<{ id: string; muted: boolean }>('mute', ({ id, muted }) => tabs.setMuted(id, muted))
   on<{ id: string }>('thread-menu', ({ id }) => threadMenu(id))
   on<{ id: string }>('close-pane', ({ id }) => tabs.closePane(id))
   on<{ id: string; sizes: number[]; done?: boolean }>('split-sizes', ({ id, sizes, done }) => tabs.resizeSplit(id, sizes, !!done))
