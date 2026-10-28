@@ -2224,6 +2224,7 @@ function wireIpc() {
   on<{ rename?: boolean } | undefined>('add-profile', (data) => void addProfile(data?.rename !== false))
   on<{ id: string }>('delete-profile', ({ id }) => void deleteProfile(id))
   on<{ id: string; name?: string; color?: string; icon?: string }>('profile', ({ id, ...change }) => updateProfile(id, change))
+  on('emoji-panel', () => app.showEmojiPanel())
   on<{ id: string }>('profile-menu', ({ id }) => profileMenu(id))
   on<{ id: string }>('default-profile', ({ id }) => setDefaultProfile(id))
   on('default-browser', () => sendDefaultBrowser())

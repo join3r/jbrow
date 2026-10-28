@@ -362,10 +362,18 @@
               <div class="set-item" data-keywords="profile profiles color rename delete default work personal logins cookies">
                 <p class="help">
                   Each profile has its own logins, cookies and extensions. Click a name to rename it, the dot to change its
-                  color and the box next to it to give it an emoji (⌃⌘Space opens the emoji picker). Right-click a profile to
+                  color and the box next to it to pick an emoji, or type a letter or two. Right-click a profile to
                   make it the default, for links from other apps and for new tabs when nothing else decides, or to delete it.
                 </p>
                 <div id="profileList" class="profile-list"></div>
+                <div id="emojiPop" class="pop emoji-pop" hidden role="dialog" aria-label="Profile icon">
+                  <input id="emojiSearch" type="search" spellcheck="false" placeholder="Search, or type a letter" aria-label="Search emoji" />
+                  <div id="emojiGrid" class="emoji-grid"></div>
+                  <div class="emoji-foot">
+                    <button id="emojiMore" class="link">More emoji…</button>
+                    <button id="emojiNone" class="link">Use the color dot</button>
+                  </div>
+                </div>
                 <button id="addProfile" class="chip">Add profile</button>
               </div>
               <div class="set-item" data-keywords="profile switcher filter all menu dropdown icons emoji compact">

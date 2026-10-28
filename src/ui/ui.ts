@@ -4,6 +4,7 @@ import { urlMatcher } from '../shared/patterns'
 import { awayFromHome, displayName, folderThreads, isAsleep, isFolder, isPinned, keptThreads, numberedThreads, sections, threadsOf, type AppView, type FolderView, type KeptItem, type ThreadView } from '../shared/threads'
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { dragDivider, PANE_GAP, paneSpans, splitOf } from '../shared/split'
+import { EMOJI_GROUPS, splitEmoji } from './emoji'
 import { DAY_MS, esc, HOUR_MS, icon, since } from './markup'
 import type { LayoutHost, OpenIn, Outcome, SuggestLayout } from './suggest/layout'
 import { LAYOUTS, layoutPictureHtml, URL_BAR_LAYOUTS } from './suggest/layouts'
@@ -1765,6 +1766,7 @@ function setSettings(open: boolean, to?: string) {
 function showSettings(show: boolean) {
   if (show === !settingsEl.hidden || (show && !settingsTab)) return
   settingsEl.hidden = !show
+  if (!show) setEmojiPop(null)
   $('settingsButton').setAttribute('aria-pressed', String(show))
   // So your key for closing a tab closes settings while it's the one showing.
   send('settings-shown', { on: show })
@@ -2559,12 +2561,13 @@ function renderProfiles() {
       .map(
         (p) => `<div class="profile-row" data-profile="${esc(p.id)}">
           <label class="swatch" title="Color"><input type="color" aria-label="Color of ${esc(p.name)}"></label>
-          <input class="emoji" spellcheck="false" placeholder="☺" title="Emoji, shown in the profile switcher in place of the dot" aria-label="Emoji of ${esc(p.name)}">
+          <button class="emoji" aria-haspopup="dialog" aria-expanded="false" title="Icon, shown in the profile switcher in place of the dot" aria-label="Icon of ${esc(p.name)}"></button>
           <input class="name" spellcheck="false" aria-label="Name">
           <em></em>
         </div>`,
       )
       .join('')
+    if (emojiFor) setEmojiPop(S.profiles.some((p) => p.id === emojiFor) ? emojiFor : null)
   }
   for (const p of S.profiles) {
     const row = profileListEl.querySelector<HTMLElement>(`[data-profile="${CSS.escape(p.id)}"]`)!
@@ -2572,8 +2575,10 @@ function renderProfiles() {
     const color = row.querySelector<HTMLInputElement>('input[type=color]')!
     if (document.activeElement !== name) name.value = p.name
     if (document.activeElement !== color) color.value = p.color
-    const emoji = row.querySelector<HTMLInputElement>('.emoji')!
-    if (document.activeElement !== emoji) emoji.value = p.icon ?? ''
+    const emoji = row.querySelector<HTMLElement>('.emoji')!
+    emoji.innerHTML = p.icon ? esc(p.icon) : icon('plus')
+    emoji.classList.toggle('set', !!p.icon)
+    emoji.setAttribute('aria-expanded', String(emojiFor === p.id))
     row.querySelector<HTMLElement>('.swatch')!.style.background = color.value
     const n = counts.get(p.id) ?? 0
     const notes = [n ? `${n} ${n === 1 ? 'tab' : 'tabs'}` : 'no tabs', p.id === S.prefs.defaultProfile ? 'default' : '']
@@ -2598,7 +2603,6 @@ function saveProfileName(input: HTMLInputElement) {
 profileListEl.addEventListener('change', (e) => {
   const input = e.target as HTMLInputElement
   if (input.classList.contains('name')) saveProfileName(input)
-  else if (input.classList.contains('emoji')) send('profile', { id: profileOf(input), icon: input.value })
   else if (input.type === 'color') send('profile', { id: profileOf(input), color: input.value })
 })
 // The color well updates live while you pick, and is saved when the picker closes.
@@ -2608,15 +2612,17 @@ profileListEl.addEventListener('input', (e) => {
 })
 profileListEl.addEventListener('keydown', (e) => {
   const input = e.target as HTMLInputElement
-  const emoji = input.classList.contains('emoji')
-  if (!emoji && !input.classList.contains('name')) return
+  if (!input.classList.contains('name')) return
   if (e.key === 'Enter') input.blur()
   else if (e.key === 'Escape') {
     e.stopPropagation()
-    const p = S?.profiles.find((x) => x.id === profileOf(input))
-    if (p) input.value = emoji ? (p.icon ?? '') : p.name
+    input.value = S?.profiles.find((p) => p.id === profileOf(input))?.name ?? input.value
     input.blur()
   }
+})
+profileListEl.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('.emoji')
+  if (b) setEmojiPop(emojiFor === profileOf(b) ? null : profileOf(b)!)
 })
 profileListEl.addEventListener('contextmenu', (e) => {
   const id = profileOf(e.target)
@@ -2625,6 +2631,87 @@ profileListEl.addEventListener('contextmenu', (e) => {
   send('profile-menu', { id })
 })
 $('addProfile').addEventListener('click', () => send('add-profile'))
+
+// ---------- profile icon picker ----------
+
+const emojiPop = $('emojiPop')
+const emojiSearch = $<HTMLInputElement>('emojiSearch')
+const emojiGrid = $('emojiGrid')
+/** The profile the icon picker is open for. */
+let emojiFor: string | null = null
+
+/** What's typed, cut to what an icon can hold: one emoji, or two letters. */
+const typedIcon = (text: string) => [...new Intl.Segmenter().segment(text.trim())].slice(0, 2).map((s) => s.segment).join('')
+const hasEmoji = (text: string) => /\p{Extended_Pictographic}/u.test(text)
+
+function setEmojiPop(id: string | null) {
+  emojiFor = id && S?.profiles.some((p) => p.id === id) ? id : null
+  emojiPop.hidden = !emojiFor
+  for (const b of profileListEl.querySelectorAll('.emoji')) b.setAttribute('aria-expanded', String(profileOf(b) === emojiFor))
+  if (!emojiFor) return
+  // Hung under the profile's box, inside the settings item so it scrolls with it.
+  const b = profileListEl.querySelector<HTMLElement>(`[data-profile="${CSS.escape(emojiFor)}"] .emoji`)!.getBoundingClientRect()
+  const item = emojiPop.parentElement!.getBoundingClientRect()
+  emojiPop.style.top = `${b.bottom - item.top + 4}px`
+  emojiPop.style.left = `${b.left - item.left - 6}px`
+  emojiSearch.value = ''
+  renderEmojiGrid()
+  emojiSearch.focus()
+}
+
+/**
+ * Every emoji, or the ones whose words start with what's typed. What's typed is offered too, as
+ * the icon itself, when it's short enough to be one; Enter picks the first match, else that.
+ */
+function renderEmojiGrid() {
+  const q = emojiSearch.value.trim().toLowerCase()
+  const terms = q.split(/\s+/).filter(Boolean)
+  const cur = S?.profiles.find((p) => p.id === emojiFor)?.icon
+  const cell = (emoji: string, cls = '') =>
+    `<button class="${cls}" data-emoji="${esc(emoji)}" aria-pressed="${emoji === cur}" title="${esc(emoji)}">${esc(emoji)}</button>`
+  const typed = typedIcon(emojiSearch.value)
+  const offerTyped = !!typed && typed === emojiSearch.value.trim()
+  const groups = EMOJI_GROUPS.map((g) => ({
+    name: g.name,
+    items: g.items.map(splitEmoji).filter(({ words }) => terms.every((t) => words.split(' ').some((w) => w.startsWith(t)))),
+  })).filter((g) => g.items.length)
+  const html = groups.map((g) => `${q ? '' : `<h4>${esc(g.name)}</h4>`}<div class="emoji-row">${g.items.map((i) => cell(i.emoji)).join('')}</div>`)
+  if (q && html.length) html.splice(0, html.length, `<div class="emoji-row">${groups.flatMap((g) => g.items.map((i) => cell(i.emoji))).join('')}</div>`)
+  if (offerTyped) html.unshift(`<h4>Use what's typed</h4><div class="emoji-row">${cell(typed, 'typed')}</div>${html.length ? '<h4>Matches</h4>' : ''}`)
+  emojiGrid.innerHTML = html.join('') || '<p class="pop-empty">No emoji found. Try More emoji…</p>'
+  const first = (q && emojiGrid.querySelector('[data-emoji]:not(.typed)')) || emojiGrid.querySelector('.typed')
+  first?.classList.add('on')
+  emojiGrid.scrollTop = 0
+}
+
+function pickEmoji(value: string) {
+  if (emojiFor) send('profile', { id: emojiFor, icon: value })
+  setEmojiPop(null)
+}
+
+emojiSearch.addEventListener('input', () => {
+  // An emoji from the system's picker, or pasted, is the choice itself.
+  if (hasEmoji(emojiSearch.value)) return pickEmoji(typedIcon(emojiSearch.value))
+  renderEmojiGrid()
+})
+emojiSearch.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return
+  const b = emojiGrid.querySelector<HTMLElement>('.on')
+  if (b) pickEmoji(b.dataset.emoji!)
+})
+emojiGrid.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-emoji]')
+  if (b) pickEmoji(b.dataset.emoji!)
+})
+$('emojiNone').addEventListener('click', () => pickEmoji(''))
+$('emojiMore').addEventListener('click', () => {
+  // The system's picker types into the search, which picks what it types.
+  emojiSearch.focus()
+  send('emoji-panel')
+})
+document.addEventListener('mousedown', (e) => {
+  if (emojiFor && !(e.target as HTMLElement).closest('#emojiPop, .profile-row .emoji')) setEmojiPop(null)
+})
 window.jbrow.on('rename-profile', (id: string) => {
   renameProfile = id
   setSettings(true, 'profiles')
@@ -2874,7 +2961,8 @@ document.addEventListener('keydown', (e) => {
     search.value = ''
     if (search === archSearch) searchArchived()
     else applySearch()
-  } else if (!rulesPop.hidden) closeRules()
+  } else if (emojiFor) setEmojiPop(null)
+  else if (!rulesPop.hidden) closeRules()
   else if (!devicePop.hidden) answerDevice(null)
   else if (!profilePop.hidden) setProfilePop(false)
   else if (!filterPop.hidden) setFilterPop(false)
