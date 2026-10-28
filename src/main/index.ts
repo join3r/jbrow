@@ -44,6 +44,7 @@ import { BrowsingHistory, fetchSearchSuggestions } from './visits'
 import { takeUpdateRelaunch, Updates } from './updates'
 import { Zoom, ZOOM_STEPS, zoomSite } from './zoom'
 import { rm, writeFile } from 'node:fs/promises'
+import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -123,6 +124,10 @@ if (process.env.JBROW_USER_DATA) {
   app.setPath('downloads', path.join(process.env.JBROW_USER_DATA, 'Downloads'))
 }
 setupLogging()
+// electron-chrome-web-store downloads extensions with Node's fetch, which tries IPv4 and IPv6 in
+// turn and drops each after 250 ms. A connection to Google that takes longer, with IPv6
+// unreachable, fails the install as "fetch failed"; Chromium's own stack waits it out.
+setDefaultAutoSelectFamilyAttemptTimeout(2000)
 // A Chromium switch, so it's read before the app is ready and a change waits for a restart.
 if (loadSettings().blockThirdPartyCookies) blockThirdPartyCookies()
 // Utilities that quit apps with no open windows (Vorssaint, for one) will quit jbrow while it's
