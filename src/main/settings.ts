@@ -126,7 +126,7 @@ const DEFAULTS: Settings = {
   unpackedExtensions: {},
   disabledExtensions: {},
   panel: { widthFraction: 0.72, heightFraction: 0.78, displays: {}, pinned: null },
-  hideFromScreenCapture: true,
+  hideFromScreenCapture: false,
   dangerousSites: true,
   blockThirdPartyCookies: true,
   pinned: true,
