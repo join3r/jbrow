@@ -153,6 +153,9 @@ export class Panel {
     })
     this.uiView.setBackgroundColor('#00000000')
     this.ui = this.uiView.webContents
+    // The UI holds the privileged bridge: a link or file dropped on it must never replace it.
+    this.ui.on('will-navigate', (e) => e.preventDefault())
+    this.ui.setWindowOpenHandler(() => ({ action: 'deny' }))
     this.win.contentView.addChildView(this.uiView)
     this.wakeUi(false)
     this.fitUi()
