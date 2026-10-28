@@ -459,6 +459,12 @@ right-click the header to switch to another extension's panel, reload or inspect
 extension opened for one tab stays with that tab; otherwise it shows next to every tab of that
 profile until you close it.
 
+A tab an extension opened, as Stem does, has that extension's icon faintly on its favicon. While
+an extension works in a page (Stem clicking and reading it), the icon is solid with a ring in the
+profile's color, and that tab's thread doesn't sleep or archive. Extensions also see the tabs
+without a page (asleep, or not opened since launch) as Chrome's discarded tabs; one an extension
+reaches for loads in the background.
+
 Extensions can run user scripts (`chrome.userScripts`, for user script managers): scripts they
 register run in matching pages and are kept across restarts. Chrome also wants you to switch on
 **Allow user scripts** for each such extension; jbrow doesn't ask, the permission is enough.

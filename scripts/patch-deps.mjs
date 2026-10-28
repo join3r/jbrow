@@ -233,6 +233,153 @@ const patches = [
         task?.end();
         task = undefined;`,
   },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: "windows: describe a window afresh each time. The library kept the first description, made when the window was added and before its tabs had details, so windows.get and getAll (populate) answered with no tabs until the window was resized, and Stem saw 0 open tabs",
+    find: `  getWindowDetails(win) {
+    if (this.ctx.store.windowDetailsCache.has(win.id)) {
+      return this.ctx.store.windowDetailsCache.get(win.id);
+    }
+    const details = this.createWindowDetails(win);
+    return details;
+  }`,
+    replace: `  getWindowDetails(win) {
+    /* jbrow: never answer from the cache, see scripts/patch-deps.mjs */
+    return this.createWindowDetails(win);
+  }`,
+  },
+  // Tabs without a page (asleep, or not opened since launch) have no WebContents, so the library
+  // knew nothing of them. jbrow's hooks (tabHooks in src/main/index.ts) list them as discarded tabs,
+  // as Chrome does, and load one when an extension reaches for it.
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: "pageless tabs: a window's tabs include jbrow's tabs without a page",
+    find: `      }).map((tab) => this.ctx.store.tabDetailsCache.get(tab.id)).filter(Boolean),
+      incognito: !this.ctx.session.isPersistent(),`,
+    replace: `      }).map((tab) => this.ctx.store.tabDetailsCache.get(tab.id)).filter(Boolean).concat(
+        /* jbrow: pageless tabs, see scripts/patch-deps.mjs */
+        (this.ctx.store.impl.pagelessTabs?.() ?? []).filter((tab) => tab.windowId === win.id)
+      ),
+      incognito: !this.ctx.session.isPersistent(),`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: "pageless tabs: jbrow's window is listed even when none of the profile's tabs has a page, so an extension opens tabs there and doesn't make a window of its own",
+    find: `  getAll(event) {
+    return Array.from(this.ctx.store.windows).map(this.getWindowDetails.bind(this));
+  }`,
+    replace: `  getAll(event) {
+    /* jbrow: pageless tabs, see scripts/patch-deps.mjs */
+    const main = this.ctx.store.impl.mainWindow?.();
+    const windows = new Set(this.ctx.store.windows);
+    if (main && !main.isDestroyed()) windows.add(main);
+    return Array.from(windows).map(this.getWindowDetails.bind(this));
+  }`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'pageless tabs: tabs.query answers with them too',
+    find: `    const filteredTabs = Array.from(this.ctx.store.tabs).map(this.getTabDetails.bind(this)).filter((tab) => {`,
+    replace: `    /* jbrow: pageless tabs, see scripts/patch-deps.mjs */
+    const filteredTabs = Array.from(this.ctx.store.tabs).map(this.getTabDetails.bind(this)).concat(this.ctx.store.impl.pagelessTabs?.() ?? []).filter((tab) => {`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: "pageless tabs: a tab's earlier IDs reach its page once it has one, jbrow's window is found by ID, and wakeTabById loads a pageless tab",
+    find: `  getWindowById(windowId) {
+    return Array.from(this.windows).find(
+      (window) => !window.isDestroyed() && window.id === windowId
+    );
+  }`,
+    replace: `  getWindowById(windowId) {
+    /* jbrow: pageless tabs, see scripts/patch-deps.mjs */
+    const main = this.impl.mainWindow?.();
+    return Array.from(this.windows).find(
+      (window) => !window.isDestroyed() && window.id === windowId
+    ) ?? (main && !main.isDestroyed() && main.id === windowId ? main : void 0);
+  }
+  wakeTabById(tabId) {
+    return this.getTabById(tabId) ?? this.impl.tabFor?.(tabId, true);
+  }`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: "pageless tabs: a tab's earlier IDs reach its page (see getWindowById)",
+    find: `  getTabById(tabId) {
+    return Array.from(this.tabs).find((tab) => !tab.isDestroyed() && tab.id === tabId);
+  }`,
+    replace: `  getTabById(tabId) {
+    return Array.from(this.tabs).find((tab) => !tab.isDestroyed() && tab.id === tabId) ?? this.impl.tabFor?.(tabId, false);
+  }`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'pageless tabs: tabs.get loads the tab and answers with it, under its new ID',
+    find: `  get(event, tabId) {
+    const tab = this.ctx.store.getTabById(tabId);
+    if (!tab) return { id: _TabsAPI.TAB_ID_NONE };`,
+    replace: `  get(event, tabId) {
+    /* jbrow: pageless tabs, see scripts/patch-deps.mjs */
+    const tab = this.ctx.store.wakeTabById(tabId);
+    if (!tab) return { id: _TabsAPI.TAB_ID_NONE };`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'pageless tabs: tabs.reload loads the tab',
+    find: `    const reloadProperties = typeof arg1 === "object" ? arg1 : typeof arg2 === "object" ? arg2 : {};
+    const tab = tabId ? this.ctx.store.getTabById(tabId) : this.ctx.store.getActiveTabOfCurrentWindow();`,
+    replace: `    const reloadProperties = typeof arg1 === "object" ? arg1 : typeof arg2 === "object" ? arg2 : {};
+    /* jbrow: pageless tabs, see scripts/patch-deps.mjs */
+    const tab = tabId ? this.ctx.store.wakeTabById(tabId) : this.ctx.store.getActiveTabOfCurrentWindow();`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'pageless tabs: tabs.update loads the tab',
+    find: `    const updateProperties = (typeof arg1 === "object" ? arg1 : arg2) || {};
+    const tab = tabId ? this.ctx.store.getTabById(tabId) : this.ctx.store.getActiveTabOfCurrentWindow();`,
+    replace: `    const updateProperties = (typeof arg1 === "object" ? arg1 : arg2) || {};
+    /* jbrow: pageless tabs, see scripts/patch-deps.mjs */
+    const tab = tabId ? this.ctx.store.wakeTabById(tabId) : this.ctx.store.getActiveTabOfCurrentWindow();`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'pageless tabs: tabs.remove closes one without loading it',
+    find: `      const tab = this.ctx.store.getTabById(tabId);
+      if (tab) this.ctx.store.removeTab(tab);
+      this.onRemoved(tabId);`,
+    replace: `      const tab = this.ctx.store.getTabById(tabId);
+      if (tab) this.ctx.store.removeTab(tab);
+      /* jbrow: pageless tabs, see scripts/patch-deps.mjs */
+      else this.ctx.store.impl.removePagelessTab?.(tabId);
+      this.onRemoved(tabId);`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'tabs.create tells jbrow which extension asked, so the tab can show it was opened by that extension',
+    find: `    const tab = await this.ctx.store.createTab({ ...details, url });`,
+    replace: `    /* jbrow: the extension that asked, see scripts/patch-deps.mjs */
+    const tab = await this.ctx.store.createTab({ ...details, url }, event.extension);`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'tabs.create tells jbrow which extension asked (see TabsAPI.create)',
+    find: `  async createTab(details) {
+    if (typeof this.impl.createTab !== "function") {
+      throw new Error("createTab is not implemented");
+    }
+    if (!details.windowId) {
+      details.windowId = this.lastFocusedWindowId;
+    }
+    const result = await this.impl.createTab(details);`,
+    replace: `  async createTab(details, extension) {
+    if (typeof this.impl.createTab !== "function") {
+      throw new Error("createTab is not implemented");
+    }
+    if (!details.windowId) {
+      details.windowId = this.lastFocusedWindowId;
+    }
+    const result = await this.impl.createTab(details, extension);`,
+  },
 ]
 
 let applied = 0

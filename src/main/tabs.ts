@@ -62,6 +62,8 @@ export interface TabsDeps {
   openInProfile: (fromId: string, profile: string, url: string) => void
   /** The active page went fullscreen or left it. */
   onFullscreen: (on: boolean, url: string) => void
+  /** An extension is working in the page (its chrome.debugger is attached), so it doesn't sleep or archive. */
+  held: (wc: WebContents) => boolean
   /**
    * A page with unsaved changes (beforeunload) wants to stay. Return true to leave anyway. It has
    * to answer before returning: Electron only lets the page go from inside the event.
@@ -92,6 +94,8 @@ export interface CreateOptions {
   /** A guest WebContents Chromium already created for window.open. */
   webContents?: WebContents
   unread?: boolean
+  /** The extension that opened it (chrome.tabs.create). */
+  openedBy?: string
 }
 
 /**
@@ -129,6 +133,9 @@ const SLIDE_EASE: [number, number, number, number] = [0.34, 1.25, 0.64, 1]
 
 /** How many closed tabs ⇧⌘T can bring back. */
 const CLOSED_KEEP = 25
+
+/** Where the IDs of tabs without a page since launch start, far past any WebContents ID. */
+const PAGELESS_IDS = 1_000_000
 
 /** How long a typed host gets to answer over https before the tab tries http, as in Chrome. */
 const UPGRADE_WAIT_MS = 3000
@@ -205,6 +212,17 @@ export class Tabs {
   /** How far above (less than 0) or below its place the shown page is while it slides in. */
   private slideY = 0
   private slideTimer: NodeJS.Timeout | null = null
+
+  /**
+   * The IDs extensions know tabs without a page by, to the tab. Chrome keeps a tab's ID when it
+   * discards it, but here each page load is a new WebContents with a new ID. A tab whose page
+   * unloaded keeps the ID its page had; one with no page since launch gets one from PAGELESS_IDS
+   * up. Every ID a tab had reaches it, page or not, until it closes.
+   */
+  private extensionIds = new Map<number, string>()
+  /** A tab without a page, to the ID extensions know it by now. */
+  private pagelessIds = new Map<string, number>()
+  private nextPagelessId = PAGELESS_IDS
 
   /** Kept and pinned threads whose pages never unload (see sweep). Main sets it from settings. */
   keepLoaded: KeepLoaded = { kept: false, pinned: true }
@@ -397,6 +415,7 @@ export class Tabs {
       createdAt: from ? createdBeside(this.records, from, now) : now,
       lastSeen: now,
       unread: opts.unread,
+      openedBy: opts.openedBy,
     }
     this.records.push(rec)
     if (opts.webContents || rec.url) this.ensureView(rec, opts.webContents)
@@ -1117,6 +1136,8 @@ export class Tabs {
     this.live.delete(rec.id)
     // A page that agreed to close is gone already.
     const wc = live.wc
+    this.extensionIds.set(wc.id, rec.id)
+    this.pagelessIds.set(rec.id, wc.id)
     if (wc.isDestroyed()) return
     this.droppingView = true
     try {
@@ -1147,6 +1168,53 @@ export class Tabs {
     if (this.droppingView) return
     const id = this.idForWebContents(wc)
     if (id) this.close(id)
+  }
+
+  // ---------- tabs without a page, for extensions ----------
+
+  /** A profile's tabs without a page, with the ID extensions know each by (see extensionIds). */
+  pageless(profile: string): { id: number; rec: TabRecord }[] {
+    for (const [id, recId] of this.extensionIds) if (!this.get(recId)) this.extensionIds.delete(id)
+    for (const recId of this.pagelessIds.keys()) if (!this.get(recId)) this.pagelessIds.delete(recId)
+    const out: { id: number; rec: TabRecord }[] = []
+    for (const rec of this.records) {
+      // An empty new tab is nothing to an extension.
+      if (rec.profile !== profile || !rec.url || this.live.has(rec.id)) continue
+      let id = this.pagelessIds.get(rec.id)
+      if (id === undefined) {
+        id = this.nextPagelessId++
+        this.pagelessIds.set(rec.id, id)
+        this.extensionIds.set(id, rec.id)
+      }
+      out.push({ id, rec })
+    }
+    return out
+  }
+
+  /**
+   * The page of the tab an extension knows by `id`, an ID its page had or the one it has without
+   * a page. With `wake`, a tab without a page gets it, in the background.
+   */
+  pageFor(profile: string, id: number, wake: boolean): WebContents | undefined {
+    const rec = this.get(this.extensionIds.get(id))
+    if (!rec || rec.profile !== profile) return undefined
+    const live = this.live.get(rec.id)
+    if (live) return live.wc.isDestroyed() ? undefined : live.wc
+    if (!wake || !rec.url) return undefined
+    const woke = this.ensureView(rec)
+    this.changed()
+    return woke?.wc
+  }
+
+  /** chrome.tabs.remove on a tab without a page. */
+  closePageless(profile: string, id: number) {
+    const rec = this.get(this.extensionIds.get(id))
+    if (rec && rec.profile === profile && !this.live.has(rec.id)) this.close(rec.id)
+  }
+
+  private held(rec: TabRecord) {
+    const wc = this.live.get(rec.id)?.wc
+    return !!wc && !wc.isDestroyed() && this.deps.held(wc)
   }
 
   rename(id: string, name: string) {
@@ -1427,7 +1495,7 @@ export class Tabs {
     const shown = this.shown()
     for (const root of this.records.filter((t) => isRoot(this.records, t) && !t.kept)) {
       const all = subtree(this.records, root)
-      if (all.some((t) => shown.includes(t.id))) continue
+      if (all.some((t) => shown.includes(t.id) || this.held(t))) continue
       if (afterMs <= 0 || now - Math.max(...all.map((t) => Math.max(t.lastSeen, t.restoredAt ?? 0))) < afterMs) {
         if (isAsleep(all, { now, afterMs: sleepAfterMs, activeId: this.activeId }) && this.unload(all)) changed = true
         continue
@@ -1456,7 +1524,7 @@ export class Tabs {
       for (const root of this.records.filter((t) => isRoot(this.records, t) && t.kept)) {
         if (root.pinned ? this.keepLoaded.pinned : this.keepLoaded.kept) continue
         const all = subtree(this.records, root)
-        if (all.some((t) => t.id === this.activeId || shown.includes(t.id))) continue
+        if (all.some((t) => t.id === this.activeId || shown.includes(t.id) || this.held(t))) continue
         if (now - Math.max(...all.map((t) => t.lastSeen)) >= sleepAfterMs && this.unload(all)) changed = true
       }
     }

@@ -9,6 +9,7 @@ import type { ProfileRuntime } from './profiles'
 export interface LibraryContext {
   router: {
     sendEvent(extensionId: string, eventName: string, ...args: unknown[]): void
+    broadcastEvent(eventName: string, ...args: unknown[]): void
     /** Registers `name` for chrome.* calls; `permission` must be in the calling extension's manifest. */
     apiHandler(): (name: string, callback: (event: ApiEvent, ...args: any[]) => unknown, opts?: { permission?: string }) => void
     /** Event name → the extension contexts listening for it. */

@@ -22,6 +22,7 @@ import { handleFavicons } from './favicons'
 import { FindInPage } from './find'
 import { frontmostApp, type FrontApp } from './frontmost'
 import { ExtensionDebugger } from './debugger'
+import { libraryOf } from './library'
 import { IdleWatcher } from './idle'
 import { secondsSinceInput } from './input'
 import { logPath, setupLogging } from './log'
@@ -153,7 +154,11 @@ app.on('open-file', (event, file) => {
 function state(): UiState {
   const active = tabs.active()
   return {
-    tabs: tabs.uiTabs(),
+    tabs: tabs.uiTabs().map((t) => {
+      const wc = tabs.webContentsFor(t.id)
+      const drivenBy = wc ? extensionDebugger.holder(wc) : undefined
+      return drivenBy ? { ...t, drivenBy } : t
+    }),
     activeId: tabs.activeId,
     folders: tabs.folders,
     splits: tabs.splits,
@@ -161,6 +166,7 @@ function state(): UiState {
     activeWebContentsId: tabs.activeWebContents()?.id ?? null,
     activePartition: active ? partitionFor(active.profile) : null,
     activeExtensions: actionExtensions(active?.profile),
+    tabExtensions: tabExtensions(),
     profiles: settings.profiles,
     filter,
     scope,
@@ -215,6 +221,20 @@ function state(): UiState {
     },
     now: Date.now(),
   }
+}
+
+/** The extensions tabs show as having opened them or working in them, by ID. */
+function tabExtensions(): UiState['tabExtensions'] {
+  const out: UiState['tabExtensions'] = {}
+  for (const t of tabs.records) {
+    const wc = tabs.webContentsFor(t.id)
+    for (const id of [t.openedBy, wc ? extensionDebugger.holder(wc) : undefined]) {
+      if (!id || out[id]) continue
+      const ext = runtimes.get(t.profile)?.session.extensions.getExtension(id)
+      if (ext) out[id] = { name: localizedName(ext), icon: iconOf(ext) }
+    }
+  }
+  return out
 }
 
 /** IDs of a profile's extensions that have a toolbar button. */
@@ -1967,8 +1987,8 @@ function popupAt(extensionId: string, anchorRect: { x: number; y: number; width:
 // ---------- extension hooks ----------
 
 const tabHooks: TabHooks = (profileId) => ({
-  createTab: async (details) => {
-    const rec = tabs.create({ profile: profileId, url: details.url || 'about:blank', activate: details.active !== false })
+  createTab: async (details, extension) => {
+    const rec = tabs.create({ profile: profileId, url: details.url || 'about:blank', activate: details.active !== false, openedBy: extension?.id })
     const wc = tabs.webContentsFor(rec.id)
     if (!wc) throw new Error('jbrow could not create a tab')
     return [wc, panel.win]
@@ -1992,6 +2012,42 @@ const tabHooks: TabHooks = (profileId) => ({
   removeWindow: (win) => {
     if (win !== panel.win && !win.isDestroyed()) (win as BrowserWindow).destroy()
   },
+  mainWindow: () => panel.win,
+  // Chrome lists a discarded tab with the title and address it had, and no more.
+  pagelessTabs: () => {
+    const [width, height] = panel.win.getSize()
+    return tabs.pageless(profileId).map(({ id, rec }) => ({
+      id,
+      windowId: panel.win.id,
+      index: -1,
+      active: false,
+      highlighted: false,
+      selected: false,
+      pinned: !!rec.pinned,
+      audible: false,
+      mutedInfo: { muted: false },
+      discarded: true,
+      autoDiscardable: true,
+      frozen: false,
+      groupId: -1,
+      incognito: false,
+      status: 'unloaded',
+      title: rec.title,
+      url: rec.url,
+      lastAccessed: rec.lastSeen,
+      width,
+      height,
+    }))
+  },
+  // A tab woken for an extension has a new ID; Chrome says so with tabs.onReplaced, as when a
+  // discarded tab came back.
+  tabFor: (id, wake) => {
+    const wc = tabs.pageFor(profileId, id, wake)
+    const rt = runtimes.get(profileId)
+    if (wc && wake && rt) libraryOf(rt).router.broadcastEvent('tabs.onReplaced', wc.id, id)
+    return wc
+  },
+  removePagelessTab: (id) => tabs.closePageless(profileId, id),
 })
 
 // ---------- UI messages ----------
@@ -2529,6 +2585,7 @@ app.whenReady().then(async () => {
       // The side panel steps aside for a fullscreen page and comes back after.
       sidePanels.layout()
     },
+    held: (wc) => !!extensionDebugger.holder(wc),
     confirmUnload,
     besideClosed: (id) => besideClosed(threadsInView(), id, settings.newTabsAt),
     profiles: () => settings.profiles,
@@ -2569,7 +2626,7 @@ app.whenReady().then(async () => {
     },
   })
   idle = new IdleWatcher()
-  extensionDebugger = new ExtensionDebugger()
+  extensionDebugger = new ExtensionDebugger(() => pushState())
   userScripts = new UserScripts()
   updates = new Updates({
     enabled: () => settings.autoUpdate,

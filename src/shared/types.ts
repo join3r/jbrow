@@ -44,6 +44,8 @@ export interface TabRecord {
   archivedAt?: number
   /** When Undo brought the thread back. Archiving counts it as seen then, so it gets its full time again. */
   restoredAt?: number
+  /** ID of the extension that opened it (chrome.tabs.create), as Stem does. */
+  openedBy?: string
 }
 
 /** A folder in the Kept section. */
@@ -74,6 +76,8 @@ export interface UiTab extends TabRecord {
   loaded: boolean
   /** Its page crashed and hasn't been reloaded. */
   crashed?: boolean
+  /** ID of the extension working in its page now (its chrome.debugger is attached). */
+  drivenBy?: string
 }
 
 export interface UiState {
@@ -89,6 +93,8 @@ export interface UiState {
   activePartition: string | null
   /** Extensions with a toolbar button in the active tab's profile. */
   activeExtensions: string[]
+  /** Names and icons of the extensions in tabs' openedBy and drivenBy, by ID. */
+  tabExtensions: Record<string, { name: string; icon?: string }>
   profiles: Profile[]
   filter: string
   scope: { key: string; name: string } | null

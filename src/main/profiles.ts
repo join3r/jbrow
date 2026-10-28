@@ -1,4 +1,4 @@
-import { app, dialog, session, type Session } from 'electron'
+import { app, dialog, session, type BaseWindow, type Session, type WebContents } from 'electron'
 import { ElectronChromeExtensions, type ChromeExtensionOptions } from 'electron-chrome-extensions'
 import { installChromeWebStore, installExtension } from 'electron-chrome-web-store'
 import path from 'node:path'
@@ -19,11 +19,22 @@ export interface ProfileRuntime {
   extensionsPath: string
 }
 
-/** How the extension library reaches back into jbrow's tabs. Shared by every profile. */
-export type TabHooks = (profileId: string) => Pick<
-  ChromeExtensionOptions,
-  'createTab' | 'selectTab' | 'removeTab' | 'createWindow' | 'removeWindow'
->
+/**
+ * How the extension library reaches back into jbrow's tabs. Shared by every profile. Past the
+ * library's own hooks are jbrow's, added by scripts/patch-deps.mjs: tabs without a page (asleep, or
+ * not opened since launch) have no WebContents, so jbrow lists them and loads one when asked.
+ */
+export type TabHooks = (profileId: string) => Pick<ChromeExtensionOptions, 'selectTab' | 'removeTab' | 'createWindow' | 'removeWindow'> & {
+  /** `extension` is the one that called chrome.tabs.create, if one did. */
+  createTab: (details: chrome.tabs.CreateProperties, extension?: Electron.Extension) => Promise<[WebContents, BaseWindow]>
+  /** jbrow's window, which holds every profile's tabs. */
+  mainWindow: () => BaseWindow
+  /** The profile's tabs without a page, as chrome.tabs.Tab. */
+  pagelessTabs: () => chrome.tabs.Tab[]
+  /** The page of the tab an extension knows by `id`; with `wake`, a tab without one gets it. */
+  tabFor: (id: number, wake: boolean) => WebContents | undefined
+  removePagelessTab: (id: number) => void
+}
 
 export const partitionFor = (profileId: string) => `persist:profile-${profileId}`
 

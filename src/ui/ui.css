@@ -333,6 +333,11 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .row .fav-home:hover { color: var(--ink); background: var(--hover); }
 .row .fav-home:hover .fav { visibility: hidden; }
 .row .fav-home:hover svg.i { display: block; }
+/* An extension's badge on the favicon: faint on a tab it opened, solid while it works in the page. */
+.row .fav-ext { position: relative; display: grid; width: 16px; height: 16px; }
+.row .fav-ext .ext-badge { position: absolute; right: -4px; bottom: -4px; display: grid; place-items: center; width: 10px; height: 10px; border-radius: 3px; object-fit: contain; color: var(--muted); background: var(--surface); box-shadow: 0 0 0 1px var(--line); opacity: 0.5; pointer-events: none; }
+.row .fav-ext .ext-badge svg.i { width: 8px; height: 8px; }
+.row .fav-ext .ext-badge.live { opacity: 1; box-shadow: 0 0 0 1.5px var(--pc, var(--muted)); }
 .row .t .away { margin-right: 5px; color: var(--muted); }
 .row.loading .fav { animation: pulse 1s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.35; } }

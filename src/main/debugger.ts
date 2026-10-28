@@ -24,6 +24,15 @@ export class ExtensionDebugger {
   /** By tab (WebContents) ID. */
   private attached = new Map<number, Attached>()
 
+  /** `onChange` hears when an extension attaches to a tab or lets go of one. */
+  constructor(private onChange: () => void) {}
+
+  /** The extension working in this page, if one is attached to it. */
+  holder(wc: WebContents): string | undefined {
+    for (const a of this.attached.values()) if (a.wc === wc) return a.extensionId
+    return undefined
+  }
+
   /** Adds chrome.debugger to a profile; see setupProfiles. */
   attach(rt: ProfileRuntime) {
     const lib = libraryOf(rt)
@@ -104,6 +113,7 @@ export class ExtensionDebugger {
             wc.off('did-navigate', onNavigated)
           },
         })
+        this.onChange()
       },
       opts,
     )
@@ -149,8 +159,11 @@ export class ExtensionDebugger {
   }
 
   private forget(tabId: number) {
-    this.attached.get(tabId)?.off()
+    const a = this.attached.get(tabId)
+    if (!a) return
+    a.off()
     this.attached.delete(tabId)
+    this.onChange()
   }
 }
 

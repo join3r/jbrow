@@ -834,9 +834,18 @@ function row(t: UiTab, thread: ThreadView<UiTab>, number?: number, showApp = tru
   // its favicon turns into a way back on hover.
   const away = awayFromHome(t)
   const img = t.favicon ? `<img class="fav" src="${esc(t.favicon)}" alt="">` : `<span class="fav none"></span>`
-  const fav = away
+  const page = away
     ? `<span class="fav-home" data-home="${t.id}" title="${esc(`Back to ${t.home!.title || t.home!.url}`)}">${img}${icon('undo')}</span>`
     : img
+  // An extension that opened the tab, or is working in it now (Stem), badges its favicon: faint
+  // for the one, solid for the other.
+  const by = t.drivenBy ?? t.openedBy
+  const ext = by ? S.tabExtensions[by] : undefined
+  const fav = ext
+    ? `<span class="fav-ext" title="${esc(t.drivenBy ? `${ext.name} is working in this tab` : `Opened by ${ext.name}`)}">${page}${
+        ext.icon ? `<img class="ext-badge${t.drivenBy ? ' live' : ''}" src="${esc(ext.icon)}" alt="">` : `<span class="ext-badge${t.drivenBy ? ' live' : ''}">${icon('puzzle')}</span>`
+      }</span>`
+    : page
   const name =
     renaming === t.id
       ? `<input class="ren" id="ren" value="${esc(displayName(t))}" aria-label="Tab name">`

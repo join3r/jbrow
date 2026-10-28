@@ -54,6 +54,20 @@ in these places:
     its extension unloads. Electron stops an idle worker after 30 seconds. With item 10 alone
     that ended Stem's host, and since jbrow's `chrome.alarms` runs on the worker's own timers,
     nothing woke the worker again: Stem had no jbrow tabs until jbrow restarted.
+12. `windows.get` and `windows.getAll` describe the window afresh each time. The library kept the
+    description it made when the window was added, before its tabs had details, so a window
+    listed no tabs until it was resized. Stem lists tabs through `windows.getAll` and reported
+    0 open tabs, though opening and driving tabs worked.
+13. Tabs without a page (asleep, or not opened since launch) are listed by `tabs.query` and
+    `windows.getAll` as Chrome's discarded tabs (`discarded: true`, `status: "unloaded"`). A tab
+    keeps the ID its last page had; one with no page since launch gets one from 1,000,000 up.
+    `tabs.get`, `update` and `reload` on one load its page in the background and answer under
+    the page's ID, and `tabs.onReplaced` says so, as Chrome did for a discarded tab. Every ID a
+    tab had reaches it until it closes, and `tabs.remove` closes one without loading it. jbrow's
+    window is always in `windows.getAll`, so an extension opens tabs there instead of making a
+    window of its own.
+14. `tabs.create` tells jbrow which extension asked, and the tab keeps it (`openedBy`) for the
+    favicon badge; `chrome.debugger` tells it which extension is working in a page.
 
 **`src/preload/extension-shims.ts`** runs in every extension context before the library:
 
@@ -194,7 +208,7 @@ These are worth sending upstream to electron-browser-shell once they've proven t
   but no service worker keeps them off.
 - Extension service workers stop after about 30 seconds idle and wake on events, as in Chrome.
 - `chrome.debugger` reaches tabs only, not extension or browser targets, and has no `getTargets`.
-  jbrow shows no "is debugging this browser" bar. Files are off limits even for an extension
-  allowed file access.
+  Instead of Chrome's "is debugging this browser" bar, the tab's favicon carries the extension's
+  icon. Files are off limits even for an extension allowed file access.
 - `chrome.downloads` is the library's stub: `search` answers nothing and no events fire, so Stem
   never sees a download a page started.
