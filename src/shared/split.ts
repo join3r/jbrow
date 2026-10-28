@@ -4,8 +4,6 @@ import type { Split } from './types'
 export const MAX_PANES = 4
 /** The gap between panes, which you drag to resize them. Must match --pane-gap in src/ui/ui.css. */
 export const PANE_GAP = 8
-/** The strip above each pane's page that holds its close button. Must match --pane-head in src/ui/ui.css. */
-export const PANE_HEAD = 24
 /** Dragging a divider stops short of making a pane narrower than this. */
 export const MIN_PANE = 200
 

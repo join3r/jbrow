@@ -107,7 +107,7 @@ usual (swipe again at their edge to navigate), and not over an iframe. jbrow fol
 **Swipe between pages** setting (Trackpad → More Gestures): two fingers, three fingers, both or
 off.
 
-Drag the window's edges to resize it and its toolbar to move it. jbrow keeps both in settings.json,
+Drag the window's edges to resize it and its top edge or the row above the tabs to move it. jbrow keeps both in settings.json,
 so the window comes back the same after a restart. Unpinned, it keeps a size and place for each
 display and comes up on the display the pointer is on; pinned, it comes back where you left it, like
 any window. **Reset size and position** under **General** in settings goes back to the default, 72% by
@@ -128,6 +128,13 @@ and finished downloads throw confetti. Reduce motion in macOS turns it off.
 The profile filter at the top of the sidebar shows each profile's color, the same color as the bar
 on its tabs. A new tab says which profile it opens in and lets you switch; right-click **+** for a
 new tab in a specific profile.
+
+The address bar is the top of the page's card: back, reload, the profile, the lock, the address
+(its site bright, the rest dimmed), the wand and the profile's pinned extensions. It takes the page's
+color, so bar and page read as one: the color across the top of the page when that's a single color,
+else the page's theme-color, else jbrow's own. While you type it turns jbrow's own again, so what you
+type never looks like part of the page. ⌘F finds in the page right there, in place of the address. The
+window-wide buttons (downloads, sound, pin and settings) sit at the foot of the sidebar.
 
 While you type in the address bar, Tab (⇧Tab goes back) switches the profile the address opens in; the
 profile in the address bar changes to match, and the foot of the suggestions says which profile Tab goes to next. On a new tab the tab itself moves over. On a tab with a page,
@@ -201,8 +208,12 @@ sidebar, its tabs side by side, where the first of them comes: ⌘D on a kept ta
 right after it, so the split stays in Kept, while on a pinned tab the pinned icon stays and the new tab
 goes to the top of Today. To split with a
 tab you already have, right-click it and choose **Open in split view**. Drag the gap between two
-panes to resize them. The focused pane has a thin ring, and the address bar and your keys (reload,
-find, zoom, ⌘L, DevTools) act on it; click a pane or use ⌃⌘←/→ to focus another. A tab whose split partners
+panes to resize them. Each pane has its own address bar on top of its page, with back, reload, its
+profile, the address and the pinned extensions of its profile, so two panes in different profiles show
+each their own; the × at its end takes the pane out of the split. Click another pane's address to type
+there, or its puzzle for its extensions. In a narrow pane the bar folds: reload, the profile's name, the
+rest of the address and all but one extension go, and the puzzle still lists them. The focused pane has a
+thin ring, and your keys (reload, find, zoom, ⌘L, DevTools) act on it; click a pane or use ⌃⌘←/→ to focus another. A tab whose split partners
 show elsewhere (a pinned icon, or a profile filtered out) has a split icon instead (hover it to see the
 other tabs), and the panes on screen besides the focused one are lightly highlighted. Opening any of them shows the whole split with that one focused.
 ⌘W closes the focused pane, and the tab left alone fills the page area again. Right-click a tab in a
@@ -309,11 +320,11 @@ back. Archived tabs are forgotten after 90 days.
 
 
 Downloads go straight into ~/Downloads, renamed `name (1).ext` if the name is taken. Each one shows
-as a small pie in the toolbar while it runs. Click it for the name, size, speed, time left, folder and
+as a small pie at the foot of the sidebar while it runs. Click it for the name, size, speed, time left, folder and
 source, and to pause, resume or cancel it. A finished download turns into a check; open its details
 to open the file or show it in Finder. Apps, installers and scripts only get Show in Finder, and every
 download is quarantined, so Gatekeeper checks it as it would one from Safari or Chrome. A page that starts a
-second download asks first, as in Chrome, and while jbrow is hidden it's simply blocked. Finished downloads leave the toolbar when jbrow hides or when you
+second download asks first, as in Chrome, and while jbrow is hidden it's simply blocked. Finished downloads leave the sidebar when jbrow hides or when you
 close their details, and if one finishes while jbrow is hidden, you get a notification. A link that opens
 a new tab only to start a download closes that tab again.
 
@@ -321,7 +332,7 @@ a new tab only to start a download closes that tab again.
 
 Restyling is off until you turn on **Restyle sites** under **Restyling** in settings, which you can
 only do with Claude Code or Codex installed (jbrow looks for them each time settings opens). Then the
-wand icon in the toolbar restyles the site you're on; it's hidden while restyling is off or the agent
+wand icon in the address bar restyles the site you're on; it's hidden while restyling is off or the agent
 you picked isn't installed. Turned off, saved styles stop applying until you turn it on again. Type how it should look ("dark theme",
 "hide the sidebar", "wider text column, bigger font") and press Return. jbrow sends Claude a
 screenshot of the page, an outline of its DOM, the colors and fonts on screen and the site's
@@ -385,7 +396,7 @@ on first run. The menu bar item's **Open settings.json** opens it. Restart jbrow
   the display's usable area) and where you left the pinned one (`pinned`, in screen coordinates).
 - `unpackedExtensions`: extension folders to load per profile, such as one you're writing.
 - `pinned`: a regular window with a Dock icon that opens at launch and stays when you click away
-  (on by default). The pin in the toolbar and ⇧⌘P switch it, and jbrow remembers.
+  (on by default). The pin at the foot of the sidebar and ⇧⌘P switch it, and jbrow remembers.
 - `quietLinks`: open links you didn't click in the background (on by default).
 - `searchUrl`: the search engine's address, `%s` where the query goes. Pick one under **General**.
 - `searchSuggestions`: ask the search engine for suggestions as you type (on by default).

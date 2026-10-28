@@ -4,7 +4,7 @@ import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, t
 import { siteProfile as matchSiteProfile, urlMatcher } from '../shared/patterns'
 import { awayFromHome, besideClosed, isInFolder, isPinned, keptThreads, numberedThreads, sections, type FolderView } from '../shared/threads'
 import { forcedSearch, isSearchUrl, looksLikeAddress, suggestUrlFor } from '../shared/engines'
-import { THEMES, URL_BAR_STYLES, type AppEntry, type AppLabel, type Folder, type ExtensionView, type Prefs, type Profile, type RestyleAgent, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
+import { THEMES, URL_BAR_STYLES, type AppEntry, type AppLabel, type Folder, type ExtensionView, type PaneBar, type Prefs, type Profile, type RestyleAgent, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
 import { BACKGROUND } from './background'
 import { Certificates } from './certs'
@@ -166,6 +166,24 @@ app.on('open-file', (event, file) => {
 
 // ---------- state for the UI ----------
 
+function paneBar(id: string): PaneBar {
+  const t = tabs.get(id)
+  const wc = tabs.webContentsFor(id)
+  const cert = t ? certs.view(id, t.profile, t.url) : null
+  const { canGoBack, loading } = tabs.navState(id)
+  return {
+    id,
+    webContentsId: wc?.id ?? null,
+    partition: t ? partitionFor(t.profile) : null,
+    extensions: actionExtensions(t?.profile),
+    canGoBack,
+    loading,
+    lock: cert ? (cert.error ? 'warn' : 'secure') : t && isInsecure(t.url) ? 'warn' : null,
+    // jbrow's own screens cover a page it stopped or that's asking for a password.
+    color: t?.url && !certs.isBlocked(id) && !dangerous.isBlocked(id) && !logins.isAsking(id) ? tabs.barColor(id) : null,
+  }
+}
+
 function state(): UiState {
   const active = tabs.active()
   return {
@@ -175,6 +193,7 @@ function state(): UiState {
       return drivenBy ? { ...t, drivenBy } : t
     }),
     activeId: tabs.activeId,
+    panes: tabs.shown().map(paneBar),
     folders: tabs.folders,
     splits: tabs.splits,
     archiveNotice: noticeRoots(),
@@ -2237,12 +2256,13 @@ function wireIpc() {
     if (id) switchProfile(id, profile, true)
   })
   on('new-tab-menu', () => newTabMenu())
-  on<{ action: 'back' | 'forward' | 'reload' | 'stop'; hard?: boolean }>('nav', ({ action, hard }) => {
-    const wc = tabs.activeWebContents()
-    if (!wc) return
+  // Without an id, the active tab; with one, another pane's, from its own address bar.
+  on<{ action: 'back' | 'forward' | 'reload' | 'stop'; hard?: boolean; id?: string }>('nav', ({ action, hard, id = tabs.activeId ?? undefined }) => {
+    const wc = id ? tabs.webContentsFor(id) : null
+    if (!id || !wc) return
     if (action === 'back') wc.navigationHistory.goBack()
     else if (action === 'forward') wc.navigationHistory.goForward()
-    else if (action === 'reload') tabs.reload(tabs.activeId!, hard)
+    else if (action === 'reload') tabs.reload(id, hard)
     else wc.stop()
   })
   on('restyle-check', () => void restyler.checkAgents())

@@ -9,8 +9,11 @@ const debug = (...args: unknown[]) => process.env.JBROW_DEBUG && console.log('[p
 
 /** Sidebar and toolbar sizes; must match src/ui/ui.css. */
 export const SIDEBAR_WIDTH = 256
-export const TOOLBAR_HEIGHT = 50
 export const GUTTER = 8
+/** Each page's address bar, the top of its card. */
+export const BAR_HEIGHT = 40
+/** Where pages start: below the gap at the top of the window and their address bars. */
+export const TOOLBAR_HEIGHT = GUTTER + BAR_HEIGHT
 /** The extension side panel: the gap you drag to resize it, and its header above its page. */
 export const SIDE_GAP = 8
 export const SIDE_HEADER = 32
@@ -266,15 +269,15 @@ export class Panel {
     }
   }
 
-  /** Where the extension side panel's page goes, under its header. */
+  /** Where the extension side panel's page goes, under its header. It reaches up beside the address bars. */
   sideBounds(): Rectangle {
     const { x, y, width, height } = this.contentBox()
     const side = this.hooks.sideWidth()
     return {
       x: x + width - GUTTER - side,
-      y: y + TOOLBAR_HEIGHT + SIDE_HEADER,
+      y: y + GUTTER + SIDE_HEADER,
       width: side,
-      height: Math.max(0, height - TOOLBAR_HEIGHT - SIDE_HEADER - GUTTER),
+      height: Math.max(0, height - GUTTER - SIDE_HEADER - GUTTER),
     }
   }
 

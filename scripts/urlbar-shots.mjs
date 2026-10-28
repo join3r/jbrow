@@ -293,7 +293,7 @@ const painted = (ui) => ui.eval('new Promise((r) => requestAnimationFrame(() => 
 /** The address bar and its suggestions, with a margin, widened or deepened to the cards' shape. */
 async function clipRect(ui) {
   const r = await ui.call(() => {
-    const a = document.querySelector('.omni-field')?.parentElement?.getBoundingClientRect()
+    const a = document.getElementById('bar').getBoundingClientRect()
     const b = document.getElementById('suggest').getBoundingClientRect()
     return { left: Math.min(a.left, b.left), top: a.top, right: Math.max(a.right, b.right), bottom: b.bottom, vw: innerWidth, vh: innerHeight, dpr: devicePixelRatio }
   })
@@ -338,7 +338,7 @@ async function shoot(jb, ui, layout, file) {
   // Only the address bar and its suggestions, on the theme's plain background: the sidebar, the
   // buttons beside it and the window's see-through backdrop would show at the edges.
   await ui.eval(`(() => {
-    document.querySelector('.omni-field').parentElement.dataset.shot = ''
+    document.getElementById('bar').dataset.shot = ''
     const style = document.createElement('style')
     style.id = 'shotStyle'
     style.textContent = 'html { background: var(--solid) } body *:not([data-shot], [data-shot] *) { visibility: hidden } [data-shot] { visibility: visible }'

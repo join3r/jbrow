@@ -222,7 +222,7 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
       <div class="wl-head">
         <span class="wl-eyebrow">Pinned or ethereal</span>
         <h2>Keep it pinned, or let it disappear?</h2>
-        <p class="wl-lede">Try each one on the little Mac: click the other app and see what jbrow does. Switch any time with the pin in the toolbar or ${caps(S!.keys.pin)}.</p>
+        <p class="wl-lede">Try each one on the little Mac: click the other app and see what jbrow does. Switch any time with the pin at the foot of the sidebar or ${caps(S!.keys.pin)}.</p>
       </div>
       <div class="wl-grid2">
         <button id="wl-mode-pinned" class="wl-choice" data-act="mode" data-v="pinned" aria-pressed="${pinned}">
@@ -454,7 +454,7 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
           <span class="label">Also in jbrow</span>
           <div class="wl-features">
             <div><span class="t">Split view ${caps(S!.keys.splitView)}</span><span class="d">Up to four tabs side by side.</span></div>
-            <div><span class="t">Restyle a site</span><span class="d">Tell Claude how a site should look with the wand in the toolbar. It writes the stylesheet.</span></div>
+            <div><span class="t">Restyle a site</span><span class="d">Tell Claude how a site should look with the wand in the address bar. It writes the stylesheet.</span></div>
             <div><span class="t">Extensions</span><span class="d">Install from the Chrome Web Store, per profile.</span></div>
             <div><span class="t">Reopen tab ${caps(S!.keys.reopenTab)}</span><span class="d">The last 25, in their old place, history included.</span></div>
             <div><span class="t">Swipe back</span><span class="d">Two fingers on the trackpad, as in Chrome.</span></div>

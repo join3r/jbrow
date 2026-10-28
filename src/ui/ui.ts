@@ -10,7 +10,7 @@ import type { LayoutHost, OpenIn, Outcome, SuggestLayout } from './suggest/layou
 import { LAYOUTS, layoutPictureHtml, URL_BAR_LAYOUTS } from './suggest/layouts'
 import { isEmpty, suggestModel, type Item, type SuggestModel, type VisitItem } from './suggest/model'
 import { initWelcome } from './welcome'
-import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type ExtensionView, type Prefs, type Profile, type SearchReply, type SiteInfoReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type UpdateView, type UrlBarStyle, type VisitView } from '../shared/types'
+import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type ExtensionView, type PaneBar, type Prefs, type Profile, type SearchReply, type SiteInfoReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type UpdateView, type UrlBarStyle, type VisitView } from '../shared/types'
 import { afterRender, beforeRender, downloadsChanged, flourish, setWhimsy } from './whimsy'
 
 declare global {
@@ -38,6 +38,7 @@ const restylePane = $('restylePane')
 const restylePrompt = $<HTMLTextAreaElement>('restylePrompt')
 const settingsEl = $('settings')
 const privateMask = $('privateMask')
+const urlShow = $('urlShow')
 const rulesPop = $('rulesPop')
 const folderRules = $<HTMLTextAreaElement>('folderRules')
 const certPop = $('certPop')
@@ -221,6 +222,7 @@ function render() {
   syncCovering()
   renderSidePanel()
   renderPanes()
+  settleActivate()
 }
 
 /** The header and the space for an extension's side panel; its page is a native view main lays over it. */
@@ -297,24 +299,28 @@ const shownPanes = () => activeSplit()?.tabs ?? (S?.activeId ? [S.activeId] : []
 /**
  * Around the pages main lays side by side: the room for each pane (a new tab has no page there
  * yet), the dividers in the gaps and the ring around the focused pane. The active tab's own
- * screens (new tab, certificate, crash) move into its pane through --fx and --fw.
+ * screens (new tab, certificate, crash) and its address bar move into its pane through --fx and
+ * --fw; the other panes get bars of their own.
  */
 function renderPanes() {
   const split = activeSplit()
   contentEl.classList.toggle('split', !!split)
   panesEl.hidden = !split || !settingsEl.hidden
+  renderBar(split)
   if (!split || !S) {
     paneBgs.innerHTML = ''
-    contentEl.style.removeProperty('--fx')
-    contentEl.style.removeProperty('--fw')
+    root.style.removeProperty('--fx')
+    root.style.removeProperty('--fw')
+    renderPaneBars([], [])
     return
   }
   const sizes = paneDrag?.id === split.id ? paneDrag.sizes : split.sizes
   const spans = paneSpans(contentEl.clientWidth, sizes)
   const focused = Math.max(0, split.tabs.indexOf(S.activeId!))
   const f = spans[focused]
-  contentEl.style.setProperty('--fx', `${f.x}px`)
-  contentEl.style.setProperty('--fw', `${f.width}px`)
+  root.style.setProperty('--fx', `${f.x}px`)
+  root.style.setProperty('--fw', `${f.width}px`)
+  barEl.classList.toggle('last', focused > 0 && focused === split.tabs.length - 1)
   paneBgs.innerHTML = split.tabs
     .map((id, i) => {
       const empty = i !== focused && !S!.tabs.find((t) => t.id === id)?.url
@@ -324,22 +330,136 @@ function renderPanes() {
   panesEl.innerHTML =
     `<div class="pane-ring" style="left:${f.x}px;width:${f.width}px"></div>` +
     spans
-      .map((s, i) => `<button class="pane-x" data-close-pane="${esc(split.tabs[i])}" style="left:${s.x + s.width}px" title="Take out of split view" aria-label="Take out of split view">${icon('close')}</button>`)
-      .join('') +
-    spans
       .slice(1)
       .map((s, i) => `<div class="pane-split${paneDrag?.i === i ? ' drag' : ''}" data-divider="${i}" style="left:${s.x - PANE_GAP}px" title="Drag to resize"></div>`)
       .join('')
+  renderPaneBars(split.tabs, spans)
 }
+
+// ---------- address bars ----------
+
+const barEl = $('bar')
+const paneBarsEl = $('paneBars')
+const paneBar = (id: string): PaneBar | undefined => S?.panes.find((p) => p.id === id)
+
+/** Whether light text reads better than dark on a #rrggbb color, by its relative luminance as WCAG works it out. */
+function isDark(hex: string): boolean {
+  const n = parseInt(hex.slice(1), 16)
+  const lin = (c: number) => ((c /= 255) <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+  return 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255) < 0.18
+}
+
+/** A bar takes its page's color, or keeps jbrow's surface. */
+function paintBar(el: HTMLElement, color: string | null) {
+  if (color) el.style.setProperty('--site', color)
+  else el.style.removeProperty('--site')
+  el.classList.toggle('tone-dark', !!color && isDark(color))
+  el.classList.toggle('tone-light', !!color && !isDark(color))
+}
+
+/** The active tab's bar: its color, and the × that takes it out of a split. */
+function renderBar(split = activeSplit()) {
+  paintBar(barEl, (S?.activeId && paneBar(S.activeId)?.color) || null)
+  $('paneClose').hidden = !split
+  if (!split) barEl.classList.remove('last')
+}
+
+/**
+ * The bars of a split's other panes. Each shows its own tab: back, reload, profile, lock, the
+ * address and its profile's pinned extensions, which work in place. Clicking the address or the
+ * extensions makes the pane active first, so its keyboard and popovers are the live bar's.
+ */
+function renderPaneBars(ids: string[], spans: { x: number; width: number }[]) {
+  const others = new Set(ids.filter((id) => id !== S?.activeId))
+  for (const el of [...paneBarsEl.children] as HTMLElement[]) if (!others.has(el.dataset.bar!)) el.remove()
+  ids.forEach((id, i) => {
+    const p = paneBar(id)
+    const t = S?.tabs.find((x) => x.id === id)
+    if (!others.has(id) || !p || !t || !S) return
+    let el = paneBarsEl.querySelector<HTMLElement>(`[data-bar="${CSS.escape(id)}"]`)
+    if (!el) {
+      el = document.createElement('div')
+      el.className = 'bar pane-bar'
+      el.dataset.bar = id
+      el.innerHTML = `<div class="bar-main" style="display:contents"></div><div class="pinned-actions"></div>
+        <button class="icon sm bar-btn" data-bar-ext title="Extensions" aria-label="Extensions">${icon('puzzle')}</button>
+        <button class="icon sm bar-btn" data-close-pane title="Take out of split view" aria-label="Take out of split view">${icon('close')}</button>`
+      paneBarsEl.append(el)
+    }
+    el.style.left = `${spans[i].x}px`
+    el.style.width = `${spans[i].width}px`
+    paintBar(el, p.color)
+    const prof = profile(t.profile)
+    const named = !!prof && S.profiles.length > 1
+    const masked = isPrivate(t.url)
+    const lockTitle = p.lock === 'warn' ? 'Not secure' : 'Secure connection'
+    const main =
+      `<div class="profile-band${named ? ' on' : ''}" style="--pc:${esc(prof?.color || '#8a93a1')}">` +
+      `<div class="nav"><button class="icon sm" data-nav="back" title="Back" aria-label="Back"${p.canGoBack ? '' : ' disabled'}>${icon('back')}</button>` +
+      `<button class="icon sm reload" data-nav="${p.loading ? 'stop' : 'reload'}" title="${p.loading ? 'Stop' : 'Reload'}" aria-label="${p.loading ? 'Stop' : 'Reload'}">${icon(p.loading ? 'close' : 'reload')}</button></div>` +
+      (named ? `<span class="profile-name">${esc(prof.name)}</span>` : '') +
+      `</div>` +
+      (p.lock && !masked ? `<span class="lock${p.lock === 'warn' ? ' warn' : ''}" title="${lockTitle}" aria-label="${lockTitle}">${icon(p.lock === 'warn' ? 'warn' : 'lock')}</span>` : '') +
+      `<button class="pane-url" data-focus-bar title="${esc(masked ? 'Private' : t.url)}">${
+        !t.url ? '<span class="none">New tab</span>' : masked ? '<span class="none">Private</span>' : addressHtml(t.url)
+      }</button>`
+    const mainEl = el.querySelector<HTMLElement>('.bar-main')!
+    if (mainEl.dataset.key !== main) {
+      mainEl.dataset.key = main
+      mainEl.innerHTML = main
+    }
+    // The hidden list loads the profile's extensions for the buttons, which draw from it.
+    const pinned = S.prefs.pinnedExtensions.filter((x) => p.extensions.includes(x))
+    const tab = p.webContentsId != null ? String(p.webContentsId) : '-1'
+    const partition = esc(p.partition ?? '')
+    const acts =
+      `<browser-action-list hidden partition="${partition}" tab="${tab}"></browser-action-list>` +
+      pinned.map((x) => `<button is="browser-action" class="pinned-action" id="${esc(x)}" partition="${partition}" tab="${tab}" alignment="bottom left"></button>`).join('')
+    const actsEl = el.querySelector<HTMLElement>('.pinned-actions')!
+    if (actsEl.dataset.key !== acts) {
+      actsEl.dataset.key = acts
+      actsEl.innerHTML = acts
+    }
+  })
+}
+
+/** A pane made active from its bar, and what to do once it is: the keyboard into the address, or its extensions open. */
+let afterActivate: { id: string; then: 'type' | 'extensions' } | null = null
+function activateFromBar(id: string, then: 'type' | 'extensions') {
+  afterActivate = { id, then }
+  send('activate', { id })
+}
+/** Runs once the state says the pane is active. */
+function settleActivate() {
+  if (!afterActivate || S?.activeId !== afterActivate.id) return
+  const { then } = afterActivate
+  afterActivate = null
+  if (then === 'extensions') return setExtensions(true)
+  focusUi()
+  omnibox.focus()
+  omnibox.select()
+}
+
+paneBarsEl.addEventListener('mousedown', (e) => {
+  // The address takes the keyboard on click, as the live bar's does, without the page grabbing it back first.
+  if ((e.target as HTMLElement).closest('[data-focus-bar]')) e.preventDefault()
+})
+paneBarsEl.addEventListener('click', (e) => {
+  const el = e.target as HTMLElement
+  const id = el.closest<HTMLElement>('[data-bar]')?.dataset.bar
+  if (!id) return
+  const nav = el.closest<HTMLElement>('[data-nav]')?.dataset.nav
+  if (nav) return send('nav', { action: nav, id, hard: nav === 'reload' && e.shiftKey })
+  if (el.closest('[data-close-pane]')) return send('close-pane', { id })
+  if (el.closest('[data-focus-bar]')) return activateFromBar(id, 'type')
+  if (el.closest('[data-bar-ext]')) activateFromBar(id, 'extensions')
+})
+$('paneClose').addEventListener('click', () => S?.activeId && send('close-pane', { id: S.activeId }))
 new ResizeObserver(() => renderPanes()).observe(contentEl)
 // A pane without a page is jbrow's; clicking it focuses its tab. Panes with a page focus themselves.
 paneBgs.addEventListener('mousedown', (e) => {
   const id = (e.target as HTMLElement).closest<HTMLElement>('[data-pane]')?.dataset.pane
   if (id && id !== S?.activeId) send('activate', { id })
-})
-panesEl.addEventListener('click', (e) => {
-  const id = (e.target as HTMLElement).closest<HTMLElement>('[data-close-pane]')?.dataset.closePane
-  if (id) send('close-pane', { id })
 })
 // Drag a gap between panes to resize them, as with the side panel.
 panesEl.addEventListener('mousedown', (e) => {
@@ -373,7 +493,7 @@ panesEl.addEventListener('mousedown', (e) => {
 })
 
 /**
- * Pinned extensions, as <browser-action> buttons in the toolbar. Only those the current profile
+ * Pinned extensions, as <browser-action> buttons in the active tab's address bar. Only those the current profile
  * has show. The buttons draw from the state the popover's <browser-action-list> loads.
  */
 const pinnedEl = $('pinnedActions')
@@ -396,7 +516,7 @@ function renderPinnedActions() {
 }
 /** Redraws pinned buttons when an extension changes its icon or badge. */
 function refreshPinnedActions() {
-  for (const b of pinnedEl.children) b.setAttribute('tab', b.getAttribute('tab') ?? '-1')
+  for (const b of document.querySelectorAll('.pinned-action')) b.setAttribute('tab', b.getAttribute('tab') ?? '-1')
 }
 ;(window as unknown as { browserAction?: { addEventListener(name: string, fn: () => void): void } }).browserAction?.addEventListener(
   'update',
@@ -610,6 +730,25 @@ function showAddress() {
   omnibox.value = masked ? '' : url
   omnibox.placeholder = masked ? '' : 'Search or type a tab name'
   privateMask.hidden = !masked
+  // At rest it reads as the site, the rest of the address dimmed after it.
+  const dressed = !masked && !!url
+  omnibox.classList.toggle('dressed', dressed)
+  urlShow.hidden = !dressed
+  if (dressed) urlShow.innerHTML = addressHtml(url)
+}
+
+/** An address as a bar shows it at rest: the site (with its port), then the rest dimmed. Other addresses whole. */
+function addressHtml(url: string): string {
+  try {
+    const u = new URL(url)
+    if (u.protocol === 'http:' || u.protocol === 'https:') {
+      const rest = (u.pathname === '/' ? '' : u.pathname) + u.search + u.hash
+      return `<span class="host">${esc(u.host.replace(/^www\./, ''))}</span><span class="rest">${esc(rest)}</span>`
+    }
+  } catch {
+    // Not an address URL can read; shown as it is.
+  }
+  return `<span class="host">${esc(url)}</span>`
 }
 
 function renderThreads() {
@@ -1498,7 +1637,7 @@ $('newTab').addEventListener('click', () => {
 
 // ---------- sound ----------
 // A page can play sound from anywhere: a tab in a closed folder, another profile, or the Earlier
-// section. Each tab says so with a speaker, and so does the toolbar, with a list to go there from.
+// section. Each tab says so with a speaker, and so does the foot of the sidebar, with a list to go there from.
 
 const heard = (t: UiTab) => !!t.audible && !t.muted
 
@@ -1703,7 +1842,7 @@ function renderDownloadPop() {
 
 function setDownload(id: string | null) {
   if (id === dlOpen) return
-  // Looking at a finished download is what takes it off the toolbar.
+  // Looking at a finished download is what takes it off the sidebar.
   const prev = downloads.find((d) => d.id === dlOpen)
   if (prev && finished(prev)) send('download', { id: prev.id, action: 'dismiss' })
   dlOpen = id
@@ -1869,6 +2008,7 @@ function setSettings(open: boolean, to?: string) {
 function showSettings(show: boolean) {
   if (show === !settingsEl.hidden || (show && !settingsTab)) return
   settingsEl.hidden = !show
+  root.classList.toggle('settings-open', show)
   if (!show) setEmojiPop(null)
   $('settingsButton').setAttribute('aria-pressed', String(show))
   // So your key for closing a tab closes settings while it's the one showing.
@@ -3168,6 +3308,7 @@ document.addEventListener('keydown', (e) => {
 // ---------- find in page ----------
 
 const findBar = $('find')
+const omniEl = findBar.closest<HTMLElement>('.omni')!
 const findInput = $<HTMLInputElement>('findInput')
 const findCount = $('findCount')
 
@@ -3185,6 +3326,7 @@ function showFindCount(matches: number, active: number) {
 function openFind() {
   const reopen = findBar.hidden
   findBar.hidden = false
+  omniEl.classList.add('finding')
   focusUi()
   findInput.focus()
   findInput.select()
@@ -3195,6 +3337,7 @@ function openFind() {
 function closeFind(focusPage = true) {
   if (findBar.hidden) return
   findBar.hidden = true
+  omniEl.classList.remove('finding')
   findCount.textContent = ''
   findBar.classList.remove('none')
   send('find-stop')

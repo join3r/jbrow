@@ -58,7 +58,7 @@ Don't add `session.webRequest` listeners: one is enough to switch off every exte
 (`src/main/jbrow-extension.ts`) as rules.
 
 Layout: `src/main` (Electron main process: panel, tabs, profiles, hotkeys), `src/preload` (UI
-bridge and extension shims), `src/ui` (the toolbar and sidebar), `src/shared` (sidebar logic both
+bridge and extension shims), `src/ui` (the address bars and sidebar), `src/shared` (sidebar logic both
 sides use), `scripts/patch-deps.mjs` (fixes to electron-chrome-extensions).
 The log is at `~/Library/Logs/jbrow/main.log` (menu bar item, **Show log file**).
 

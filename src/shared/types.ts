@@ -86,9 +86,31 @@ export interface UiTab extends TabRecord {
   muted?: boolean
 }
 
+/**
+ * What one pane's address bar shows: the active tab's, or each tab of its split. The active
+ * tab's bar has the rest of UiState besides; the others are drawn from this alone.
+ */
+export interface PaneBar {
+  id: string
+  /** For its <browser-action> buttons. Null for a new tab with no page yet. */
+  webContentsId: number | null
+  /** Session partition of the tab's profile. */
+  partition: string | null
+  /** Extensions with a toolbar button in the tab's profile. */
+  extensions: string[]
+  canGoBack: boolean
+  loading: boolean
+  /** The lock: a trusted https page, one with a certificate error or over plain http, or neither (jbrow's own pages, local files). */
+  lock: 'secure' | 'warn' | null
+  /** The color the bar takes from the page, as #rrggbb; null keeps jbrow's surface. */
+  color: string | null
+}
+
 export interface UiState {
   tabs: UiTab[]
   activeId: string | null
+  /** The address bars on screen, one per pane, left to right. */
+  panes: PaneBar[]
   folders: Folder[]
   splits: Split[]
   /** Threads (root IDs) archived since you last looked, for the sidebar's Undo. */

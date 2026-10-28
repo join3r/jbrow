@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { bezier } from '../shared/ease'
 import { addressUrl, forcedSearch } from '../shared/engines'
 import { urlMatcher } from '../shared/patterns'
-import { MAX_PANES, PANE_HEAD, paneSpans, splitOf } from '../shared/split'
+import { MAX_PANES, paneSpans, splitOf } from '../shared/split'
 import { byOrder, createdBeside, flatten, isAsleep, isInFolder, isRoot, parentFolder, samePage, subtree, threadsOf } from '../shared/threads'
 import type { CrashView, Folder, KeepLoaded, Profile, Split, TabRecord, UiTab } from '../shared/types'
 import type { Certificates } from './certs'
@@ -17,6 +17,7 @@ import type { Logins } from './logins'
 import type { SitePermissions } from './permissions'
 import type { ProfileRuntime } from './profiles'
 import { setAside, writeAtomic } from './json-file'
+import { SiteColors } from './site-color'
 
 interface LiveTab {
   view: WebContentsView
@@ -179,6 +180,8 @@ export class Tabs {
   archivedRev = 0
   activeId: string | null = null
   private live = new Map<string, LiveTab>()
+  /** The color each page's address bar takes. */
+  private colors = new SiteColors(() => this.deps.onChange())
   /** The tabs layout() last put on screen, so it only has to hide those. */
   private placed: string[] = []
   private saveTimer: NodeJS.Timeout | null = null
@@ -396,6 +399,10 @@ export class Tabs {
   shown(): string[] {
     return this.activeId ? this.panesOf(this.activeId) : []
   }
+  /** The color a tab's address bar takes from its page, null for jbrow's own. Only for tabs on screen: it may look at the page. */
+  barColor(id: string): string | null {
+    return this.crashed.has(id) ? null : this.colors.color(id)
+  }
   idForWebContents(wc: WebContents): string | undefined {
     for (const [id, live] of this.live) if (live.wc === wc) return id
     return undefined
@@ -420,8 +427,8 @@ export class Tabs {
     wc.setAudioMuted(muted)
     this.deps.onChange()
   }
-  navState() {
-    const wc = this.activeWebContents()
+  navState(id = this.activeId) {
+    const wc = id ? this.webContentsFor(id) : null
     return {
       canGoBack: wc?.navigationHistory.canGoBack() ?? false,
       canGoForward: wc?.navigationHistory.canGoForward() ?? false,
@@ -491,6 +498,7 @@ export class Tabs {
     const live: LiveTab = { view, wc: view.webContents, loading: false }
     this.live.set(rec.id, live)
     this.wire(rec.id, view.webContents, rt)
+    this.colors.watch(rec.id, view.webContents)
     this.addingView = true
     try {
       rt.extensions.addTab(view.webContents, win)
@@ -742,7 +750,10 @@ export class Tabs {
       }
       this.sentAt.delete(id)
       if (this.fullscreenId === id) this.setFullscreen(null)
-      if (this.live.get(id)?.wc === wc) this.live.delete(id)
+      if (this.live.get(id)?.wc === wc) {
+        this.live.delete(id)
+        this.colors.forget(id)
+      }
       this.killing.delete(id)
       this.deps.certs.clear(id)
       this.deps.dangerous.clear(id)
@@ -1003,7 +1014,7 @@ export class Tabs {
         const y = area.y + (this.fullscreenId ? 0 : this.slideY)
         live.view.setBounds(
           spans
-            ? { x: area.x + spans[i].x, y: y + PANE_HEAD, width: spans[i].width, height: Math.max(0, area.height - PANE_HEAD) }
+            ? { x: area.x + spans[i].x, y, width: spans[i].width, height: area.height }
             : { ...area, y },
         )
       }
