@@ -631,8 +631,20 @@ export class Panel {
     this.unblurPage()
   }
 
+  /**
+   * Puts the unpinned panel back on the floating level. Something can drop it to the normal level
+   * while jbrow runs (the installed app's was found there; the cause isn't known yet), and then it
+   * opens under the window you're in instead of on top of it.
+   */
+  private float() {
+    if (this.pinned || this.pageFullscreen) return
+    if (!this.win.isAlwaysOnTop()) console.log('[panel] the window had dropped to the normal level; floating it again')
+    this.win.setAlwaysOnTop(true, 'floating')
+  }
+
   async show() {
     if (this.win.isDestroyed()) return
+    this.float()
     if (this.visible && !this.animating) {
       if (!BACKGROUND) this.win.focus()
       return
