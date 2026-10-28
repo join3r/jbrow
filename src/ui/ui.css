@@ -694,7 +694,14 @@ body.resizing, body.resizing * { cursor: col-resize !important; }
 .profile-sites { display: grid; gap: 10px; }
 .profile-sites label { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; color: var(--muted); }
 .profile-sites .swatch-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.profile-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 3px 0; }
+.profile-row { position: relative; display: grid; grid-template-columns: auto auto auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 3px 0; }
+.profile-row .grip { display: grid; place-items: center; width: 14px; height: 24px; margin-right: -6px; color: var(--muted); opacity: 0; cursor: grab; }
+.profile-row .grip svg.i { width: 14px; height: 14px; stroke-width: 2.6; }
+.profile-row:hover .grip, .profile-list.dragging .grip { opacity: 0.7; }
+.profile-list:has(> .profile-row:only-child) .grip { display: none; }
+.profile-row.ins-before::after, .profile-row.ins-after::after { content: ''; position: absolute; left: 0; right: 0; height: 2px; border-radius: 1px; background: var(--accent); pointer-events: none; }
+.profile-row.ins-before::after { top: -1px; }
+.profile-row.ins-after::after { bottom: -1px; }
 .profile-row .emoji { display: grid; place-items: center; width: 28px; height: 24px; padding: 0; font-size: 14px; line-height: 1; color: var(--ink); background: none; border: 1px dashed var(--line); border-radius: 6px; }
 .profile-row .emoji.set { border-style: solid; border-color: transparent; }
 .profile-row .emoji:hover, .profile-row .emoji[aria-expanded='true'] { border-color: var(--line); background: var(--hover); }

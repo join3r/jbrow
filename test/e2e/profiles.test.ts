@@ -1,4 +1,4 @@
-// Profiles: adding one, renaming and recoloring, the default profile, and what can't be deleted.
+// Profiles: adding one, renaming and recoloring, their order, the default profile, and what can't be deleted.
 // Deleting a profile asks in a native dialog first, which a test can't answer, so only the cases
 // that never get that far are covered. Tabs in profiles are in tab-profiles.test.ts.
 import assert from 'node:assert/strict'
@@ -101,6 +101,56 @@ test('profiles and the default survive a relaunch', async () => {
   await jb.send('add-profile', { rename: false })
   const more = await jb.waitForState((s) => s.profiles.length === 6, 'a sixth profile')
   assert.equal(more.profiles[5].id, 'profile-6')
+})
+
+test("'move-profile' changes the order, which settings.json keeps", async () => {
+  const ids = (s: { profiles: { id: string }[] }) => s.profiles.map((p) => p.id).join()
+  assert.equal(ids(await jb.state()), 'work,personal,profile-3,profile-4,profile-5,profile-6')
+  await jb.send('move-profile', { id: 'profile-6', target: 'work', after: false })
+  await jb.waitForState((s) => ids(s) === 'profile-6,work,personal,profile-3,profile-4,profile-5', 'profile-6 first')
+  await jb.send('move-profile', { id: 'work', target: 'profile-5', after: true })
+  await jb.waitForState((s) => ids(s) === 'profile-6,personal,profile-3,profile-4,profile-5,work', 'work last')
+  await waitFor(() => ids(saved()) === 'profile-6,personal,profile-3,profile-4,profile-5,work', 'settings.json to have it')
+  // Onto itself, or beside a profile that doesn't exist, nothing moves.
+  await jb.send('move-profile', { id: 'work', target: 'work', after: false })
+  await jb.send('move-profile', { id: 'work', target: 'nobody', after: false })
+  await jb.send('move-profile', { id: 'nobody', target: 'work', after: false })
+  await jb.send('move-profile', { id: 'profile-6', target: 'personal', after: true })
+  const s = await jb.waitForState((s) => ids(s) === 'personal,profile-6,profile-3,profile-4,profile-5,work', 'a later move')
+  assert.equal(s.profiles.length, 6)
+})
+
+test('dragging a profile by its handle in settings moves it', async () => {
+  const ui = await jb.ui()
+  await ui.clickOn('#settingsButton')
+  await ui.clickOn('.set-nav-item[data-section="profiles"]')
+  await ui.clickOn('#profileList [data-profile="work"] .grip')
+  const at = (sel: string) =>
+    ui.call((sel) => {
+      const r = document.querySelector(sel)!.getBoundingClientRect()
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, h: r.height }
+    }, sel)
+  const from = await at('#profileList [data-profile="work"] .grip')
+  const to = await at('#profileList [data-profile="personal"]')
+  // Drags are caught over CDP, then played back as drag events.
+  await ui.send('Input.setInterceptDrags', { enabled: true })
+  const caught = new Promise<any>((resolve) => ui.on('Input.dragIntercepted', (p) => resolve(p.data)))
+  await ui.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: from.x, y: from.y, button: 'left', clickCount: 1 })
+  await ui.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x, y: from.y + 10, button: 'left', buttons: 1 })
+  await ui.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: to.x, y: to.y - to.h / 4, button: 'left', buttons: 1 })
+  const data = await caught
+  const y = to.y - to.h / 4
+  await ui.send('Input.dispatchDragEvent', { type: 'dragEnter', x: to.x, y, data })
+  await ui.send('Input.dispatchDragEvent', { type: 'dragOver', x: to.x, y, data })
+  assert.ok(await ui.eval('!!document.querySelector(\'#profileList [data-profile="personal"].ins-before\')'), 'a line above Personal')
+  await ui.send('Input.dispatchDragEvent', { type: 'drop', x: to.x, y, data })
+  await ui.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: to.x, y, button: 'left', clickCount: 1 })
+  await ui.send('Input.setInterceptDrags', { enabled: false })
+  const s = await jb.waitForState((s) => s.profiles[0].id === 'work', 'work moved above personal')
+  assert.equal(s.profiles[1].id, 'personal')
+  const rows = await ui.eval<string[]>(`[...document.querySelectorAll('#profileList .profile-row')].map((r) => r.dataset.profile)`)
+  assert.deepEqual(rows, s.profiles.map((p) => p.id))
+  await ui.press('Escape')
 })
 
 test("'delete-profile' of a profile that doesn't exist does nothing", async () => {

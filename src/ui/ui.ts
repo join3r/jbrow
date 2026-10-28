@@ -2562,6 +2562,7 @@ function renderProfiles() {
     profileListEl.innerHTML = S.profiles
       .map(
         (p) => `<div class="profile-row" data-profile="${esc(p.id)}">
+          <span class="grip" title="Drag to reorder" aria-hidden="true">${icon('grip')}</span>
           <label class="swatch" title="Color"><input type="color" aria-label="Color of ${esc(p.name)}"></label>
           <button class="emoji" aria-haspopup="dialog" aria-expanded="false" title="Icon, shown in the profile switcher in place of the dot" aria-label="Icon of ${esc(p.name)}"></button>
           <input class="name" spellcheck="false" aria-label="Name">
@@ -2672,6 +2673,51 @@ profileListEl.addEventListener('contextmenu', (e) => {
   send('profile-menu', { id })
 })
 $('addProfile').addEventListener('click', () => send('add-profile'))
+
+// Dragged by the grip, so dragging in a name still selects its text.
+let dragProfile: string | null = null
+const clearProfileDrop = () => profileListEl.querySelectorAll('.ins-before, .ins-after').forEach((x) => x.classList.remove('ins-before', 'ins-after'))
+profileListEl.addEventListener('pointerdown', (e) => {
+  const row = (e.target as HTMLElement).closest<HTMLElement>('.profile-row')
+  if (row) row.draggable = !!(e.target as HTMLElement).closest('.grip')
+})
+profileListEl.addEventListener('dragstart', (e) => {
+  dragProfile = profileOf(e.target) ?? null
+  if (!dragProfile) return
+  e.dataTransfer!.effectAllowed = 'move'
+  e.dataTransfer!.setData('text/plain', dragProfile)
+  profileListEl.classList.add('dragging')
+})
+/** The row a dragged profile would land beside, and whether below it, by which half it's over. */
+function profileDrop(e: DragEvent): { row: HTMLElement; after: boolean } | null {
+  const row = (e.target as HTMLElement).closest<HTMLElement>('.profile-row')
+  if (!dragProfile || !row) return null
+  const box = row.getBoundingClientRect()
+  return { row, after: e.clientY > box.top + box.height / 2 }
+}
+profileListEl.addEventListener('dragover', (e) => {
+  const at = profileDrop(e)
+  if (!at) return
+  e.preventDefault()
+  // Beside the dragged row itself, nothing would move.
+  const rows = [...profileListEl.querySelectorAll<HTMLElement>('.profile-row')]
+  const to = rows.indexOf(at.row) + (at.after ? 1 : 0)
+  const from = rows.findIndex((r) => r.dataset.profile === dragProfile)
+  clearProfileDrop()
+  if (to !== from && to !== from + 1) at.row.classList.add(at.after ? 'ins-after' : 'ins-before')
+})
+profileListEl.addEventListener('drop', (e) => {
+  const at = profileDrop(e)
+  if (!at) return
+  e.preventDefault()
+  if (at.row.dataset.profile !== dragProfile) send('move-profile', { id: dragProfile, target: at.row.dataset.profile, after: at.after })
+})
+profileListEl.addEventListener('dragend', () => {
+  dragProfile = null
+  clearProfileDrop()
+  profileListEl.classList.remove('dragging')
+  for (const r of profileListEl.querySelectorAll<HTMLElement>('.profile-row')) r.draggable = false
+})
 
 // ---------- profile icon picker ----------
 

@@ -1785,6 +1785,16 @@ function updateProfile(id: string, change: { name?: string; color?: string; icon
   sendProfiles()
 }
 
+/** Moves a profile before or after another, which is the order every profile list shows. */
+function moveProfile(id: string, target: string, after: boolean) {
+  const profile = settings.profiles.find((p) => p.id === id)
+  if (!profile || id === target || !settings.profiles.some((p) => p.id === target)) return
+  settings.profiles = settings.profiles.filter((p) => p !== profile)
+  settings.profiles.splice(settings.profiles.findIndex((p) => p.id === target) + (after ? 1 : 0), 0, profile)
+  saveSettings(settings)
+  sendProfiles()
+}
+
 function setDefaultProfile(id: string) {
   if (!settings.profiles.some((p) => p.id === id)) return
   settings.defaultProfile = id
@@ -1851,8 +1861,13 @@ async function deleteProfile(id: string) {
 function profileMenu(id: string) {
   const profile = settings.profiles.find((p) => p.id === id)
   if (!profile) return
+  const i = settings.profiles.indexOf(profile)
+  const before = settings.profiles[i - 1]
+  const next = settings.profiles[i + 1]
   Menu.buildFromTemplate([
     { label: 'Rename', click: () => panel.ui.send('rename-profile', id) },
+    { label: 'Move up', enabled: !!before, click: () => before && moveProfile(id, before.id, false) },
+    { label: 'Move down', enabled: !!next, click: () => next && moveProfile(id, next.id, true) },
     { label: 'Use for links and new tabs', type: 'checkbox', checked: settings.defaultProfile === id, click: () => setDefaultProfile(id) },
     { label: `New tab in ${profile.name}`, click: () => {
       tabs.create({ profile: id, ...scopeFields() })
@@ -2244,6 +2259,7 @@ function wireIpc() {
   on<{ id: string; name?: string; color?: string; icon?: string }>('profile', ({ id, ...change }) => updateProfile(id, change))
   on('emoji-panel', () => app.showEmojiPanel())
   on<{ id: string }>('profile-menu', ({ id }) => profileMenu(id))
+  on<{ id: string; target: string; after: boolean }>('move-profile', ({ id, target, after }) => moveProfile(id, target, after))
   on<{ id: string }>('default-profile', ({ id }) => setDefaultProfile(id))
   on('default-browser', () => sendDefaultBrowser())
   on('make-default-browser', () => makeDefaultBrowser())
