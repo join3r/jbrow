@@ -75,6 +75,8 @@ export interface TabsDeps {
   besideClosed: (id: string) => string | undefined
   /** The tab's page closed itself with window.close(): a popup that's done, say. */
   closedByPage: (id: string) => void
+  /** You're using an extension: one of its windows has focus, or you just pressed one of its shortcuts. */
+  extensionInUse: () => boolean
 }
 
 /** What a page asking to stay would be left for: another page, the same one again, or nothing. */
@@ -133,6 +135,9 @@ const SLIDE_PX = 14
 const SLIDE_MS = 320
 const SLIDE_EASE: [number, number, number, number] = [0.34, 1.25, 0.64, 1]
 
+/** How long an extension may bring back the tab that was in front before it, without you using the extension. */
+const EXTENSION_BACK_MS = 5000
+
 /** How many closed tabs ⇧⌘T can bring back. */
 const CLOSED_KEEP = 25
 
@@ -180,6 +185,8 @@ export class Tabs {
   private mru: string[] = []
   /** Set while jbrow hands a new view to the extensions library, which marks every new tab active. */
   private addingView = false
+  /** The tab that was in front before the active one, and when it stopped being. */
+  private leftFront: { id: string; at: number } | null = null
   /** Set while jbrow takes a view away from the extensions library, which reports that as the tab closing. */
   private droppingView = false
   /** Tabs whose page crashed or stopped responding, until it loads again. */
@@ -889,11 +896,25 @@ export class Tabs {
     menu.popup({ window: this.deps.window() })
   }
 
-  /** An extension (chrome.tabs.update) or the extensions library wants this tab in front. */
+  /**
+   * An extension (chrome.tabs.update) or the extensions library wants this tab in front. Only
+   * while you're using the extension, or to give back the tab that was in front a moment ago (Stem
+   * does, after a page it clicked opened a tab in front). Otherwise a page pulls you away from the
+   * one you're on: Bitwarden ends every passkey request by bringing its page to the front, even
+   * the quiet one a sign-in page makes each time it loads in the background.
+   */
   selectFromExtension(wc: WebContents) {
     if (this.addingView) return
     const id = this.idForWebContents(wc)
-    if (id) this.activate(id)
+    if (!id || id === this.activeId) return
+    const back = this.leftFront?.id === id && Date.now() - this.leftFront.at < EXTENSION_BACK_MS
+    if (back || this.deps.extensionInUse()) return this.activate(id)
+    // The library already counts it active; once it's done telling extensions so, put back the real one.
+    queueMicrotask(() => {
+      const active = this.active()
+      const live = active && this.live.get(active.id)
+      if (live && active.profile === this.get(id)?.profile) this.deps.runtime(active.profile)?.extensions.selectTab(live.wc)
+    })
   }
 
   activate(id: string) {
@@ -909,6 +930,7 @@ export class Tabs {
       this.mru = this.mru.filter((m) => m !== prev.id)
     }
     if (this.fullscreenId && this.fullscreenId !== id) this.leaveFullscreen()
+    if (this.activeId && this.activeId !== id) this.leftFront = { id: this.activeId, at: Date.now() }
     this.activeId = id
     // Every pane of a split is on screen, so each counts as seen and has its page.
     const now = Date.now()
@@ -1238,6 +1260,13 @@ export class Tabs {
       out.push({ id, rec })
     }
     return out
+  }
+
+  /** The ID a tab without a page goes by now, for one an extension knows by any ID it had. */
+  pagelessId(profile: string, id: number): number | undefined {
+    const rec = this.get(this.extensionIds.get(id))
+    if (!rec || rec.profile !== profile || this.live.has(rec.id)) return undefined
+    return this.pageless(profile).find((p) => p.rec === rec)?.id
   }
 
   /**

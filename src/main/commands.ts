@@ -45,6 +45,9 @@ function fromChrome(chromeKey: string): string | null {
 }
 
 export class ExtensionCommands {
+  /** When an extension shortcut last ran, so the tab it switches to right after is your doing. */
+  lastRunAt = 0
+
   constructor(
     private settings: () => Settings,
     private runtimes: () => Map<string, ProfileRuntime>,
@@ -140,6 +143,7 @@ export class ExtensionCommands {
   }
 
   run(cmd: ExtensionShortcut, tab = this.hooks.activeTab(cmd.profile)) {
+    this.lastRunAt = Date.now()
     if (EXECUTE_ACTION.has(cmd.name)) return this.hooks.openPopup(cmd.profile, cmd.extensionId)
     const rt = this.runtimes().get(cmd.profile)
     if (!rt) return

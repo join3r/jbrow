@@ -39,9 +39,10 @@ export class ExtensionDebugger {
     const handle = lib.router.apiHandler()
     const opts = { permission: 'debugger' }
     const profile = rt.profile.id
-    const tabOf = (target: Target = {}) => {
+    // Attaching is what loads a tab without a page: the extension is about to work in it.
+    const tabOf = (target: Target = {}, wake = false) => {
       if (target.tabId === undefined) throw new Error('Only tab targets are supported.')
-      const wc = lib.store.getTabById(target.tabId)
+      const wc = wake ? lib.store.wakeTabById(target.tabId) : lib.store.getTabById(target.tabId)
       if (!wc || wc.isDestroyed()) throw new Error(`No tab with given id ${target.tabId}.`)
       return wc
     }
@@ -56,7 +57,7 @@ export class ExtensionDebugger {
     handle(
       'debugger.attach',
       ({ extension }, target: Target, version?: string) => {
-        const wc = tabOf(target)
+        const wc = tabOf(target, true)
         const tabId = target.tabId!
         // An extension that went away lets go of its tabs, as in Chrome.
         const held = this.attached.get(tabId)

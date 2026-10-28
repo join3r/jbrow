@@ -61,8 +61,10 @@ in these places:
 13. Tabs without a page (asleep, or not opened since launch) are listed by `tabs.query` and
     `windows.getAll` as Chrome's discarded tabs (`discarded: true`, `status: "unloaded"`). A tab
     keeps the ID its last page had; one with no page since launch gets one from 1,000,000 up.
-    `tabs.get`, `update` and `reload` on one load its page in the background and answer under
-    the page's ID, and `tabs.onReplaced` says so, as Chrome did for a discarded tab. Every ID a
+    `tabs.get` answers for one as it is, without loading it: Bitwarden calls it on every https
+    tab each time its service worker starts, which woke every sleeping tab, kept ones too.
+    `tabs.update`, `tabs.reload` and `debugger.attach` on one load its page in the background and
+    answer under the page's ID, and `tabs.onReplaced` says so, as Chrome did for a discarded tab. Every ID a
     tab had reaches it until it closes, and `tabs.remove` closes one without loading it. jbrow's
     window is always in `windows.getAll`, so an extension opens tabs there instead of making a
     window of its own.

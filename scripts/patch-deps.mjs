@@ -314,14 +314,28 @@ const patches = [
   },
   {
     file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
-    why: 'pageless tabs: tabs.get loads the tab and answers with it, under its new ID',
+    why: "pageless tabs: tabs.get answers for a tab without a page as Chrome's discarded tab, and doesn't load it. Bitwarden calls it on every https tab each time its service worker starts, which woke every sleeping tab",
     find: `  get(event, tabId) {
     const tab = this.ctx.store.getTabById(tabId);
     if (!tab) return { id: _TabsAPI.TAB_ID_NONE };`,
+    applied: `  get(event, tabId) {
+    /* jbrow: pageless tabs, see scripts/patch-deps.mjs */`,
     replace: `  get(event, tabId) {
+    /* jbrow: pageless tabs, see scripts/patch-deps.mjs */
+    const tab = this.ctx.store.getTabById(tabId);
+    if (!tab) return this.ctx.store.impl.pagelessTab?.(tabId) ?? { id: _TabsAPI.TAB_ID_NONE };`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'pageless tabs: tabs.get no longer loads the tab (a checkout patched when it did)',
+    find: `  get(event, tabId) {
     /* jbrow: pageless tabs, see scripts/patch-deps.mjs */
     const tab = this.ctx.store.wakeTabById(tabId);
     if (!tab) return { id: _TabsAPI.TAB_ID_NONE };`,
+    replace: `  get(event, tabId) {
+    /* jbrow: pageless tabs, see scripts/patch-deps.mjs */
+    const tab = this.ctx.store.getTabById(tabId);
+    if (!tab) return this.ctx.store.impl.pagelessTab?.(tabId) ?? { id: _TabsAPI.TAB_ID_NONE };`,
   },
   {
     file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',

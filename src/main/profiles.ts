@@ -31,6 +31,8 @@ export type TabHooks = (profileId: string) => Pick<ChromeExtensionOptions, 'sele
   mainWindow: () => BaseWindow
   /** The profile's tabs without a page, as chrome.tabs.Tab. */
   pagelessTabs: () => chrome.tabs.Tab[]
+  /** The tab without a page an extension knows by `id`, as chrome.tabs.Tab. */
+  pagelessTab: (id: number) => chrome.tabs.Tab | undefined
   /** The page of the tab an extension knows by `id`; with `wake`, a tab without one gets it. */
   tabFor: (id: number, wake: boolean) => WebContents | undefined
   removePagelessTab: (id: number) => void

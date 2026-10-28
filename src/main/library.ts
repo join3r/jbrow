@@ -18,6 +18,8 @@ export interface LibraryContext {
   store: {
     tabDetailsCache: Map<number, unknown>
     getTabById(id: number): WebContents | undefined
+    /** getTabById, and a tab without a page gets one (scripts/patch-deps.mjs). */
+    wakeTabById(id: number): WebContents | undefined
   }
 }
 

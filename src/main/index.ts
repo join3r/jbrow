@@ -2096,6 +2096,10 @@ const tabHooks: TabHooks = (profileId) => ({
     if (wc && wake && rt) libraryOf(rt).router.broadcastEvent('tabs.onReplaced', wc.id, id)
     return wc
   },
+  pagelessTab: (id) => {
+    const now = tabs.pagelessId(profileId, id)
+    return now === undefined ? undefined : tabHooks(profileId).pagelessTabs().find((t) => t.id === now)
+  },
   removePagelessTab: (id) => tabs.closePageless(profileId, id),
 })
 
@@ -2649,6 +2653,11 @@ app.whenReady().then(async () => {
       tabs.create({ profile, url, scope: from?.scope, scopeName: from?.scopeName, app: from?.app, ...(background && { activate: false, unread: true }) })
     },
     siteProfile,
+    extensionInUse: () => {
+      const focused = BrowserWindow.getFocusedWindow()
+      const page = focused && !focused.isDestroyed() ? focused.webContents.getURL() : ''
+      return page.startsWith('chrome-extension://') || Date.now() - commands.lastRunAt < 2000
+    },
   })
 
   downloads = new Downloads({
