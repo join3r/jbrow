@@ -37,6 +37,8 @@ export interface Settings {
   defaultProfile: string
   /** Default profile per app, keyed by bundle ID. Used for links from and new tabs in that app's view. */
   appProfiles: Record<string, string>
+  /** Sites per profile ID that always open in that profile, whatever app, tab or profile the link comes from. See siteProfile. */
+  profileSites: Record<string, string[]>
   /** Groups of bundle IDs that share one set of tabs for the app hotkey. An app belongs to at most one group. */
   linkedApps: string[][]
   animation: { style: AnimationStyle; durationMs: number; ease: AnimationEase }
@@ -119,6 +121,7 @@ const DEFAULTS: Settings = {
     'com.tinyspeck.slackmacgap': 'work',
     'com.microsoft.teams2': 'work',
   },
+  profileSites: {},
   linkedApps: [['com.microsoft.VSCode', 'com.apple.Terminal']],
   animation: { style: 'materialize', durationMs: 180, ease: 'spring' },
   whimsy: false,
@@ -186,6 +189,7 @@ export function loadSettings(): Settings {
     if (!['pinned', 'kept', 'today'].includes(settings.numberFrom)) settings.numberFrom = DEFAULTS.numberFrom
     if (!['top', 'bottom'].includes(settings.newTabsAt)) settings.newTabsAt = DEFAULTS.newTabsAt
     if (!Array.isArray(settings.openApps)) settings.openApps = DEFAULTS.openApps
+    if (!settings.profileSites || typeof settings.profileSites !== 'object') settings.profileSites = {}
     if (typeof settings.whimsy !== 'boolean') settings.whimsy = DEFAULTS.whimsy
     if (!Number.isFinite(settings.sidePanelWidth)) settings.sidePanelWidth = DEFAULTS.sidePanelWidth
     if (!['system', 'light', 'dark'].includes(settings.appearance)) settings.appearance = DEFAULTS.appearance

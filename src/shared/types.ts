@@ -166,6 +166,8 @@ export interface Prefs {
   whimsy: boolean
   /** Addresses matching one of these show as "Private" until clicked. `*` matches anything. */
   privateUrls: string[]
+  /** Sites per profile ID that always open in that profile. */
+  profileSites: Record<string, string[]>
   hideFromScreenCapture: boolean
   /** Warn before opening sites on the phishing and malware lists. */
   dangerousSites: boolean

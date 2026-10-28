@@ -59,7 +59,9 @@ export interface TabsDeps {
   download: (wc: WebContents, url: string) => void
   profiles: () => Profile[]
   /** Opens a link as a new thread in another profile, next to the tab's thread. */
-  openInProfile: (fromId: string, profile: string, url: string) => void
+  openInProfile: (fromId: string, profile: string, url: string, background?: boolean) => void
+  /** The profile an address always opens in, if its site has one (Sites under Profiles in settings). */
+  siteProfile: (url: string) => string | undefined
   /** The active page went fullscreen or left it. */
   onFullscreen: (on: boolean, url: string) => void
   /** An extension is working in the page (its chrome.debugger is attached), so it doesn't sleep or archive. */
@@ -206,6 +208,8 @@ export class Tabs {
    * to http:// instead, as Chrome's HTTPS-Upgrades does. The wait starts once that load does.
    */
   private upgrades = new Map<string, { https: string; http: string; timer?: NodeJS.Timeout }>()
+  /** When each tab last sent a link to its site's profile. See sendToSiteProfile. */
+  private sentAt = new Map<string, number>()
   /** Tabs that fell back to http, with the https address whose error page is left in their history. */
   private fellBack = new Map<string, string>()
 
@@ -650,11 +654,24 @@ export class Tabs {
       if (this.fullscreenId === id) this.setFullscreen(null)
     })
 
+    // A link to a site that has a profile of its own opens there, and this page stays. Redirects
+    // stay put: a sign-in that passes through the site would lose its way.
+    wc.on('will-navigate', (e) => {
+      if (!e.isMainFrame || e.isSameDocument) return
+      const from = rec()?.profile ?? rt.profile.id
+      const to = this.deps.siteProfile(e.url)
+      if (!to || to === from || !isWebUrl(wc.getURL()) || !this.sendToSiteProfile(id, to, e.url)) return
+      e.preventDefault()
+    })
+
     wc.setWindowOpenHandler((details) => {
+      const background = details.disposition === 'background-tab'
+      // So does a link opened in a new tab. A popup doesn't: it needs its opener.
+      const to = background || details.disposition === 'foreground-tab' ? this.deps.siteProfile(details.url) : undefined
+      if (to && to !== (rec()?.profile ?? rt.profile.id) && this.sendToSiteProfile(id, to, details.url, background)) return { action: 'deny' }
       // A popup (window.open with a size: a sign-in, a payment, a Proxmox console) is a tab too.
       // It keeps its opener and can close itself, as a window could, and it gets what tabs have
       // and windows don't: the certificate you trusted, sign-in sheets, keys.
-      const background = details.disposition === 'background-tab'
       return {
         action: 'allow',
         outlivesOpener: true,
@@ -684,6 +701,7 @@ export class Tabs {
     })
 
     wc.on('destroyed', () => {
+      this.sentAt.delete(id)
       // A page that agreed to close: now the tab goes.
       const closing = this.closing.get(id)
       if (closing) {
@@ -949,6 +967,18 @@ export class Tabs {
   /** jbrow shows its own screen in place of the tab's page. */
   covered(id: string) {
     return this.deps.certs.isBlocked(id) || this.deps.dangerous.isBlocked(id) || this.deps.logins.isAsking(id) || this.crashed.has(id)
+  }
+
+  /**
+   * Opens a link from tab `id` in its site's profile. Electron doesn't say whether you clicked it,
+   * so a page can't flood another profile with tabs: past one a second, links load where they are.
+   */
+  private sendToSiteProfile(id: string, profile: string, url: string, background?: boolean): boolean {
+    const now = Date.now()
+    if (now - (this.sentAt.get(id) ?? 0) < 1000) return false
+    this.sentAt.set(id, now)
+    this.deps.openInProfile(id, profile, url, background)
+    return true
   }
 
   /** `search` sends the text to the search engine even if it looks like an address. */

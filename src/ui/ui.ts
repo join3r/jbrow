@@ -1108,7 +1108,8 @@ function pick(item: Item | null, open?: OpenIn) {
     // An open tab goes beside the active one itself; anything else opens its page.
     if (open === 'split' && item.kind === 'tab') return send('split-with', { id: item.id })
     const input = item.kind === 'address' ? item.input : item.kind === 'search' ? item.query : item.url
-    const profile = open === 'profile' ? next : item.kind === 'tab' ? (item.profile?.id ?? from) : from
+    // Without one picked with Tab, a new tab goes where its site belongs (see siteProfile).
+    const profile = open === 'profile' ? next : item.kind === 'tab' ? (item.profile?.id ?? from) : open === 'tab' ? opensIn : from
     return send('navigate', { input, profile, search: item.kind === 'search', open: open === 'profile' ? undefined : open })
   }
   if (item?.kind === 'tab') send('activate', { id: item.id })
@@ -1924,6 +1925,7 @@ function renderSettings(all = false) {
   renderZoomSites()
   renderArchived()
   renderProfiles()
+  renderProfileSites()
   if (all || document.activeElement !== animSpeed) animSpeed.value = String(animation.durationMs)
   $('animSpeedOut').textContent = `${animSpeed.value} ms`
   for (const id of ['animSpeed', 'animEase', 'animPreview']) $(id).closest('.field')!.classList.toggle('off', animation.style === 'off')
@@ -2590,6 +2592,45 @@ function renderProfiles() {
     }
   }
 }
+
+const profileSitesEl = $('profileSites')
+function renderProfileSites() {
+  if (!S) return
+  const boxes = [...profileSitesEl.querySelectorAll<HTMLTextAreaElement>('textarea')]
+  if (boxes.map((b) => b.dataset.profile).join() !== S.profiles.map((p) => p.id).join()) {
+    profileSitesEl.innerHTML = S.profiles
+      .map(
+        (p) => `<div>
+          <label for="sites-${esc(p.id)}"><span class="swatch-dot"></span><span class="name"></span></label>
+          <textarea id="sites-${esc(p.id)}" data-profile="${esc(p.id)}" rows="3" spellcheck="false" placeholder="youtube.com&#10;*.corp.example"></textarea>
+        </div>`,
+      )
+      .join('')
+  }
+  for (const p of S.profiles) {
+    const box = profileSitesEl.querySelector<HTMLTextAreaElement>(`textarea[data-profile="${CSS.escape(p.id)}"]`)!
+    const label = box.previousElementSibling!
+    label.querySelector<HTMLElement>('.swatch-dot')!.style.background = p.color
+    label.querySelector('.name')!.textContent = p.name
+    if (document.activeElement !== box) box.value = (S.prefs.profileSites[p.id] ?? []).join('\n')
+  }
+}
+let sitesTimer: number | undefined
+function saveProfileSites() {
+  clearTimeout(sitesTimer)
+  if (!S) return
+  const sites: Record<string, string[]> = {}
+  for (const box of profileSitesEl.querySelectorAll<HTMLTextAreaElement>('textarea')) {
+    const list = box.value.split('\n').map((l) => l.trim()).filter(Boolean)
+    if (list.length) sites[box.dataset.profile!] = list
+  }
+  if (JSON.stringify(sites) !== JSON.stringify(S.prefs.profileSites)) sendPrefs({ profileSites: sites })
+}
+profileSitesEl.addEventListener('input', () => {
+  clearTimeout(sitesTimer)
+  sitesTimer = window.setTimeout(saveProfileSites, 400)
+})
+profileSitesEl.addEventListener('focusout', saveProfileSites)
 
 const profileOf = (el: EventTarget | null) => (el as HTMLElement | null)?.closest<HTMLElement>('[data-profile]')?.dataset.profile
 function saveProfileName(input: HTMLInputElement) {

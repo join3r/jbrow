@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { urlMatcher } from '../../src/shared/patterns'
+import { siteProfile, urlMatcher } from '../../src/shared/patterns'
 
 describe('urlMatcher', () => {
   test('no patterns match nothing', () => {
@@ -55,5 +55,46 @@ describe('urlMatcher', () => {
   test('a matcher can be called many times (no stateful regex)', () => {
     const m = urlMatcher(['a.example'])
     for (let i = 0; i < 5; i++) assert.equal(m('https://a.example/'), true)
+  })
+})
+
+describe('siteProfile', () => {
+  const sites = { personal: ['youtube.com', 'youtu.be', 'github.com'], work: ['*.corp.example', 'github.com/acme'] }
+
+  test('a site covers itself and the sites under it', () => {
+    assert.equal(siteProfile(sites, 'https://www.youtube.com/watch?v=1'), 'personal')
+    assert.equal(siteProfile(sites, 'https://youtube.com/'), 'personal')
+    assert.equal(siteProfile(sites, 'http://m.YouTube.com'), 'personal')
+    assert.equal(siteProfile(sites, 'https://youtu.be/abc'), 'personal')
+  })
+
+  test("the site has to be the address's own, not just appear in it", () => {
+    assert.equal(siteProfile(sites, 'https://www.google.com/search?q=youtube.com'), undefined)
+    assert.equal(siteProfile(sites, 'https://notyoutube.com/'), undefined)
+    assert.equal(siteProfile(sites, 'https://youtube.com.evil.example/'), undefined)
+    assert.equal(siteProfile(sites, 'https://evil.example/youtube.com'), undefined)
+  })
+
+  test('* stays in the site name', () => {
+    assert.equal(siteProfile(sites, 'https://wiki.corp.example/page'), 'work')
+    assert.equal(siteProfile(sites, 'https://corp.example/'), undefined)
+    assert.equal(siteProfile(sites, 'https://evil.example/x.corp.example'), undefined)
+  })
+
+  test('a path narrows it, and the longer match wins', () => {
+    assert.equal(siteProfile(sites, 'https://github.com/acme/app/pulls'), 'work')
+    assert.equal(siteProfile(sites, 'https://github.com/someone/app'), 'personal')
+    assert.equal(siteProfile(sites, 'https://github.com/acme'), 'work')
+    assert.equal(siteProfile(sites, 'https://github.com/acme-evil/app'), 'personal')
+  })
+
+  test('a scheme in the pattern is ignored', () => {
+    assert.equal(siteProfile({ work: ['https://jira.example'] }, 'https://jira.example/browse/X-1'), 'work')
+  })
+
+  test('only web addresses', () => {
+    assert.equal(siteProfile({ p: ['*'] }, 'about:blank'), undefined)
+    assert.equal(siteProfile({ p: ['*'] }, 'not a url'), undefined)
+    assert.equal(siteProfile({ p: ['', '  '] }, 'https://a.example/'), undefined)
   })
 })

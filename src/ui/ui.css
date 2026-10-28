@@ -691,6 +691,9 @@ body.resizing, body.resizing * { cursor: col-resize !important; }
 .ext-row:hover .ext-acts, .ext-acts:focus-within { visibility: visible; }
 
 .profile-list { margin-bottom: 10px; }
+.profile-sites { display: grid; gap: 10px; }
+.profile-sites label { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; color: var(--muted); }
+.profile-sites .swatch-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .profile-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 3px 0; }
 .profile-row .emoji { display: grid; place-items: center; width: 28px; height: 24px; padding: 0; font-size: 14px; line-height: 1; color: var(--ink); background: none; border: 1px dashed var(--line); border-radius: 6px; }
 .profile-row .emoji.set { border-style: solid; border-color: transparent; }

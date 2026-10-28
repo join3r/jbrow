@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, MenuItem, nativeImage, nativeTheme, Notification, powerMonitor, session, shell, systemPreferences, Tray } from 'electron'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
-import { urlMatcher } from '../shared/patterns'
+import { siteProfile as matchSiteProfile, urlMatcher } from '../shared/patterns'
 import { awayFromHome, besideClosed, isInFolder, isPinned, keptThreads, numberedThreads, sections, type FolderView } from '../shared/threads'
 import { forcedSearch, isSearchUrl, looksLikeAddress, suggestUrlFor } from '../shared/engines'
 import { THEMES, URL_BAR_STYLES, type AppEntry, type AppLabel, type Folder, type ExtensionView, type Prefs, type Profile, type RestyleAgent, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
@@ -36,7 +36,7 @@ import { installTestExtensions, loadUnpacked, partitionFor, setupProfile, setupP
 import { Restyler } from './restyle'
 import { loadSettings, saveSettings, scopeForApp, settingsPath, type Settings } from './settings'
 import { wireSwipes } from './swipe'
-import { Tabs, type UnloadKind } from './tabs'
+import { Tabs, toUrl, type UnloadKind } from './tabs'
 import { blockThirdPartyCookies, thirdPartyCookiesBlocked } from './third-party-cookies'
 import { UserScripts } from './user-scripts'
 import { topSiteCompletion } from './top-sites'
@@ -200,6 +200,7 @@ function state(): UiState {
       animation: settings.animation,
       whimsy: settings.whimsy,
       privateUrls: settings.privateUrls,
+      profileSites: settings.profileSites,
       hideFromScreenCapture: settings.hideFromScreenCapture,
       dangerousSites: settings.dangerousSites,
       blockThirdPartyCookies: settings.blockThirdPartyCookies,
@@ -464,6 +465,12 @@ function newTabProfile(): string {
     if (forApp) return forApp
   }
   return tabs.active()?.profile ?? settings.defaultProfile
+}
+
+/** The profile an address always opens in, by the sites you gave your profiles. */
+function siteProfile(url: string): string | undefined {
+  const id = matchSiteProfile(settings.profileSites, url)
+  return id && settings.profiles.some((p) => p.id === id) ? id : undefined
 }
 
 function scopeFields() {
@@ -981,6 +988,14 @@ function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.animation) settings.animation = { ...settings.animation, ...prefs.animation }
   if (typeof prefs.whimsy === 'boolean') settings.whimsy = prefs.whimsy
   if (prefs.privateUrls) settings.privateUrls = prefs.privateUrls.map((p) => p.trim()).filter(Boolean)
+  if (prefs.profileSites) {
+    settings.profileSites = Object.fromEntries(
+      Object.entries(prefs.profileSites)
+        .filter(([id]) => settings.profiles.some((p) => p.id === id))
+        .map(([id, list]) => [id, list.map((p) => p.trim()).filter(Boolean)] as const)
+        .filter(([, list]) => list.length),
+    )
+  }
   if (prefs.hideFromScreenCapture !== undefined) {
     settings.hideFromScreenCapture = prefs.hideFromScreenCapture
     panel.applyContentProtection()
@@ -1589,8 +1604,8 @@ function suggest({ input, profile, seq }: { input: string; profile?: string; seq
 // ---------- links from other apps ----------
 
 /**
- * Opens a link another app handed to jbrow, in that app's profile and its section of the sidebar,
- * and brings jbrow up on it. The app the link came from is still in front when it arrives.
+ * Opens a link another app handed to jbrow, in its site's profile or else that app's, in that app's
+ * section of the sidebar, and brings jbrow up on it. The app the link came from is still in front when it arrives.
  */
 async function openFromApp(url: string, clicked = false) {
   const [front, quiet] = await Promise.all([frontmostApp(), !clicked && openQuietly()])
@@ -1602,7 +1617,7 @@ async function openFromApp(url: string, clicked = false) {
     const key = scopeForApp(settings, from.bundleId)
     fields = { scope: key, scopeName: scopeName(key), app: from.bundleId }
   }
-  const profile = (from && settings.appProfiles[from.bundleId]) || settings.defaultProfile
+  const profile = siteProfile(url) || (from && settings.appProfiles[from.bundleId]) || settings.defaultProfile
   if (quiet) {
     const rec = tabs.create({ profile, url, ...fields, activate: false, unread: true })
     quietLinks.add(rec.id)
@@ -1811,6 +1826,7 @@ async function deleteProfile(id: string) {
   settings.profiles = settings.profiles.filter((p) => p.id !== id)
   if (settings.defaultProfile === id) settings.defaultProfile = settings.profiles[0].id
   for (const [bundleId, p] of Object.entries(settings.appProfiles)) if (p === id) delete settings.appProfiles[bundleId]
+  delete settings.profileSites[id]
   delete settings.unpackedExtensions[id]
   delete settings.extensionShortcuts[id]
   delete settings.disabledExtensions[id]
@@ -2085,6 +2101,8 @@ function wireIpc() {
     focusAddressBar()
   })
   on<{ input: string; profile?: string; search?: boolean; open?: 'tab' | 'split' }>('navigate', ({ input, profile, search, open }) => {
+    // A site with a profile of its own opens there, unless you picked one with Tab.
+    if (!profile && open !== 'split') profile = siteProfile(toUrl(input, settings.searchUrl, search))
     const cur = tabs.active()
     const known = !!profile && settings.profiles.some((p) => p.id === profile)
     // The address bar's tools: in a new tab, or in a new pane beside the page (with no page to go beside, here).
@@ -2603,11 +2621,12 @@ app.whenReady().then(async () => {
     confirmUnload,
     besideClosed: (id) => besideClosed(threadsInView(), id, settings.newTabsAt),
     profiles: () => settings.profiles,
-    openInProfile: (fromId, profile, url) => {
+    openInProfile: (fromId, profile, url, background) => {
       const from = tabs.get(fromId)
-      if (filter !== 'all' && filter !== profile) filter = 'all'
-      tabs.create({ profile, url, scope: from?.scope, scopeName: from?.scopeName, app: from?.app })
+      if (!background && filter !== 'all' && filter !== profile) filter = 'all'
+      tabs.create({ profile, url, scope: from?.scope, scopeName: from?.scopeName, app: from?.app, ...(background && { activate: false, unread: true }) })
     },
+    siteProfile,
   })
 
   downloads = new Downloads({
