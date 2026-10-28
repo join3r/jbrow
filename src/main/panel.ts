@@ -148,13 +148,13 @@ export class Panel {
         preload: path.join(__dirname, 'preload-ui.js'),
         sandbox: true,
         contextIsolation: true,
-        // The show animation is timed by the page; a hidden page mustn't lag when it wakes.
-        backgroundThrottling: false,
+        // Asleep while the window is hidden, as it starts out; see wakeUi.
       },
     })
     this.uiView.setBackgroundColor('#00000000')
     this.ui = this.uiView.webContents
     this.win.contentView.addChildView(this.uiView)
+    this.wakeUi(false)
     this.fitUi()
     this.win.setAlwaysOnTop(true, 'floating')
     this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
@@ -567,6 +567,18 @@ export class Panel {
     for (const { wc } of this.woken) wc.setBackgroundThrottling(false)
   }
 
+  /**
+   * The UI times the show animation, so it's awake and unthrottled while the window is up. While
+   * the window is hidden it sleeps, as the pages do: Chromium doesn't count a hidden window's view
+   * as hidden, and a looping animation in it (a loading tab's pulsing favicon, a running restyle,
+   * a download of unknown size) kept it and the GPU drawing frames for as long as jbrow stayed away.
+   */
+  private wakeUi(on: boolean) {
+    if (this.ui.isDestroyed()) return
+    this.ui.setBackgroundThrottling(!on)
+    this.uiView.setVisible(on)
+  }
+
   private letPageSleep() {
     if (this.sleepTimer) clearTimeout(this.sleepTimer)
     this.sleepTimer = null
@@ -630,6 +642,7 @@ export class Panel {
     this.visible = true
     this.animating = true
     this.target = this.place()
+    this.wakeUi(true)
     // The live page is in the window from the start, while the window is still transparent.
     this.wakePage()
     const anim = this.beginIn()
@@ -674,6 +687,7 @@ export class Panel {
     await this.animate(ms, (t) => this.frameAt(progress * (1 - bezier(EASE_IN, t)), alpha * (1 - t * t), from))
     if (run !== this.run || this.win.isDestroyed()) return
     this.win.hide()
+    this.wakeUi(false)
     this.animating = false
     this.hooks.setPageVisible(false)
     this.settle()
