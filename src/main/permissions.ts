@@ -1,4 +1,4 @@
-import { app, dialog, type BrowserWindow, type Session, type WebContents } from 'electron'
+import { app, dialog, ipcMain, type BrowserWindow, type Session, type WebContents } from 'electron'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { Profile } from '../shared/types'
@@ -155,6 +155,8 @@ export class SitePermissions {
   private blockedOnPage = new WeakMap<WebContents, Set<string>>()
   /** Devices allowed until jbrow quits (see isLasting), by profile and origin, then device key. */
   private sessionDevices = new Map<string, Set<string>>()
+  /** The profile each attached session belongs to. */
+  private profiles = new WeakMap<Session, string>()
 
   constructor(private window: () => BrowserWindow | null) {
     if (!existsSync(storePath())) return
@@ -169,6 +171,7 @@ export class SitePermissions {
   /** Denies by default; asks for what's in ASK and remembers the answer for the profile. */
   attach(sess: Session, profile: Profile) {
     const profileId = profile.id
+    this.profiles.set(sess, profileId)
     sess.setPermissionRequestHandler((wc, permission, callback, details) => {
       const origin = originOf(details.requestingUrl)
       const wanted = expand(permission, details as { mediaTypes?: string[]; externalURL?: string })
@@ -243,6 +246,24 @@ export class SitePermissions {
     if (!isRememberable(origin)) return false
     const runtime = sessionKey(api, device)
     return (!!runtime && !!this.sessionDevices.get(`${profileId} ${origin}`)?.has(runtime)) || this.store[profileId]?.[origin]?.[deviceKey(api, device)] === true
+  }
+
+  /**
+   * Answers src/preload/permissions.ts: whether the page's top frame hasn't been allowed or blocked
+   * `permission` yet, so the page is told it may still ask. Only for what jbrow asks about.
+   */
+  listen() {
+    const undecided = (e: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent, permission: unknown) =>
+      e.senderFrame === e.sender.mainFrame && typeof permission === 'string' && this.undecided(e.sender, e.senderFrame.origin, permission)
+    ipcMain.on('jbrow:permission-undecided', (e, permission: unknown) => void (e.returnValue = undecided(e, permission)))
+    ipcMain.handle('jbrow:permission-undecided', (e, permission: unknown) => undecided(e, permission))
+  }
+
+  undecided(wc: WebContents, url: string, permission: string): boolean {
+    const profileId = this.profiles.get(wc.session)
+    const origin = originOf(url)
+    if (!profileId || !ASK[permission] || permission === 'openExternal' || this.blockedOnPage.get(wc)?.has(permission)) return false
+    return !isRememberable(origin) || this.store[profileId]?.[origin]?.[permission] === undefined
   }
 
   /** Whether the site has remembered decisions or devices in the profile, to offer resetting them. */

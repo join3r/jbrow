@@ -55,6 +55,15 @@ await Promise.all([
     format: 'cjs',
     external: ['electron'],
   }),
+  // Runs in web pages so they see "prompt" for permissions you haven't decided on.
+  build({
+    ...common,
+    entryPoints: ['src/preload/permissions.ts'],
+    outfile: 'dist/preload-permissions.js',
+    platform: 'node',
+    format: 'cjs',
+    external: ['electron'],
+  }),
   // Runs in web pages to inject extensions' user scripts (chrome.userScripts).
   build({
     ...common,

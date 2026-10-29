@@ -36,12 +36,12 @@ function setup(profile = { id: 'p', name: 'Personal', color: '#000' }) {
   const perms = new SitePermissions(() => null)
   perms.attach(sess as unknown as Session, profile)
   let nextId = 1
-  const page = () => ({ id: nextId++ }) as unknown as WebContents
+  const page = () => ({ id: nextId++, session: sess }) as unknown as WebContents
   const wc = page()
   const request = (permission: string, details: Record<string, unknown>, from = wc) =>
     new Promise<boolean>((resolve) => handlers.request(from, permission, resolve, details))
   const check = (permission: string, origin: string, details: Record<string, unknown> = {}) => handlers.check(wc, permission, origin, details)
-  return { perms, handlers, request, check, page }
+  return { perms, handlers, request, check, page, wc }
 }
 
 /** Answers the permission dialog: Allow or Block, with "Remember" ticked or not. Returns what was asked. */
@@ -241,6 +241,26 @@ test('a page without an origin that was blocked stays blocked for as long as it 
   assert.equal(asked.length, 0)
   // Another such page is asked.
   assert.equal(await request('media', { requestingUrl: 'file:///x.html', mediaTypes: ['video'] }, page()), true)
+})
+
+test("pages are told they may still ask for what you haven't decided", async (t) => {
+  answer(t, false)
+  const { perms, request, page, wc } = setup()
+  assert.equal(perms.undecided(wc, 'https://meet.example/abc', 'microphone'), true)
+  assert.equal(perms.undecided(wc, 'https://meet.example/abc', 'midiSysex'), true)
+  // Not something jbrow asks about, so it's simply denied.
+  assert.equal(perms.undecided(wc, 'https://meet.example/abc', 'openExternal'), false)
+  assert.equal(perms.undecided(wc, 'https://meet.example/abc', 'bluetooth'), false)
+  assert.equal(await request('media', { requestingUrl: 'https://meet.example/abc', mediaTypes: ['audio'] }), false)
+  assert.equal(perms.undecided(wc, 'https://meet.example/', 'microphone'), false)
+  assert.equal(perms.undecided(wc, 'https://meet.example/', 'camera'), true)
+  // A page without an origin it was blocked on, but not another one.
+  const other = page()
+  assert.equal(await request('camera', { requestingUrl: 'file:///x.html' }, other), false)
+  assert.equal(perms.undecided(other, 'file:///x.html', 'camera'), false)
+  assert.equal(perms.undecided(page(), 'file:///x.html', 'camera'), true)
+  // A session jbrow didn't attach to isn't answered.
+  assert.equal(perms.undecided({ session: {} } as unknown as WebContents, 'https://meet.example/', 'camera'), false)
 })
 
 test('the same request twice at once gets one dialog', async (t) => {

@@ -99,6 +99,8 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
 
   // Two-finger swipe back and forward in tab pages; see src/preload/swipe.ts.
   sess.registerPreloadScript({ id: 'jbrow-swipe', type: 'frame', filePath: path.join(__dirname, 'preload-swipe.js') })
+  // Tells pages they may still ask for what you haven't decided; see src/preload/permissions.ts.
+  sess.registerPreloadScript({ id: 'jbrow-permissions', type: 'frame', filePath: path.join(__dirname, 'preload-permissions.js') })
   // Extensions' user scripts (chrome.userScripts) in tab pages; see src/preload/user-scripts.ts.
   sess.registerPreloadScript({ id: 'jbrow-user-scripts', type: 'frame', filePath: path.join(__dirname, 'preload-user-scripts.js') })
 

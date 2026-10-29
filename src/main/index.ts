@@ -2612,6 +2612,7 @@ app.whenReady().then(async () => {
   })
 
   permissions = new SitePermissions(() => panel.win)
+  permissions.listen()
   restyler = new Restyler({
     settings: () => settings.restyle,
     pages: () => tabs.pages(),
