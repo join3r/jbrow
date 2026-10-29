@@ -35,7 +35,7 @@ export function setupLogging() {
     if (Date.now() - lastNotice > 60_000 && app.isReady() && !BACKGROUND) {
       lastNotice = Date.now()
       const message = error instanceof Error ? error.message : String(error)
-      new Notification({ title: 'jbrow hit an error', body: `${message}\nDetails are in ~/Library/Logs/jbrow/main.log` }).show()
+      new Notification({ title: 'jbrow hit an error', body: `${message}\nDetails are in ${file}` }).show()
     }
   }
   process.on('uncaughtException', onError('uncaught exception'))

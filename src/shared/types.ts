@@ -4,6 +4,8 @@ export interface Profile {
   id: string
   name: string
   color: string
+  /** An emoji or a character or two, shown in place of the color dot in the profile switcher. */
+  icon?: string
 }
 
 /** One tab as persisted. A tab without a parent is a thread; tabs with children are sub-threads. */
@@ -44,6 +46,8 @@ export interface TabRecord {
   archivedAt?: number
   /** When Undo brought the thread back. Archiving counts it as seen then, so it gets its full time again. */
   restoredAt?: number
+  /** ID of the extension that opened it (chrome.tabs.create), as Stem does. */
+  openedBy?: string
 }
 
 /** A folder in the Kept section. */
@@ -74,11 +78,39 @@ export interface UiTab extends TabRecord {
   loaded: boolean
   /** Its page crashed and hasn't been reloaded. */
   crashed?: boolean
+  /** ID of the extension working in its page now (its chrome.debugger is attached). */
+  drivenBy?: string
+  /** Its page is making sound right now. */
+  audible?: boolean
+  /** Its page's sound is muted. */
+  muted?: boolean
+}
+
+/**
+ * What one pane's address bar shows: the active tab's, or each tab of its split. The active
+ * tab's bar has the rest of UiState besides; the others are drawn from this alone.
+ */
+export interface PaneBar {
+  id: string
+  /** For its <browser-action> buttons. Null for a new tab with no page yet. */
+  webContentsId: number | null
+  /** Session partition of the tab's profile. */
+  partition: string | null
+  /** Extensions with a toolbar button in the tab's profile. */
+  extensions: string[]
+  canGoBack: boolean
+  loading: boolean
+  /** The lock: a trusted https page, one with a certificate error or over plain http, or neither (jbrow's own pages, local files). */
+  lock: 'secure' | 'warn' | null
+  /** The color the bar takes from the page, as #rrggbb; null keeps jbrow's surface. */
+  color: string | null
 }
 
 export interface UiState {
   tabs: UiTab[]
   activeId: string | null
+  /** The address bars on screen, one per pane, left to right. */
+  panes: PaneBar[]
   folders: Folder[]
   splits: Split[]
   /** Threads (root IDs) archived since you last looked, for the sidebar's Undo. */
@@ -89,6 +121,8 @@ export interface UiState {
   activePartition: string | null
   /** Extensions with a toolbar button in the active tab's profile. */
   activeExtensions: string[]
+  /** Names and icons of the extensions in tabs' openedBy and drivenBy, by ID. */
+  tabExtensions: Record<string, { name: string; icon?: string }>
   profiles: Profile[]
   filter: string
   scope: { key: string; name: string } | null
@@ -117,6 +151,8 @@ export interface UiState {
   devices: DeviceChooserView | null
   /** Every site with a restyle, for the settings screen. */
   styledSites: StyledSite[]
+  /** Whether the claude and codex commands are installed; null until jbrow has looked. */
+  restyleAgents: Record<RestyleAgent, boolean | null>
   /** Sites with a zoom of their own, in percent. */
   zoomSites: { site: string; percent: number }[]
   nav: { canGoBack: boolean; canGoForward: boolean; loading: boolean }
@@ -142,14 +178,22 @@ export type Appearance = 'system' | 'light' | 'dark'
 /** How the address bar shows the tab's profile: a tint behind back, reload and its name, the tint with a solid edge, or the full color. */
 export type ProfileStyle = 'tint' | 'edge' | 'solid'
 
+/** The profile switcher above the tabs: labels, then icons, as room allows (auto), or always a menu. */
+export type ProfileSwitcher = 'auto' | 'menu'
+
 /** The settings the settings screen edits. Everything else stays in settings.json. */
 export interface Prefs {
   appearance: Appearance
   theme: ThemeId
   profileStyle: ProfileStyle
+  profileSwitcher: ProfileSwitcher
   animation: { style: AnimMessage['style']; durationMs: number; ease: AnimMessage['ease'] }
+  /** Playful animations in jbrow's own UI. */
+  whimsy: boolean
   /** Addresses matching one of these show as "Private" until clicked. `*` matches anything. */
   privateUrls: string[]
+  /** Sites per profile ID that always open in that profile. */
+  profileSites: Record<string, string[]>
   hideFromScreenCapture: boolean
   /** Warn before opening sites on the phishing and malware lists. */
   dangerousSites: boolean
@@ -168,6 +212,14 @@ export interface Prefs {
   pinnedExtensions: string[]
   /** Rows the pinned tabs' icons share at the top of the sidebar; drag the line under them to change it. */
   pinnedRows: number
+  /** Where ⌘1 starts: the pinned icons, the Kept rows, or Today, skipping the sections above. */
+  numberFrom: NumberFrom
+  /** Where new tabs go outside Kept, and so which tab closing one moves to. */
+  newTabsAt: NewTabsAt
+  /** App sections at the bottom of the sidebar that are open, by scope key. The rest are collapsed. */
+  openApps: string[]
+  /** Restyling is on (see RestyleSettings.enabled). */
+  restyleEnabled: boolean
   /** Claude model alias for restyling sites. */
   restyleAgent: RestyleAgent
   restyleModel: string
@@ -181,7 +233,36 @@ export interface Prefs {
   searchUrl: string
   /** Ask the search engine for suggestions while you type in the address bar. */
   searchSuggestions: boolean
+  /** How the address bar lays out its suggestions (see URL_BAR_STYLES). */
+  urlBarStyle: UrlBarStyle
+  /** Check for, download and install new releases on its own. */
+  autoUpdate: boolean
 }
+
+/** Where updating stands, for settings. */
+export interface UpdateView {
+  /** The version running now. */
+  version: string
+  /**
+   * 'source': running from a checkout. 'local': a build made on this Mac, which doesn't update.
+   * 'idle': hasn't checked yet, or a quiet check failed. 'latest': no newer release.
+   */
+  state: 'source' | 'local' | 'idle' | 'checking' | 'downloading' | 'ready' | 'latest' | 'error'
+  /** Of the download, 0–100. */
+  percent: number
+  /** The release being downloaded or ready. */
+  newVersion: string
+  /** Why the last check you asked for failed. */
+  error: string
+  /** When a check last got an answer, 0 for never. */
+  checkedAt: number
+}
+
+/** The first sidebar section ⌘1–9 count from. */
+export type NumberFrom = 'pinned' | 'kept' | 'today'
+
+/** Where new tabs go in the sidebar outside Kept. Closing a tab focuses the one beside it on that side. */
+export type NewTabsAt = 'top' | 'bottom'
 
 /** Which kept threads keep their pages loaded. Pinned threads are kept too, but have their own switch. */
 export interface KeepLoaded {
@@ -257,6 +338,21 @@ export interface DeviceChooserView {
   devices: DeviceChoice[]
 }
 
+/** A site's permission question, as the card under the address bar shows it (src/main/permission-prompt.ts). */
+export interface PromptView {
+  /** Changes with each question. */
+  id: number
+  /** A site's host, "This page", or the extension asking. */
+  who: string
+  /** "use your camera and use your microphone". */
+  what: string
+  /** camera, microphone, geolocation, openExternal:zoommtg… */
+  permissions: string[]
+  profile: string
+  /** Whether the answer can be remembered for the site. */
+  remembers: boolean
+}
+
 export interface DeviceChoice {
   id: string
   name: string
@@ -319,8 +415,8 @@ export interface RestyleView {
   /** What you asked for so far and what the agent said it changed, oldest first. */
   changes: { prompt: string; note: string }[]
   enabled: boolean
-  /** A request an agent is working on now, with the agent's name. */
-  running: { prompt: string; startedAt: number; agent: string } | null
+  /** A request an agent is working on now, with the agent's name and what it's doing ("working on “…”"). */
+  running: { prompt: string; startedAt: number; agent: string; doing: string } | null
 }
 
 export interface StyledSite {
@@ -334,6 +430,20 @@ export interface AnimMessage {
   style: 'materialize' | 'slide' | 'scale' | 'fade' | 'off'
   durationMs: number
   ease: 'spring' | 'snappy' | 'smooth'
+}
+
+/** An extension in a profile, for the Extensions settings. */
+export interface ExtensionView {
+  profile: string
+  id: string
+  name: string
+  version: string
+  description: string
+  /** Data URL. */
+  icon?: string
+  enabled: boolean
+  /** Loaded from a folder you chose, rather than installed from the Chrome Web Store. */
+  unpacked: boolean
 }
 
 /** An extension command (chrome.commands) and the shortcut it has in one profile. */
@@ -410,4 +520,55 @@ export interface UserScriptInjection {
   runAt: 'document_start' | 'document_end' | 'document_idle'
   /** The script's sources, in order. */
   js: { code: string; url?: string }[]
+}
+
+/**
+ * Layouts for the address bar's suggestions. 'columns': the site you're typing on a card, searches
+ * under it, then history and your tabs side by side. 'preview': one list, with the highlighted
+ * row's details and tools beside it.
+ */
+export const URL_BAR_STYLES = ['columns', 'preview'] as const
+export type UrlBarStyle = (typeof URL_BAR_STYLES)[number]
+
+/**
+ * What jbrow knows about the site behind an address bar suggestion, for the preview layout's
+ * "Site" details. All of it comes from this machine: the system's DNS and the certificates the
+ * profile was shown this run. Nothing is looked up for a private address. Room for later:
+ * registrar, domain age and location, which need a lookup service.
+ */
+export interface SiteInfoReply {
+  /** The request's seq, so the UI can drop an answer to a row it has moved off. */
+  seq: number
+  url: string
+  /** Host name without the port, '' for an address without one. */
+  host: string
+  /** 'https', 'http', or another scheme without its colon (about, file, chrome-extension…). */
+  scheme: string
+  /** The address matches a private address pattern, so nothing was looked up and nothing else is filled in. */
+  private: boolean
+  /** The address the system's DNS gives for the host. Missing when it didn't resolve or wasn't looked up. */
+  ip?: string
+  /** The IP address is this machine or the local network (loopback, 10/8, 172.16/12, 192.168/16, link-local, fc00::/7). */
+  local?: boolean
+  /** Missing for private addresses and anything that isn't http or https. */
+  cert?: SiteCert
+}
+
+/**
+ * The site's certificate as the profile last saw it this run. 'valid': Chromium accepted it.
+ * 'error': it didn't (see `error`). 'unknown': jbrow hasn't connected to the host this run, and
+ * won't just to find out. 'none': plain http, no certificate.
+ */
+export interface SiteCert {
+  state: 'valid' | 'error' | 'unknown' | 'none'
+  /** Chromium's error without net::ERR_, such as CERT_DATE_INVALID or CERT_AUTHORITY_INVALID. */
+  error?: string
+  /** Who signed it: the issuer's common name, or its organization. */
+  issuer?: string
+  /** When it expires, in ms. */
+  validTo?: number
+  /** Whole days until it expires; negative once it has. */
+  daysLeft?: number
+  /** You chose to go ahead despite the error. */
+  trusted?: boolean
 }

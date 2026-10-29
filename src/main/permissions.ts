@@ -1,8 +1,9 @@
-import { app, dialog, type BrowserWindow, type Session, type WebContents } from 'electron'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { app, dialog, ipcMain, type BrowserWindow, type Session, type WebContents } from 'electron'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { Profile } from '../shared/types'
 import { thirdPartyCookiesBlocked } from './third-party-cookies'
+import { setAside, writeAtomic } from './json-file'
 
 /** Granted without asking, as Chrome does. display-capture asks with its own menu (see screenshare.ts). */
 const ALWAYS = new Set([
@@ -75,20 +76,54 @@ const storePath = () => path.join(app.getPath('userData'), 'permissions.json')
 
 function originOf(url: string): string {
   try {
-    return new URL(url).origin
+    const u = new URL(url)
+    // URL gives schemes it doesn't know, chrome-extension: included, the origin "null".
+    return u.protocol === 'chrome-extension:' ? `chrome-extension://${u.host}` : u.origin
   } catch {
     return url
   }
 }
 
-/** Extensions already listed what they use when you installed them. */
 const isExtension = (origin: string) => origin.startsWith('chrome-extension://')
 
 /**
- * Only http(s) sites get remembered decisions. Others (data:, file:, sandboxed frames, whose
- * origin is "null") would share one entry with every page like them, so they're asked each time.
+ * The web permissions an extension gets by listing them in its manifest, as in Chrome. Everything
+ * else it's asked for like a site: camera, microphone, other apps, and these when it didn't list them.
  */
-const isRememberable = (origin: string) => /^https?:\/\//.test(origin)
+const MANIFEST: Record<string, string> = {
+  geolocation: 'geolocation',
+  notifications: 'notifications',
+  'clipboard-read': 'clipboardRead',
+}
+
+/** The installed extension an origin belongs to, if it is one. */
+function extensionOf(sess: Session, origin: string): Electron.Extension | undefined {
+  return isExtension(origin) ? sess.extensions.getExtension(origin.slice('chrome-extension://'.length)) ?? undefined : undefined
+}
+
+/**
+ * Who the prompt says is asking: a site by its host, an extension as an extension, so one named
+ * like a site can't pass for it. The name is the extension's own, kept to one short line.
+ */
+function requester(origin: string, name?: string): string {
+  if (!isExtension(origin)) return origin.replace(/^https?:\/\//, '')
+  const clean = name?.replace(/[\p{C}\s]+/gu, ' ').trim().slice(0, 40)
+  return clean ? `The extension “${clean}”` : 'An extension'
+}
+
+/** Whether the extension behind `origin` listed `permission` in its manifest. */
+function listed(sess: Session, origin: string, permission: string): boolean {
+  const key = MANIFEST[permission]
+  const declared: unknown = key && extensionOf(sess, origin)?.manifest?.permissions
+  return Array.isArray(declared) && declared.includes(key)
+}
+
+/**
+ * Only http(s) sites and extensions get remembered decisions. Others (data:, file:, sandboxed
+ * frames, whose origin is "null") would share one entry with every page like them, so they're
+ * asked each time.
+ */
+const isRememberable = (origin: string) => /^(https?|chrome-extension):\/\//.test(origin)
 
 /**
  * Camera and microphone arrive as one "media" request; jbrow asks and remembers them separately.
@@ -112,6 +147,32 @@ function describe(permission: string): string | undefined {
   return ASK[permission]
 }
 
+/** What a permission prompt asks. */
+export interface PermissionQuestion {
+  /** A site's host, "This page", or the extension asking (see requester()). */
+  who: string
+  /** What it wants to do, as one phrase: "use your camera and use your microphone". */
+  what: string
+  /** The permissions asked for, after expand(): camera, microphone, openExternal:zoommtg… */
+  permissions: string[]
+  profile: string
+  /** Whether the answer can be remembered for the site. */
+  remembers: boolean
+}
+
+export interface PermissionAnswer {
+  allow: boolean
+  remember: boolean
+  /** Closed without an answer: refused this once, and the site may ask again. */
+  dismissed?: boolean
+}
+
+/**
+ * Asks in jbrow's own window, under the address bar of the tab the page is in. Undefined for a
+ * page outside tabs, which is asked with a dialog instead.
+ */
+export type PermissionAsker = (wc: WebContents, question: PermissionQuestion) => Promise<PermissionAnswer> | undefined
+
 export class SitePermissions {
   private store: Store = {}
   /** Open prompts, so a site asking twice gets one dialog. */
@@ -120,31 +181,42 @@ export class SitePermissions {
   private blockedOnPage = new WeakMap<WebContents, Set<string>>()
   /** Devices allowed until jbrow quits (see isLasting), by profile and origin, then device key. */
   private sessionDevices = new Map<string, Set<string>>()
+  /** The profile each attached session belongs to. */
+  private profiles = new WeakMap<Session, string>()
 
-  constructor(private window: () => BrowserWindow | null) {
+  constructor(
+    private window: () => BrowserWindow | null,
+    private asker?: PermissionAsker,
+  ) {
     if (!existsSync(storePath())) return
     try {
       this.store = JSON.parse(readFileSync(storePath(), 'utf8')) as Store
     } catch (error) {
       console.error('[permissions] permissions.json is not valid JSON, starting over:', error)
+      setAside(storePath())
     }
   }
 
   /** Denies by default; asks for what's in ASK and remembers the answer for the profile. */
   attach(sess: Session, profile: Profile) {
     const profileId = profile.id
+    this.profiles.set(sess, profileId)
     sess.setPermissionRequestHandler((wc, permission, callback, details) => {
       const origin = originOf(details.requestingUrl)
-      if (ALWAYS.has(permission) || isExtension(origin)) return callback(true)
-      if (STORAGE_ACCESS.has(permission)) return callback(!thirdPartyCookiesBlocked())
       const wanted = expand(permission, details as { mediaTypes?: string[]; externalURL?: string })
+      if (ALWAYS.has(permission) || wanted.every((p) => listed(sess, origin, p))) return callback(true)
+      if (STORAGE_ACCESS.has(permission)) return callback(!thirdPartyCookiesBlocked())
       if (!wanted.every((p) => describe(p))) return callback(false)
       // The name is read when asking, so a profile renamed in settings asks under its new name.
-      void this.ask(wc, profileId, profile.name, origin, wanted).then(callback)
+      // A prompt that fails denies, rather than leaving the page waiting for an answer.
+      void this.ask(wc, profileId, profile.name, origin, wanted, extensionOf(sess, origin)?.name).then(callback, (error) => {
+        console.error('[permissions] could not ask:', error)
+        callback(false)
+      })
     })
     sess.setPermissionCheckHandler((_wc, permission, requestingOrigin, details) => {
       const origin = originOf(requestingOrigin)
-      if (ALWAYS.has(permission) || isExtension(origin)) return true
+      if (ALWAYS.has(permission) || listed(sess, origin, permission)) return true
       if (STORAGE_ACCESS.has(permission)) return !thirdPartyCookiesBlocked()
       // A site may ask for a USB, HID or serial device. It sees only the ones you pick in the chooser.
       if (permission === 'usb' || permission === 'hid' || permission === 'serial') return true
@@ -205,6 +277,24 @@ export class SitePermissions {
     return (!!runtime && !!this.sessionDevices.get(`${profileId} ${origin}`)?.has(runtime)) || this.store[profileId]?.[origin]?.[deviceKey(api, device)] === true
   }
 
+  /**
+   * Answers src/preload/permissions.ts: whether the page's top frame hasn't been allowed or blocked
+   * `permission` yet, so the page is told it may still ask. Only for what jbrow asks about.
+   */
+  listen() {
+    const undecided = (e: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent, permission: unknown) =>
+      e.senderFrame === e.sender.mainFrame && typeof permission === 'string' && this.undecided(e.sender, e.senderFrame.origin, permission)
+    ipcMain.on('jbrow:permission-undecided', (e, permission: unknown) => void (e.returnValue = undecided(e, permission)))
+    ipcMain.handle('jbrow:permission-undecided', (e, permission: unknown) => undecided(e, permission))
+  }
+
+  undecided(wc: WebContents, url: string, permission: string): boolean {
+    const profileId = this.profiles.get(wc.session)
+    const origin = originOf(url)
+    if (!profileId || !ASK[permission] || permission === 'openExternal' || this.blockedOnPage.get(wc)?.has(permission)) return false
+    return !isRememberable(origin) || this.store[profileId]?.[origin]?.[permission] === undefined
+  }
+
   /** Whether the site has remembered decisions or devices in the profile, to offer resetting them. */
   has(profileId: string, url: string): boolean {
     const origin = originOf(url)
@@ -226,7 +316,8 @@ export class SitePermissions {
     this.save()
   }
 
-  private async ask(wc: WebContents, profileId: string, profileName: string, origin: string, wanted: string[]): Promise<boolean> {
+  /** `name` is the extension's, for an extension: its origin is only an ID. */
+  private async ask(wc: WebContents, profileId: string, profileName: string, origin: string, wanted: string[], name?: string): Promise<boolean> {
     const remembers = isRememberable(origin)
     const decided = (remembers && this.store[profileId]?.[origin]) || {}
     const blocked = this.blockedOnPage.get(wc)
@@ -238,7 +329,8 @@ export class SitePermissions {
     const key = `${profileId} ${remembers ? origin : `page ${wc.id}`} ${open.join(',')}`
     let prompt = this.pending.get(key)
     if (!prompt) {
-      prompt = this.prompt(profileName, origin, open, remembers).then(({ allow, remember }) => {
+      prompt = this.prompt(wc, profileName, requester(origin, name), open, remembers).then(({ allow, remember, dismissed }) => {
+        if (dismissed) return false
         if (remember) {
           const site = ((this.store[profileId] ??= {})[origin] ??= {})
           for (const p of open) site[p] = allow
@@ -250,16 +342,23 @@ export class SitePermissions {
         }
         return allow
       })
-      prompt.finally(() => this.pending.delete(key))
+      void prompt.finally(() => this.pending.delete(key)).catch(() => {})
       this.pending.set(key, prompt)
     }
     return prompt
   }
 
-  private async prompt(profileName: string, origin: string, permissions: string[], remembers: boolean) {
-    const what = permissions.map(describe)
-    const list = what.length > 1 ? `${what.slice(0, -1).join(', ')} and ${what.at(-1)}` : what[0]
-    const host = remembers ? origin.replace(/^https?:\/\//, '') : 'This page'
+  /** `who` is what requester() makes of the origin. */
+  private async prompt(wc: WebContents, profileName: string, who: string, permissions: string[], remembers: boolean): Promise<PermissionAnswer> {
+    // "use your microphone and camera", not "use your microphone and use your camera".
+    const what = permissions.map(describe).map((w, i, all) => (i && all[i - 1]!.startsWith('use your ') && w!.startsWith('use your ') ? w!.slice(9) : w))
+    const list = what.length > 1 ? `${what.slice(0, -1).join(', ')} and ${what.at(-1)}` : what[0]!
+    const host = remembers ? who : 'This page'
+    const inWindow = this.asker?.(wc, { who: host, what: list, permissions, profile: profileName, remembers })
+    if (inWindow) {
+      const answer = await inWindow
+      return { ...answer, remember: remembers && answer.remember }
+    }
     const options: Electron.MessageBoxOptions = {
       type: 'question',
       message: `${host} wants to ${list}`,
@@ -276,7 +375,12 @@ export class SitePermissions {
     return { allow: response === 1, remember: remembers && checkboxChecked }
   }
 
+  /** A disk that won't take it costs the remembering, not the answer you gave. */
   private save() {
-    writeFileSync(storePath(), JSON.stringify(this.store, null, 2))
+    try {
+      writeAtomic(storePath(), JSON.stringify(this.store, null, 2))
+    } catch (error) {
+      console.error('[permissions] could not save permissions.json:', error)
+    }
   }
 }

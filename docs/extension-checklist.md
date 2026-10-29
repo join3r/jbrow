@@ -1,23 +1,28 @@
 # Extension checklist
 
-Your must-have extensions, tested in jbrow's Personal profile. "Automated" is what I could check
-from the command line on 2026-10-22. "By hand" is what only real use can tell.
+Extensions jbrow is tested with, in a profile called Personal. "Automated" is what could be
+checked from the command line on 2026-10-22. "By hand" is what only real use can tell.
 
-Install them all into a profile with `npm start -- --install-extensions=personal` (or `work`), or
-from the jb menu bar item: right-click, **Install test extensions**.
+The automation extension in the last row is an unpacked extension of the author's own. It drives
+tabs through `chrome.debugger` and talks to a desktop app over native messaging, so it stands in for
+any extension that does the same. Test yours the same way.
+
+When running from source (see [CONTRIBUTING.md](../CONTRIBUTING.md)), install the Web Store ones
+into a profile with `npm start -- --install-extensions=personal` (any profile's id works), or from
+the jb menu bar item: right-click, **Install test extensions**.
 
 | Extension | Automated result | Test by hand |
 |---|---|---|
 | **D.Bridge 2** | Native messaging works: the page handshake reaches D.Launcher's host (`dBridge2Nm`), which starts and answers. | Sign something on slovensko.sk with your eID. |
 | **uBlock Origin Lite** | Service worker runs with 6 rulesets enabled (uBlock filters, EasyList, EasyPrivacy, Peter Lowe's, badware, URLhaus). Trackers are blocked; Google ad and analytics scripts are replaced with uBlock's harmless stand-ins, as in Chrome. Checked again on 2026-10-23: until then none of its rules applied, because of jbrow's own request listener (see below), and Google Analytics loaded for real. | Browse a news site. Check that the popup opens and the per-site toggle works. |
-| **Bitwarden** | Installs; service worker runs; every API it asks for is present. The inline menu (its icon in login fields) shows, and opens its list. The toolbar icon follows lock and unlock. | Unlock, fill a login from the field icon, save a new login, use a passkey, copy a password. If it was installed before onInstalled worked (below), the field icon is off: Bitwarden → Settings → Autofill → **Show autofill suggestions on form fields**. Desktop-app unlock goes through native messaging (`com.8bit.bitwarden`), which the D.Bridge test shows working. |
+| **Bitwarden** | Installs; service worker runs; every API it asks for is present. The inline menu (its icon in login fields) shows, and opens its list. The toolbar icon follows lock and unlock. | Unlock, fill a login from the field icon and from the page's right-click menu, save a new login, use a passkey, copy a password. Desktop-app unlock goes through native messaging (`com.8bit.bitwarden`), which the D.Bridge test shows working. |
 | **SponsorBlock** | Service worker runs. It crashed before the fixes below. | Watch a YouTube video with a known sponsor segment. |
 | **Enhancer for YouTube** | Service worker runs. | Open YouTube and use its controls. Its commands have no keys until you assign them under Settings → Extension shortcuts. |
 | **Video Speed Controller** | Works: S and D change the speed on YouTube. It did nothing until the content script shim below. | Change the speed with its in-page keys (S and D). |
 | **Consent-O-Matic** | Service worker runs; opened its welcome page on first install. | Visit a few sites with cookie banners. |
 | **Canvas Blocker** | Service worker runs. Electron warns that `notifications` and `contextMenus` are unknown permissions, but the library provides both. | Check a canvas fingerprinting test page. |
 | **SideHN** | Works: on a page opened with `?hnid=`, the sidebar loads the HN thread, and with an HN login cookie the frame's request carries it (its `modifyHeaders` rule sets `Cookie`, `Sec-Fetch-*` and `Referer`). Its "Method not implemented" error was `cookies.onChanged.hasListener`, not the header rule. | Log in to HN, open a story link from HN and check that the sidebar shows you logged in and lets you vote and reply. |
-| **Stem** (yours, unpacked) | Not tested. Open a Personal tab, then puzzle icon → **Add from folder…** and pick its folder. It has a native messaging host (`com.stem.browser`), which should work the same way D.Bridge does. | Whatever Stem does in Chrome. |
+| **An automation extension** (unpacked, your own) | Connects: its native messaging host starts and the desktop app answers with the profile's name. It never did before 2026-10-26: `chrome.debugger` was missing, so its service worker threw on its first line and never started (see `debugger.ts` below). Through `chrome.debugger`, in a background tab: attach, the `Page`/`Runtime`/`Network`/`Log` enables, focus emulation, the file chooser intercept, an isolated world and binding, the accessibility tree, typing (diacritics included), clicks, keys and a clipped screenshot all work. | Have it do something in a jbrow tab: open a page, fill a form, take a screenshot. Check that the desktop app sees each profile. Downloads won't reach it (see Known gaps). |
 
 ## What jbrow had to fix
 
@@ -43,6 +48,35 @@ in these places:
 7. Pages got local storage as `chrome.storage.managed` (see the shim's storage item below).
 8. Events answer `hasListener` and `hasListeners` instead of throwing "Method not implemented".
    SideHN calls `cookies.onChanged.hasListener` first thing, so it never set up its login rule.
+9. A click on an extension's item in the page's right-click menu says which submenu it came from
+   (`parentMenuItemId`) and which frame was clicked. Both were always -1. Bitwarden decides
+   between fill, copy username and copy password by the submenu, so its items did nothing.
+10. A native messaging host ends when the page or service worker that opened it goes away.
+    Before, every extension reload or worker restart left the old host running. On 2026-10-27
+    jbrow had six of the automation extension's hosts for two profiles. Each one reconnected to
+    the desktop app every two seconds and knocked the previous one off, so its actions failed
+    with "disconnected".
+11. An open native messaging host keeps its service worker running, as in Chrome, and ends when
+    its extension unloads. Electron stops an idle worker after 30 seconds. With item 10 alone
+    that ended the automation extension's host, and since jbrow's `chrome.alarms` runs on the
+    worker's own timers, nothing woke the worker again: the desktop app saw no jbrow tabs until
+    jbrow restarted.
+12. `windows.get` and `windows.getAll` describe the window afresh each time. The library kept the
+    description it made when the window was added, before its tabs had details, so a window
+    listed no tabs until it was resized. The automation extension lists tabs through `windows.getAll` and reported
+    0 open tabs, though opening and driving tabs worked.
+13. Tabs without a page (asleep, or not opened since launch) are listed by `tabs.query` and
+    `windows.getAll` as Chrome's discarded tabs (`discarded: true`, `status: "unloaded"`). A tab
+    keeps the ID its last page had; one with no page since launch gets one from 1,000,000 up.
+    `tabs.get` answers for one as it is, without loading it: Bitwarden calls it on every https
+    tab each time its service worker starts, which woke every sleeping tab, kept ones too.
+    `tabs.update`, `tabs.reload` and `debugger.attach` on one load its page in the background and
+    answer under the page's ID, and `tabs.onReplaced` says so, as Chrome did for a discarded tab. Every ID a
+    tab had reaches it until it closes, and `tabs.remove` closes one without loading it. jbrow's
+    window is always in `windows.getAll`, so an extension opens tabs there instead of making a
+    window of its own.
+14. `tabs.create` tells jbrow which extension asked, and the tab keeps it (`openedBy`) for the
+    favicon badge; `chrome.debugger` tells it which extension is working in a page.
 
 **`src/preload/extension-shims.ts`** runs in every extension context before the library:
 
@@ -66,6 +100,17 @@ in these places:
    The service worker does this once per extension version, and only while no ruleset is on, so
    one the extension turned off stays off. It remembers that in the extension's own storage, under
    `jbrow.enabledRulesets`.
+7. Bitwarden installed before onInstalled worked (below) never turned on its field icon, and an
+   unwritten setting means off. The service worker writes "on field focus", the value Bitwarden's
+   install step writes, when the setting was never stored. It does this once per profile and
+   remembers that under `jbrow.inlineMenuVisibility`. A setting you chose, off included, stays.
+8. `chrome.storage.onChanged` reaches service workers. Electron never fires it there, whether the
+   worker or one of the extension's pages wrote. Bitwarden's worker never heard that it had
+   unlocked, so after jbrow started its toolbar icon and field menu said locked while the popup
+   said unlocked, until the worker stopped and the next one read storage afresh. Each extension
+   context reports what its writes to `local` and `session` change, and `src/main/storage-events.ts`
+   sends it on to the extension's worker. Pages still get Chromium's own event. Writes from
+   content scripts aren't reported.
 
 **`src/main/installed.ts`** stands in for `chrome.runtime.onInstalled`, which Electron never
 fires. Bitwarden turns its inline menu on, and shows its welcome page, only on install, so the
@@ -80,7 +125,7 @@ installed earlier have stored data, so they get neither.
 so Video Speed Controller never got its settings and never attached to videos. Before an extension
 from the Web Store loads, jbrow writes `jbrow-content-shim.js` into its folder and lists it first in
 each isolated-world content script, pointing `sync` at local storage. Updates get it
-too. Unpacked folders such as Stem are left alone, since they're your own source. `managed` is
+too. Unpacked folders are left alone, since they're your own source. `managed` is
 empty here as well.
 
 **`src/main/jbrow-extension.ts`** is jbrow's own extension, loaded into every profile. Electron
@@ -97,7 +142,7 @@ but leaves every shortcut empty and never fires `onCommand`. jbrow takes your sh
 settings, or else the manifest's `suggested_key` (`mac`, then `default`, where Ctrl means ⌘),
 and drops a suggestion that clashes with jbrow's own keys or another command's. It matches key
 presses in the panel and side panel against the active tab's profile and sends `onCommand` with
-that tab. Key presses in jbrow's other windows (action popups, pop-outs, popups pages open) match
+that tab. Key presses in jbrow's other windows (action popups, pop-outs) match
 against that window's profile; a popup's commands act on the tab it opened for, the others' on the
 active tab. Chrome would pass a pop-out its own tab instead, which is rarely what the command wants.
 `_execute_action` opens the popup. Commands marked `global` go through `globalShortcut`.
@@ -115,6 +160,26 @@ right of the tab, under a header drawn by jbrow's UI. `openPanelOnActionClick` m
 extension's button toggle the panel instead of opening its popup, and the button's right-click menu
 gets **Open side panel**, as in Chrome. Global options and the button behavior are kept in
 `side-panel.json`; which panels are open is not, as in Chrome.
+
+**`src/main/debugger.ts`** implements `chrome.debugger` for tab targets (`attach`, `detach`,
+`sendCommand`, `onEvent`, `onDetach`) on each page's `webContents.debugger`. One extension at a
+time per tab, with Chrome's error messages, and command errors come back as the protocol's JSON, as
+in Chrome. Electron's debugger is a full DevTools session, so jbrow holds an extension to its tab
+as Chrome does. It attaches only to web pages (http, https, data, about:blank with a web origin,
+blob of a web page) and the extension's own pages. It lets go when the tab goes, or is redirected,
+anywhere else: jbrow's pages, another extension's, a file. Each command checks the tab's address
+again. Only domains that act on the page are let through (`Page`, `Runtime`, `DOM`, `Input`,
+`Network`, `Emulation`, `Accessibility`, `Log`, `CSS`, `Overlay`, `Fetch` and the like, listed in
+`PAGE_DOMAINS`), plus `Browser.getVersion`. Within them, refused: every cookie method beyond the
+page's own `Network.getCookies`,
+`Network.clearBrowserCache`, `Page.setDownloadBehavior`, and `Page.navigate` to such a place.
+`DOM.setFileInputFiles` and `Network.loadNetworkResource` need file access, which jbrow gives
+unpacked extensions only (the automation extension's uploads use the first). A hidden tab (any background tab, and every tab while jbrow is hidden) draws no frames,
+so a CDP screenshot of it waited forever. Chrome counts a debugger as a capturer and keeps the tab
+drawing; Electron 44 has no such count, so while `Page.captureScreenshot` runs jbrow keeps the page
+drawing with `capturePage` every 100 ms. For that, and so pages opened in the background measure a
+real viewport, a new tab's view is now laid out at the page area's size instead of 0×0
+(`ensureView` in `tabs.ts`).
 
 **`src/main/user-scripts.ts`** and **`src/preload/user-scripts.ts`** implement `chrome.userScripts`:
 `register`, `update`, `unregister`, `getScripts`, `configureWorld`, `getWorldConfigurations`,
@@ -151,3 +216,8 @@ These are worth sending upstream to electron-browser-shell once they've proven t
 - Static rulesets are turned on from the extension's service worker, so an extension that has rulesets
   but no service worker keeps them off.
 - Extension service workers stop after about 30 seconds idle and wake on events, as in Chrome.
+- `chrome.debugger` reaches tabs only, not extension or browser targets, and has no `getTargets`.
+  Instead of Chrome's "is debugging this browser" bar, the tab's favicon carries the extension's
+  icon. Files are off limits even for an extension allowed file access.
+- `chrome.downloads` is the library's stub: `search` answers nothing and no events fire, so an
+  automation extension never sees a download a page started.

@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <title>Permission</title>
+    <link rel="stylesheet" href="ui.css" />
+    <style>
+      html, body { height: auto; }
+      body { padding: var(--pad-top) var(--pad-side) var(--pad-bottom); }
+      .prompt {
+        background: var(--solid);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px 10px 10px 12px;
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+      }
+      .prompt-head { display: flex; align-items: flex-start; gap: 10px; }
+      .prompt-icon {
+        flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; margin-top: 1px;
+        border-radius: 8px; background: var(--accent-soft); color: var(--accent);
+      }
+      .prompt-icon svg.i { width: 15px; height: 15px; }
+      .prompt-text { flex: 1; min-width: 0; padding-top: 1px; }
+      .prompt-text p { margin: 0; font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
+      .prompt-text b { font-weight: 600; }
+      .prompt-text .prompt-profile { color: var(--muted); font-size: 11.5px; margin-top: 1px; }
+      .prompt-head .icon { margin: -3px -4px 0 0; }
+      .prompt-acts { display: flex; align-items: center; gap: 6px; margin-top: 10px; padding-left: 38px; }
+      .prompt-acts label { flex: 1; display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; }
+      .prompt-acts label input { margin: 0; accent-color: var(--accent); }
+      .prompt-acts .btn { height: 26px; padding: 0 12px; font-size: 12.5px; }
+    </style>
+  </head>
+  <body>
+    <div id="card" class="prompt" role="alertdialog" aria-labelledby="text" aria-describedby="profile" hidden>
+      <div class="prompt-head">
+        <span id="icon" class="prompt-icon"></span>
+        <div class="prompt-text">
+          <p id="text"></p>
+          <p id="profile" class="prompt-profile"></p>
+        </div>
+        <button id="dismiss" class="icon sm" title="Not now (Esc)" aria-label="Not now"></button>
+      </div>
+      <div class="prompt-acts">
+        <label id="rememberRow"><input id="remember" type="checkbox" checked />Remember</label>
+        <span id="spacer" hidden style="flex: 1"></span>
+        <button id="block" class="btn">Block</button>
+        <button id="allow" class="btn primary">Allow</button>
+      </div>
+    </div>
+    <script src="permission-prompt.js"></script>
+  </body>
+</html>

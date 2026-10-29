@@ -1,22 +1,29 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, MenuItem, nativeImage, nativeTheme, Notification, session, shell, Tray } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, MenuItem, nativeImage, nativeTheme, Notification, powerMonitor, session, shell, systemPreferences, Tray } from 'electron'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
-import { urlMatcher } from '../shared/patterns'
-import { awayFromHome, isInFolder, isPinned, keptThreads, numberedThreads, sections, type FolderView } from '../shared/threads'
-import { isSearchUrl, looksLikeAddress, suggestUrlFor } from '../shared/engines'
-import { THEMES, type AppEntry, type AppLabel, type Folder, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
+import { siteProfile as matchSiteProfile, urlMatcher } from '../shared/patterns'
+import { awayFromHome, besideClosed, isInFolder, isPinned, keptThreads, numberedThreads, sections, type FolderView } from '../shared/threads'
+import { forcedSearch, isSearchUrl, looksLikeAddress, suggestUrlFor } from '../shared/engines'
+import { THEMES, URL_BAR_STYLES, type AppEntry, type AppLabel, type Folder, type ExtensionView, type PaneBar, type Prefs, type Profile, type RestyleAgent, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
 import { BACKGROUND } from './background'
 import { Certificates } from './certs'
 import { DangerousSites } from './dangerous'
 import { DeviceChooser } from './devices'
+import { PermissionPrompts } from './permission-prompt'
 import { Logins } from './logins'
 import { SignInSheets } from './signin'
+import { isSearchPage, SiteInfo } from './site-info'
 import { ExtensionCommands } from './commands'
+import { eraseExtensionData, iconOf, localize, localizedName, messages, readFolder, type ExtensionFolder } from './extension-files'
+import { forgetInstall } from './installed'
+import { jbrowExtensionDir } from './jbrow-extension'
 import { Downloads, type DownloadAction } from './downloads'
 import { handleFavicons } from './favicons'
 import { FindInPage } from './find'
 import { frontmostApp, type FrontApp } from './frontmost'
+import { ExtensionDebugger } from './debugger'
+import { libraryOf } from './library'
 import { IdleWatcher } from './idle'
 import { secondsSinceInput } from './input'
 import { logPath, setupLogging } from './log'
@@ -25,26 +32,32 @@ import { SitePermissions } from './permissions'
 import { MiniPlayer } from './pip'
 import { pickShareSource } from './screenshare'
 import { SidePanels } from './side-panel'
-import { installTestExtensions, loadUnpacked, partitionFor, setupProfile, setupProfiles, type ProfileDeps, type ProfileRuntime, type TabHooks } from './profiles'
+import { attachStorageEvents } from './storage-events'
+import { installTestExtensions, loadUnpacked, partitionFor, setupProfile, setupProfiles, startWorker, type ProfileDeps, type ProfileRuntime, type TabHooks } from './profiles'
 import { Restyler } from './restyle'
 import { loadSettings, saveSettings, scopeForApp, settingsPath, type Settings } from './settings'
 import { wireSwipes } from './swipe'
-import { Tabs, type UnloadKind } from './tabs'
+import { Tabs, toUrl, type UnloadKind } from './tabs'
 import { blockThirdPartyCookies, thirdPartyCookiesBlocked } from './third-party-cookies'
 import { UserScripts } from './user-scripts'
+import { topSiteCompletion } from './top-sites'
 import { BrowsingHistory, fetchSearchSuggestions } from './visits'
+import { takeUpdateRelaunch, Updates } from './updates'
 import { Zoom, ZOOM_STEPS, zoomSite } from './zoom'
 import { rm, writeFile } from 'node:fs/promises'
+import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const AWAY_FOCUS_MS = 60 * 1000
 /** A link this long after your last click or key press opens quietly. */
 const QUIET_AFTER_S = 2
 const AWAY_FRESH_MS = 4 * 60 * 60 * 1000
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
 const SWEEP_EVERY_MS = 10 * 60 * 1000
+/** jbrow from source or with JBROW_DEBUG: the test extensions and the UI's DevTools in the menu. */
+const DEV_TOOLS = !app.isPackaged || !!process.env.JBROW_DEBUG
+const BUG_REPORT_URL = 'https://github.com/join3r/jbrow/issues/new?template=bug_report.md'
 
 let settings: Settings
 let panel: Panel
@@ -55,15 +68,19 @@ let commands: ExtensionCommands
 let downloads: Downloads
 let restyler: Restyler
 let certs: Certificates
+let siteInfo: SiteInfo
 let dangerous: DangerousSites
 let logins: Logins
 let signIns: SignInSheets
 let devices: DeviceChooser
+let prompts: PermissionPrompts
 let permissions: SitePermissions
 let profileDeps: ProfileDeps
 let sidePanels: SidePanels
 let idle: IdleWatcher
+let extensionDebugger: ExtensionDebugger
 let userScripts: UserScripts
+let updates: Updates
 /** Pages you've visited, per profile, for the address bar's suggestions. */
 const visits = new BrowsingHistory()
 /** The settings screen is recording a shortcut: key presses go to it, not to jbrow or extensions. */
@@ -107,10 +124,15 @@ const addedApps = new Set<string>()
 // without touching your real data.
 if (process.env.JBROW_USER_DATA) {
   app.setPath('userData', process.env.JBROW_USER_DATA)
-  app.setPath('logs', `${process.env.JBROW_USER_DATA}/logs`)
-  app.setPath('downloads', `${process.env.JBROW_USER_DATA}/Downloads`)
+  // path.join, not a /: on Windows Chromium fails every download into a folder written C:\x/Downloads.
+  app.setPath('logs', path.join(process.env.JBROW_USER_DATA, 'logs'))
+  app.setPath('downloads', path.join(process.env.JBROW_USER_DATA, 'Downloads'))
 }
 setupLogging()
+// electron-chrome-web-store downloads extensions with Node's fetch, which tries IPv4 and IPv6 in
+// turn and drops each after 250 ms. A connection to Google that takes longer, with IPv6
+// unreachable, fails the install as "fetch failed"; Chromium's own stack waits it out.
+setDefaultAutoSelectFamilyAttemptTimeout(2000)
 // A Chromium switch, so it's read before the app is ready and a change waits for a restart.
 if (loadSettings().blockThirdPartyCookies) blockThirdPartyCookies()
 // Utilities that quit apps with no open windows (Vorssaint, for one) will quit jbrow while it's
@@ -120,6 +142,13 @@ app.on('before-quit', () => {
   // A move or resize from the last moment, while the window is still there.
   panel?.flush()
 })
+
+// A debugging port hands every profile's cookies and pages to whoever connects, and anything
+// that can start jbrow could ask for one. Only jbrow from source takes it.
+if (app.isPackaged && ['remote-debugging-port', 'remote-debugging-pipe'].some((s) => app.commandLine.hasSwitch(s))) {
+  console.error('[jbrow] refusing to start with remote debugging')
+  app.exit(1)
+}
 
 if (!app.requestSingleInstanceLock()) app.quit()
 
@@ -139,17 +168,41 @@ app.on('open-file', (event, file) => {
 
 // ---------- state for the UI ----------
 
+function paneBar(id: string): PaneBar {
+  const t = tabs.get(id)
+  const wc = tabs.webContentsFor(id)
+  const cert = t ? certs.view(id, t.profile, t.url) : null
+  const { canGoBack, loading } = tabs.navState(id)
+  return {
+    id,
+    webContentsId: wc?.id ?? null,
+    partition: t ? partitionFor(t.profile) : null,
+    extensions: actionExtensions(t?.profile),
+    canGoBack,
+    loading,
+    lock: cert ? (cert.error ? 'warn' : 'secure') : t && isInsecure(t.url) ? 'warn' : null,
+    // jbrow's own screens cover a page it stopped or that's asking for a password.
+    color: t?.url && !certs.isBlocked(id) && !dangerous.isBlocked(id) && !logins.isAsking(id) ? tabs.barColor(id) : null,
+  }
+}
+
 function state(): UiState {
   const active = tabs.active()
   return {
-    tabs: tabs.uiTabs(),
+    tabs: tabs.uiTabs().map((t) => {
+      const wc = tabs.webContentsFor(t.id)
+      const drivenBy = wc ? extensionDebugger.holder(wc) : undefined
+      return drivenBy ? { ...t, drivenBy } : t
+    }),
     activeId: tabs.activeId,
+    panes: tabs.shown().map(paneBar),
     folders: tabs.folders,
     splits: tabs.splits,
     archiveNotice: noticeRoots(),
     activeWebContentsId: tabs.activeWebContents()?.id ?? null,
     activePartition: active ? partitionFor(active.profile) : null,
     activeExtensions: actionExtensions(active?.profile),
+    tabExtensions: tabExtensions(),
     profiles: settings.profiles,
     filter,
     scope,
@@ -166,6 +219,7 @@ function state(): UiState {
     crash: active ? tabs.crash(active.id) : null,
     devices: active ? devices.view(active.id) : null,
     styledSites: restyler.styledSites(),
+    restyleAgents: restyler.agents(),
     zoomSites: zoom.list(),
     nav: tabs.navState(),
     keys: actionKeys(settings.shortcuts),
@@ -173,8 +227,11 @@ function state(): UiState {
       appearance: settings.appearance,
       theme: settings.theme,
       profileStyle: settings.profileStyle,
+      profileSwitcher: settings.profileSwitcher,
       animation: settings.animation,
+      whimsy: settings.whimsy,
       privateUrls: settings.privateUrls,
+      profileSites: settings.profileSites,
       hideFromScreenCapture: settings.hideFromScreenCapture,
       dangerousSites: settings.dangerousSites,
       blockThirdPartyCookies: settings.blockThirdPartyCookies,
@@ -185,6 +242,10 @@ function state(): UiState {
       earlierAfterHours: settings.earlierAfterHours,
       pinnedExtensions: settings.pinnedExtensions,
       pinnedRows: settings.pinnedRows,
+      numberFrom: settings.numberFrom,
+      newTabsAt: settings.newTabsAt,
+      openApps: settings.openApps,
+      restyleEnabled: settings.restyle.enabled,
       restyleAgent: settings.restyle.agent,
       restyleModel: settings.restyle.model,
       restyleCodexModel: settings.restyle.codexModel,
@@ -193,9 +254,25 @@ function state(): UiState {
       zoom: { defaultPercent: settings.zoom.defaultPercent, remember: settings.zoom.remember },
       searchUrl: settings.searchUrl,
       searchSuggestions: settings.searchSuggestions,
+      urlBarStyle: settings.urlBarStyle,
+      autoUpdate: settings.autoUpdate,
     },
     now: Date.now(),
   }
+}
+
+/** The extensions tabs show as having opened them or working in them, by ID. */
+function tabExtensions(): UiState['tabExtensions'] {
+  const out: UiState['tabExtensions'] = {}
+  for (const t of tabs.records) {
+    const wc = tabs.webContentsFor(t.id)
+    for (const id of [t.openedBy, wc ? extensionDebugger.holder(wc) : undefined]) {
+      if (!id || out[id]) continue
+      const ext = runtimes.get(t.profile)?.session.extensions.getExtension(id)
+      if (ext) out[id] = { name: localizedName(ext), icon: iconOf(ext) }
+    }
+  }
+  return out
 }
 
 /** IDs of a profile's extensions that have a toolbar button. */
@@ -216,6 +293,124 @@ function togglePinnedExtension(id: string) {
   settings.pinnedExtensions = pinned.includes(id) ? pinned.filter((p) => p !== id) : [...pinned, id]
   saveSettings(settings)
   pushState()
+}
+
+// ---------- turning extensions off and removing them ----------
+
+/** Every extension in every profile, on or off, for the Extensions settings. */
+function extensionViews(): ExtensionView[] {
+  const views: ExtensionView[] = []
+  for (const p of settings.profiles) {
+    const rt = runtimes.get(p.id)
+    if (!rt) continue
+    const view = (ext: ExtensionFolder, id: string, enabled: boolean): ExtensionView => ({
+      profile: p.id,
+      id,
+      name: localizedName(ext),
+      version: String(ext.manifest.version ?? ''),
+      description: localize(String(ext.manifest.description ?? ''), messages(ext)),
+      icon: iconOf(ext),
+      enabled,
+      unpacked: !isInside(ext.path, rt.extensionsPath),
+    })
+    for (const ext of rt.session.extensions.getAllExtensions()) {
+      if (ext.path !== jbrowExtensionDir()) views.push(view(ext, ext.id, true))
+    }
+    for (const d of settings.disabledExtensions[p.id] ?? []) {
+      const ext = readFolder(d.path)
+      if (ext) views.push(view(ext, d.id, false))
+    }
+  }
+  return views.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+const isInside = (file: string, dir: string) => {
+  const rel = path.relative(dir, file)
+  // On Windows another drive's path comes back whole; `..foo` is a name inside.
+  return !path.isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${path.sep}`)
+}
+
+let extensionsQueued = false
+function sendExtensions() {
+  if (extensionsQueued) return
+  extensionsQueued = true
+  // Removing or loading several at once sends one list.
+  setTimeout(() => {
+    extensionsQueued = false
+    if (!panel.win.isDestroyed() && settingsShown) panel.ui.send('extensions', { profiles: settings.profiles, extensions: extensionViews() })
+  }, 50)
+}
+
+/** Turns an extension off (it stays installed, and loads no more) or back on. */
+async function setExtensionEnabled(profileId: string, id: string, on: boolean) {
+  const rt = runtimes.get(profileId)
+  if (!rt) return
+  const disabled = (settings.disabledExtensions[profileId] ??= [])
+  if (!on) {
+    const ext = rt.session.extensions.getExtension(id)
+    if (!ext) return
+    disabled.push({ id, path: ext.path })
+    saveSettings(settings)
+    rt.session.extensions.removeExtension(id)
+  } else {
+    const entry = disabled.find((d) => d.id === id)
+    if (!entry) return
+    try {
+      const unpacked = !isInside(entry.path, rt.extensionsPath)
+      const ext = await rt.session.extensions.loadExtension(entry.path, unpacked ? { allowFileAccess: true } : undefined)
+      await startWorker(rt.session, ext, profileId)
+    } catch (error) {
+      console.error(`[extensions] could not turn ${id} back on:`, error)
+      toast(`That extension didn't load: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  pushState()
+  sendExtensions()
+}
+
+/** Removes an extension from a profile after asking, with what it stored. A folder you added stays on disk. */
+async function removeExtension(profileId: string, id: string) {
+  const rt = runtimes.get(profileId)
+  if (!rt) return
+  const loaded = rt.session.extensions.getExtension(id)
+  const entry = settings.disabledExtensions[profileId]?.find((d) => d.id === id)
+  const dir = loaded?.path ?? entry?.path
+  const folder = dir ? readFolder(dir) : null
+  if (!dir || !folder) return
+  const name = localizedName(folder)
+  const unpacked = !isInside(dir, rt.extensionsPath)
+  const { response } = await dialog.showMessageBox(panel.win, {
+    type: 'warning',
+    message: `Remove "${name}" from ${rt.profile.name}?`,
+    detail: unpacked
+      ? 'What it stored is erased. Its folder stays where it is, so you can add it again.'
+      : 'What it stored is erased, like its settings and anything you saved in it.',
+    buttons: ['Cancel', 'Remove'],
+    defaultId: 0,
+    cancelId: 0,
+  })
+  if (response !== 1) return
+
+  if (loaded) rt.session.extensions.removeExtension(id)
+  if (settings.disabledExtensions[profileId]) {
+    settings.disabledExtensions[profileId] = settings.disabledExtensions[profileId].filter((d) => d.id !== id)
+  }
+  if (unpacked) settings.unpackedExtensions[profileId] = (settings.unpackedExtensions[profileId] ?? []).filter((d) => d !== dir)
+  if (settings.extensionShortcuts[profileId]) delete settings.extensionShortcuts[profileId][id]
+  const elsewhere = [...runtimes.values()].some(
+    (other) => other.session.extensions.getExtension(id) || settings.disabledExtensions[other.profile.id]?.some((d) => d.id === id),
+  )
+  if (!elsewhere) settings.pinnedExtensions = settings.pinnedExtensions.filter((p) => p !== id)
+  saveSettings(settings)
+  userScripts.forgetExtension(profileId, id)
+  forgetInstall(rt.session, id)
+  if (!unpacked) await rm(path.join(rt.extensionsPath, id), { recursive: true, force: true }).catch(() => {})
+  await eraseExtensionData(rt.session, id)
+  commands.refresh()
+  commands.registerGlobal()
+  pushState()
+  sendExtensions()
+  toast(`Removed ${name} from ${rt.profile.name}.`)
 }
 
 let pushQueued = false
@@ -307,6 +502,12 @@ function newTabProfile(): string {
   return tabs.active()?.profile ?? settings.defaultProfile
 }
 
+/** The profile an address always opens in, by the sites you gave your profiles. */
+function siteProfile(url: string): string | undefined {
+  const id = matchSiteProfile(settings.profileSites, url)
+  return id && settings.profiles.some((p) => p.id === id) ? id : undefined
+}
+
 function scopeFields() {
   return scope ? { scope: scope.key, scopeName: scope.name, app: lastFront?.bundleId } : {}
 }
@@ -329,7 +530,7 @@ function appLabels(): Record<string, AppLabel> {
 
 function threadsInView() {
   const appNames = Object.fromEntries(Object.entries(appLabels()).map(([k, l]) => [k, l.name]))
-  return sections(tabs.records, { filter, scope: scope?.key ?? null, activeId: tabs.activeId, now: Date.now(), folders: tabs.folders, appNames, earlierAfterMs: settings.earlierAfterHours * HOUR_MS })
+  return sections(tabs.records, { filter, scope: scope?.key ?? null, activeId: tabs.activeId, now: Date.now(), folders: tabs.folders, appNames, earlierAfterMs: settings.earlierAfterHours * HOUR_MS, newTabsAt: settings.newTabsAt })
 }
 
 /** Unloads and archives stale threads, or files them into folders, per settings. */
@@ -406,30 +607,20 @@ function activeInView(): boolean {
 // ---------- summoning ----------
 
 async function summon() {
-  let focusOmnibox = false
   if (!panel.visible) {
     sweep()
     const away = hiddenAt ? Date.now() - hiddenAt : 0
-    if (away > AWAY_FRESH_MS) {
-      tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
-      focusOmnibox = true
-    } else if (away > AWAY_FOCUS_MS) {
-      focusOmnibox = true
-    }
+    if (away > AWAY_FRESH_MS) tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
   }
   if (!activeInView()) {
     const recent = mostRecentInView()
     if (recent) tabs.activate(recent)
-    else {
-      tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
-      focusOmnibox = true
-    }
+    else tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
   }
-  if (!tabs.active()?.url) focusOmnibox = true
   pushState()
   await panel.show()
-  if (focusOmnibox) focusAddressBar()
-  else focusActive()
+  // The page, or the address bar for an empty tab.
+  focusActive()
 }
 
 async function onHotkey() {
@@ -530,20 +721,21 @@ function setActionKey(id: ActionId, shortcut: string): string | null {
 // ---------- keyboard shortcuts inside the panel ----------
 
 function openThread(n: number) {
-  const thread = numberedThreads(threadsInView())[n - 1]
+  const thread = numberedThreads(threadsInView(), { from: settings.numberFrom, openApps: settings.openApps })[n - 1]
   if (thread) tabs.activate(thread.last.id)
 }
 
 /**
- * Moves a tab to another profile. A new tab just switches; a loaded page can't change its
- * session, so it reopens in the other profile next to the original.
+ * Moves a tab to another profile. A new tab just switches, and so does a loaded one `inPlace`
+ * (the profile in the address bar): its page loads again there. Otherwise a loaded page reopens
+ * in the other profile next to the original.
  */
-function switchProfile(id: string, next: string) {
+function switchProfile(id: string, next: string, inPlace = false) {
   const cur = tabs.get(id)
   if (!cur || cur.profile === next) return
   if (filter !== 'all' && filter !== next) filter = 'all'
-  if (!cur.url) {
-    cur.profile = next
+  if (!cur.url || inPlace) {
+    tabs.setProfile(id, next)
     pushState()
     return
   }
@@ -602,7 +794,7 @@ function runAction(id: ActionId) {
       const url = tabs.active()?.url
       if (!url) return
       clipboard.writeText(url)
-      return toast('Copied URL')
+      return panel.ui.send('url-copied')
     }
     case 'find':
       return openFind()
@@ -624,9 +816,32 @@ function runAction(id: ActionId) {
   }
 }
 
+/** Off macOS, Ctrl does what ⌘ does: ⌃T opens a tab there, as in Chrome. */
+const CTRL_IS_COMMAND = process.platform !== 'darwin'
+const commandHeld = (input: Electron.Input) => input.meta || (CTRL_IS_COMMAND && input.control)
+
+/**
+ * The shortcuts a key press can be, to look up in that order: the key as pressed, then off macOS
+ * the same with Ctrl as ⌘. So a key that really uses Control, as ⌃Tab does, still wins.
+ */
+function shortcutsFor(input: Electron.Input): string[] {
+  const exact = shortcutFromKey({ ...input, command: input.meta })
+  const asCommand = CTRL_IS_COMMAND && input.control && !input.meta ? shortcutFromKey({ ...input, control: false, command: true }) : null
+  return [exact, asCommand].filter((s): s is string => !!s)
+}
+
+/** The command a key press runs, if any. The summon keys are global shortcuts, so they never reach a window. */
+function actionFor(input: Electron.Input): ActionId | undefined {
+  const keys = actionKeys(settings.shortcuts)
+  for (const shortcut of shortcutsFor(input)) {
+    const action = ACTIONS.find((a) => keys[a.id] === shortcut && !isGlobal(a.id))
+    if (action) return action.id
+  }
+}
+
 /** ⌘+ (1), ⌘− (−1) or ⌘0 (0) for zoom; null for any other key. */
 function zoomDirection(input: Electron.Input): -1 | 0 | 1 | null {
-  if (!input.meta || input.alt) return null
+  if (!commandHeld(input) || input.alt) return null
   const key = input.key.toLowerCase()
   // Matched by code too, so zoom works on layouts where = and - sit elsewhere or need Shift.
   return key === '=' || key === '+' || input.code === 'Equal' || input.code === 'NumpadAdd' ? 1
@@ -646,22 +861,18 @@ function zoomActive(direction: -1 | 0 | 1) {
 function onKey(input: Electron.Input): boolean {
   if (input.type !== 'keyDown' || recordingShortcut) return false
   if (commands?.handleKey(tabs.active()?.profile, input)) return true
-  const shortcut = shortcutFromKey({ ...input, command: input.meta })
-  if (shortcut) {
-    const keys = actionKeys(settings.shortcuts)
-    // The summon keys are global shortcuts, so they never reach a window.
-    const action = ACTIONS.find((a) => keys[a.id] === shortcut && !isGlobal(a.id))
-    if (action) {
-      runAction(action.id)
-      return true
-    }
-    // ⌘G and ⇧⌘G step through the matches while the find bar is open.
-    if (finder.open && (shortcut === 'Command+G' || shortcut === 'Command+Shift+G')) {
-      panel.ui.send('find', { step: shortcut === 'Command+G' ? 1 : -1 })
-      return true
-    }
+  const action = actionFor(input)
+  if (action) {
+    runAction(action)
+    return true
   }
-  if (!input.meta) return false
+  // ⌘G and ⇧⌘G step through the matches while the find bar is open.
+  const shortcuts = shortcutsFor(input)
+  if (finder.open && (shortcuts.includes('Command+G') || shortcuts.includes('Command+Shift+G'))) {
+    panel.ui.send('find', { step: shortcuts.includes('Command+G') ? 1 : -1 })
+    return true
+  }
+  if (!commandHeld(input)) return false
   const key = input.key.toLowerCase()
   const zoomKey = zoomDirection(input)
   if (zoomKey !== null) {
@@ -703,10 +914,7 @@ function onWindowKey(wc: Electron.WebContents, input: Electron.Input): boolean {
     if (zoomSite(wc.getURL())) pushState()
     return true
   }
-  const shortcut = shortcutFromKey({ ...input, command: input.meta })
-  if (!shortcut) return false
-  const keys = actionKeys(settings.shortcuts)
-  const action = ACTIONS.find((a) => keys[a.id] === shortcut && !isGlobal(a.id))?.id
+  const action = actionFor(input)
   if (!action) return false
   if (PANEL_ACTIONS.has(action)) {
     void (async () => {
@@ -733,6 +941,22 @@ function onWindowKey(wc: Electron.WebContents, input: Electron.Input): boolean {
 }
 
 // ---------- settings screen, extensions, thread menu ----------
+
+/** Brings jbrow up with the welcome over it, to go through again what it asked at first launch. */
+async function showWelcome() {
+  await summon()
+  panel.ui.send('welcome', { first: false })
+}
+
+/** The welcome is done or skipped: it doesn't show at launch again, and the window is pinned or not as chosen. */
+function finishWelcome(pinned: boolean) {
+  if (!settings.welcomed) {
+    settings.welcomed = true
+    saveSettings(settings)
+  }
+  if (pinned !== panel.pinned) setPinned(pinned)
+  if (!pinned) toast(`jbrow now hides when you click another app. ${shortcutLabel(actionKeys(settings.shortcuts).show)} brings it back.`)
+}
 
 /** Pins or unpins the window and remembers it for next launch. */
 function setPinned(on: boolean) {
@@ -771,6 +995,23 @@ function tabSwitched() {
   if (settings.miniPlayer.onTabSwitch && panel.visible) toMiniPlayer(prev)
 }
 
+/**
+ * Turns restyling on, if claude or codex is installed: looked for again first, since you may have
+ * just installed one. If only the other agent is there, it switches to that one.
+ */
+async function setRestyleEnabled() {
+  const found = await restyler.checkAgents()
+  const agent = found[settings.restyle.agent] ? settings.restyle.agent : (Object.keys(found) as RestyleAgent[]).find((a) => found[a])
+  if (!agent) {
+    toast("jbrow can't find Claude Code or Codex. Install one and sign in, then turn restyling on.")
+    return pushState()
+  }
+  settings.restyle = { ...settings.restyle, enabled: true, agent }
+  saveSettings(settings)
+  restyler.refreshAll()
+  pushState()
+}
+
 function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.appearance === 'system' || prefs.appearance === 'light' || prefs.appearance === 'dark') {
     settings.appearance = prefs.appearance
@@ -778,22 +1019,46 @@ function updatePrefs(prefs: Partial<Prefs>) {
   }
   if (THEMES.some((t) => t.id === prefs.theme)) settings.theme = prefs.theme!
   if (prefs.profileStyle === 'tint' || prefs.profileStyle === 'edge' || prefs.profileStyle === 'solid') settings.profileStyle = prefs.profileStyle
+  if (prefs.profileSwitcher === 'auto' || prefs.profileSwitcher === 'menu') settings.profileSwitcher = prefs.profileSwitcher
   if (prefs.animation) settings.animation = { ...settings.animation, ...prefs.animation }
+  if (typeof prefs.whimsy === 'boolean') settings.whimsy = prefs.whimsy
   if (prefs.privateUrls) settings.privateUrls = prefs.privateUrls.map((p) => p.trim()).filter(Boolean)
+  if (prefs.profileSites) {
+    settings.profileSites = Object.fromEntries(
+      Object.entries(prefs.profileSites)
+        .filter(([id]) => settings.profiles.some((p) => p.id === id))
+        .map(([id, list]) => [id, list.map((p) => p.trim()).filter(Boolean)] as const)
+        .filter(([, list]) => list.length),
+    )
+  }
   if (prefs.hideFromScreenCapture !== undefined) {
     settings.hideFromScreenCapture = prefs.hideFromScreenCapture
     panel.applyContentProtection()
   }
   if (prefs.quietLinks !== undefined) settings.quietLinks = prefs.quietLinks
-  if (prefs.dangerousSites !== undefined) settings.dangerousSites = prefs.dangerousSites
+  if (prefs.dangerousSites !== undefined) {
+    settings.dangerousSites = prefs.dangerousSites
+    if (settings.dangerousSites) dangerous.start()
+  }
   if (prefs.blockThirdPartyCookies !== undefined) settings.blockThirdPartyCookies = prefs.blockThirdPartyCookies
   if (prefs.searchUrl !== undefined && isSearchUrl(prefs.searchUrl.trim())) settings.searchUrl = prefs.searchUrl.trim()
   if (prefs.searchSuggestions !== undefined) settings.searchSuggestions = prefs.searchSuggestions
-  if (prefs.restyleAgent === 'claude' || prefs.restyleAgent === 'codex') settings.restyle = { ...settings.restyle, agent: prefs.restyleAgent }
+  if (prefs.urlBarStyle && URL_BAR_STYLES.includes(prefs.urlBarStyle)) settings.urlBarStyle = prefs.urlBarStyle
+  if (prefs.autoUpdate !== undefined) settings.autoUpdate = prefs.autoUpdate
+  // Only an agent that's installed, and restyling only turned on with one (see setRestyleEnabled).
+  if ((prefs.restyleAgent === 'claude' || prefs.restyleAgent === 'codex') && restyler.agents()[prefs.restyleAgent]) settings.restyle = { ...settings.restyle, agent: prefs.restyleAgent }
+  if (prefs.restyleEnabled === false && settings.restyle.enabled) {
+    settings.restyle = { ...settings.restyle, enabled: false }
+    restyler.refreshAll()
+  }
+  if (prefs.restyleEnabled === true) void setRestyleEnabled()
   if (prefs.restyleModel) settings.restyle = { ...settings.restyle, model: prefs.restyleModel }
   if (prefs.restyleCodexModel !== undefined) settings.restyle = { ...settings.restyle, codexModel: prefs.restyleCodexModel.trim() }
   if (prefs.earlierAfterHours !== undefined) settings.earlierAfterHours = Math.max(1, prefs.earlierAfterHours)
   if (Number.isFinite(prefs.pinnedRows)) settings.pinnedRows = Math.max(1, Math.round(prefs.pinnedRows!))
+  if (prefs.numberFrom === 'pinned' || prefs.numberFrom === 'kept' || prefs.numberFrom === 'today') settings.numberFrom = prefs.numberFrom
+  if (prefs.newTabsAt === 'top' || prefs.newTabsAt === 'bottom') settings.newTabsAt = prefs.newTabsAt
+  if (Array.isArray(prefs.openApps)) settings.openApps = prefs.openApps.filter((k) => typeof k === 'string')
   if (prefs.miniPlayer) {
     const mp = { ...settings.miniPlayer, ...prefs.miniPlayer }
     const clean = (list: string[]) => list.map((p) => p.trim()).filter(Boolean)
@@ -867,12 +1132,16 @@ function printPage(wc: Electron.WebContents) {
   app.focus({ steal: true })
   void whileDialog(
     () =>
-      new Promise<void>((resolve) =>
+      new Promise<void>((resolve) => {
+        // A page closed while its print dialog is up may never call back; the dialog still ends.
+        const gone = () => resolve()
+        wc.once('destroyed', gone)
         wc.print({}, (ok, reason) => {
+          if (!wc.isDestroyed()) wc.off('destroyed', gone)
           if (!ok && reason && !/cancel/i.test(reason)) toast(`Couldn't print: ${reason}`)
           resolve()
-        }),
-      ),
+        })
+      }),
   )
 }
 
@@ -956,6 +1225,35 @@ async function requestQuit(restart = false) {
   app.quit()
 }
 
+/** Restarts into a downloaded update, asking first if that would cancel downloads, as quitting does. */
+async function restartToUpdate() {
+  if (askingToQuit || !(await confirmQuit())) return
+  updates.install()
+}
+
+/** jbrow hidden this long, or nobody touching the Mac this long while it shows, and an update may restart it. */
+const UPDATE_AFTER_HIDDEN_MS = 10 * 60 * 1000
+const UPDATE_AFTER_IDLE_S = 30 * 60
+/** Hidden, you could still be about to call jbrow up; this long without a key or click, you aren't. */
+const UPDATE_HIDDEN_IDLE_S = 2 * 60
+
+/**
+ * A moment an update can restart jbrow in without anyone noticing: nothing would be cancelled or
+ * cut off (downloads, sound, a video in picture-in-picture, a question on screen), and jbrow has
+ * been hidden a while, or showing with nobody at the Mac. Tabs come back as they were.
+ */
+function quietMoment() {
+  if (unfinishedDownloads() || askingToQuit || dialogsOpen > 0 || miniPlayer.webContents) return false
+  if (tabs.pages().some((wc) => wc.isCurrentlyAudible())) return false
+  const idleS = powerMonitor.getSystemIdleTime()
+  if (panel.visible) return idleS >= UPDATE_AFTER_IDLE_S
+  return Date.now() - hiddenAt >= UPDATE_AFTER_HIDDEN_MS && idleS >= UPDATE_HIDDEN_IDLE_S
+}
+
+function sendUpdates() {
+  if (!panel.win.isDestroyed()) panel.ui.send('updates', updates.view())
+}
+
 /**
  * Asks before quitting cancels downloads. jbrow comes up first if it's hidden, so the question
  * shows over the downloads it's about, as a sheet: an app-modal dialog would stall jbrow.
@@ -991,6 +1289,11 @@ function threadMenu(id: string) {
     { label: 'Rename', click: () => panel.ui.send('rename-tab', id) },
   ]
   if (rec.url) items.push({ label: 'Copy link', click: () => clipboard.writeText(rec.url) })
+  const wc = tabs.webContentsFor(id)
+  if (wc) {
+    const muted = wc.isAudioMuted()
+    items.push({ label: muted ? 'Unmute' : 'Mute', click: () => tabs.setMuted(id, !muted) })
+  }
   if (rec.kept && rec.home) {
     const away = awayFromHome(rec)
     items.push(
@@ -1127,7 +1430,10 @@ function certAction(action: 'proceed' | 'back' | 'distrust') {
     if (!view) return
     certs.distrust(rec.profile, view.host)
     // An open connection would carry on without checking the certificate again.
-    void wc.session.closeAllConnections().then(() => wc.reload())
+    void wc.session
+      .closeAllConnections()
+      .then(() => !wc.isDestroyed() && wc.reload())
+      .catch(() => {})
   }
 }
 
@@ -1264,7 +1570,9 @@ async function clearSiteData() {
       await rt.session.cookies.remove(`http${c.secure ? 's' : ''}://${c.domain.replace(/^\./, '')}${c.path ?? '/'}`, c.name)
     }
     const hosts = new Set([host, site, `www.${site}`])
-    const origins = [...hosts].flatMap((h) => [`https://${h}`, `http://${h}`])
+    // An origin includes its port: localhost:5173's storage isn't localhost's.
+    const port = new URL(rec.url).port
+    const origins = [...hosts].flatMap((h) => [`https://${h}`, `http://${h}`]).map((o) => (port ? `${o}:${port}` : o))
     await rt.session.clearData({ dataTypes: SITE_DATA.filter((t) => t !== 'cookies'), origins })
     if (!wc.isDestroyed()) wc.reload()
     toast(`Cleared cookies and site data for ${site}.`)
@@ -1280,15 +1588,16 @@ let searchTimer: NodeJS.Timeout | null = null
 let searchAbort: AbortController | null = null
 
 /**
- * Whether what's typed may go to the search engine, which sees every keystroke: words only, never
- * anything that looks like an address or matches a private address pattern.
+ * Whether `q` may go to the search engine, which sees every keystroke: words only, never anything
+ * that looks like an address or matches a private address pattern. `forced` is a search asked for
+ * with a leading ?, which may look like an address (?node.js) but still not like a private one.
  */
-function maySendToSearch(input: string, reply: SuggestReply, profile: string): boolean {
-  const q = input.trim()
-  if (!settings.searchSuggestions || !q || q.length > 200 || looksLikeAddress(q)) return false
+function maySendToSearch(q: string, forced: boolean, visited: boolean, profile: string): boolean {
+  if (!settings.searchSuggestions || !q || q.length > 200 || (!forced && looksLikeAddress(q))) return false
   // Typing the start of a site you've been to is typing an address, not a search: "intr" on the
-  // way to a private intranet host mustn't reach the search engine either.
-  if (reply.completion) return false
+  // way to a private intranet host mustn't reach the search engine either. A popular site's name
+  // tells it nothing about you.
+  if (visited) return false
   const isPrivate = urlMatcher(settings.privateUrls)
   if (visits.search(profile, q, 50).some((v) => isPrivate(v.url))) return false
   return !isPrivate(q) && !isPrivate(`https://${q}`)
@@ -1309,22 +1618,27 @@ function cancelSearchSuggestions() {
 function suggest({ input, profile, seq }: { input: string; profile?: string; seq: number }) {
   if (panel.win.isDestroyed()) return
   const p = profile && settings.profiles.some((x) => x.id === profile) ? profile : (tabs.active()?.profile ?? settings.defaultProfile)
+  const isPrivate = urlMatcher(settings.privateUrls)
+  const visited = visits.completion(p, input, isPrivate)
   const reply: SuggestReply = {
     seq,
     input,
     visits: visits.search(p, input, 12),
-    completion: visits.completion(p, input, urlMatcher(settings.privateUrls)),
+    // Your own sites first, then popular ones you haven't been to.
+    completion: visited ?? topSiteCompletion(input, isPrivate),
   }
   panel.ui.send('suggestions', reply)
   cancelSearchSuggestions()
   const suggestUrl = suggestUrlFor(settings.searchUrl)
-  if (!suggestUrl || !maySendToSearch(input, reply, p)) return
+  const forced = forcedSearch(input)
+  const query = forced ?? input.trim()
+  if (!suggestUrl || !maySendToSearch(query, forced !== undefined, !!visited, p)) return
   searchTimer = setTimeout(async () => {
     searchTimer = null
     const ctrl = (searchAbort = new AbortController())
     const timeout = setTimeout(() => ctrl.abort(), 4000)
     try {
-      const searches = await fetchSearchSuggestions(suggestUrl, input.trim(), ctrl.signal)
+      const searches = await fetchSearchSuggestions(suggestUrl, query, ctrl.signal)
       const answer: SearchReply = { seq, input, searches: searches.slice(0, 6) }
       if (!ctrl.signal.aborted && !panel.win.isDestroyed()) panel.ui.send('search-suggestions', answer)
     } catch (error) {
@@ -1339,8 +1653,8 @@ function suggest({ input, profile, seq }: { input: string; profile?: string; seq
 // ---------- links from other apps ----------
 
 /**
- * Opens a link another app handed to jbrow, in that app's profile and its section of the sidebar,
- * and brings jbrow up on it. The app the link came from is still in front when it arrives.
+ * Opens a link another app handed to jbrow, in its site's profile or else that app's, in that app's
+ * section of the sidebar, and brings jbrow up on it. The app the link came from is still in front when it arrives.
  */
 async function openFromApp(url: string, clicked = false) {
   const [front, quiet] = await Promise.all([frontmostApp(), !clicked && openQuietly()])
@@ -1352,7 +1666,7 @@ async function openFromApp(url: string, clicked = false) {
     const key = scopeForApp(settings, from.bundleId)
     fields = { scope: key, scopeName: scopeName(key), app: from.bundleId }
   }
-  const profile = (from && settings.appProfiles[from.bundleId]) || settings.defaultProfile
+  const profile = siteProfile(url) || (from && settings.appProfiles[from.bundleId]) || settings.defaultProfile
   if (quiet) {
     const rec = tabs.create({ profile, url, ...fields, activate: false, unread: true })
     quietLinks.add(rec.id)
@@ -1408,7 +1722,7 @@ function showQuietLink() {
 /** The menu bar item counts quiet threads you haven't seen. */
 function updateTray() {
   const n = tray ? unseenQuietLinks().length : 0
-  tray?.setTitle(n ? `jb •${n}` : 'jb')
+  tray?.setTitle(n ? ` ${n}` : '')
 }
 
 /** Whether jbrow opens web links: 'dev' when it runs from source, which macOS won't offer. */
@@ -1453,7 +1767,20 @@ function attachProfile(rt: ProfileRuntime) {
       menu.append(new MenuItem({ label: open ? 'Close side panel' : 'Open side panel', click: () => sidePanels.toggle(rt.profile.id, ext) }))
     }
     menu.append(new MenuItem({ label: pinned ? 'Unpin from toolbar' : 'Pin to toolbar', click: () => togglePinnedExtension(extensionId) }))
+    menu.append(new MenuItem({ type: 'separator' }))
+    menu.append(new MenuItem({ label: 'Turn off', click: () => void setExtensionEnabled(rt.profile.id, extensionId, false) }))
+    menu.append(new MenuItem({ label: `Remove from ${rt.profile.name}…`, click: () => void removeExtension(rt.profile.id, extensionId) }))
   })
+  // One installed again from the Web Store, or a folder added again, is on: it no longer counts as turned off.
+  rt.session.extensions.on('extension-loaded', (_e, ext) => {
+    const disabled = settings.disabledExtensions[rt.profile.id]
+    if (disabled?.some((d) => d.id === ext.id)) {
+      settings.disabledExtensions[rt.profile.id] = disabled.filter((d) => d.id !== ext.id)
+      saveSettings(settings)
+    }
+    sendExtensions()
+  })
+  rt.session.extensions.on('extension-unloaded', () => sendExtensions())
   rt.extensions.on('browser-action-popup-created', (popup: { browserWindow?: BrowserWindow }) => {
     const tab = tabs.activeWebContents()
     if (popup.browserWindow && tab) popupTabs.set(popup.browserWindow.webContents, tab)
@@ -1461,7 +1788,8 @@ function attachProfile(rt: ProfileRuntime) {
 }
 
 let addingProfile = false
-async function addProfile() {
+/** Adds a profile; `rename` opens settings with its name ready to type over. */
+async function addProfile(rename = true) {
   if (addingProfile) return
   addingProfile = true
   try {
@@ -1481,7 +1809,7 @@ async function addProfile() {
     attachProfile(rt)
     commands.watchProfile(rt)
     sendProfiles()
-    panel.ui.send('rename-profile', profile.id)
+    if (rename) panel.ui.send('rename-profile', profile.id)
   } catch (error) {
     console.error('[profiles] could not add a profile:', error)
     toast(`Couldn't add a profile: ${error instanceof Error ? error.message : String(error)}`)
@@ -1490,12 +1818,28 @@ async function addProfile() {
   }
 }
 
-function updateProfile(id: string, change: { name?: string; color?: string }) {
+function updateProfile(id: string, change: { name?: string; color?: string; icon?: string }) {
   const profile = settings.profiles.find((p) => p.id === id)
   if (!profile) return
   const name = change.name?.trim()
   if (name) profile.name = name
   if (change.color && /^#[0-9a-f]{6}$/i.test(change.color)) profile.color = change.color
+  if (typeof change.icon === 'string') {
+    // One emoji, even one built from several code points (flags, skin tones, families), or two letters.
+    const icon = [...new Intl.Segmenter().segment(change.icon.trim())].slice(0, 2).map((s) => s.segment).join('')
+    if (icon) profile.icon = icon
+    else delete profile.icon
+  }
+  saveSettings(settings)
+  sendProfiles()
+}
+
+/** Moves a profile before or after another, which is the order every profile list shows. */
+function moveProfile(id: string, target: string, after: boolean) {
+  const profile = settings.profiles.find((p) => p.id === id)
+  if (!profile || id === target || !settings.profiles.some((p) => p.id === target)) return
+  settings.profiles = settings.profiles.filter((p) => p !== profile)
+  settings.profiles.splice(settings.profiles.findIndex((p) => p.id === target) + (after ? 1 : 0), 0, profile)
   saveSettings(settings)
   sendProfiles()
 }
@@ -1534,14 +1878,17 @@ async function deleteProfile(id: string) {
   tabs.forgetProfile(id)
   sidePanels.forgetProfile(id)
   idle.forgetProfile(id)
+  extensionDebugger.forgetProfile(id)
   userScripts.forgetProfile(id)
   visits.clear(id)
 
   settings.profiles = settings.profiles.filter((p) => p.id !== id)
   if (settings.defaultProfile === id) settings.defaultProfile = settings.profiles[0].id
   for (const [bundleId, p] of Object.entries(settings.appProfiles)) if (p === id) delete settings.appProfiles[bundleId]
+  delete settings.profileSites[id]
   delete settings.unpackedExtensions[id]
   delete settings.extensionShortcuts[id]
+  delete settings.disabledExtensions[id]
   saveSettings(settings)
   permissions.forgetProfile(id)
   runtimes.delete(id)
@@ -1563,8 +1910,13 @@ async function deleteProfile(id: string) {
 function profileMenu(id: string) {
   const profile = settings.profiles.find((p) => p.id === id)
   if (!profile) return
+  const i = settings.profiles.indexOf(profile)
+  const before = settings.profiles[i - 1]
+  const next = settings.profiles[i + 1]
   Menu.buildFromTemplate([
     { label: 'Rename', click: () => panel.ui.send('rename-profile', id) },
+    { label: 'Move up', enabled: !!before, click: () => before && moveProfile(id, before.id, false) },
+    { label: 'Move down', enabled: !!next, click: () => next && moveProfile(id, next.id, true) },
     { label: 'Use for links and new tabs', type: 'checkbox', checked: settings.defaultProfile === id, click: () => setDefaultProfile(id) },
     { label: `New tab in ${profile.name}`, click: () => {
       tabs.create({ profile: id, ...scopeFields() })
@@ -1728,8 +2080,8 @@ function popupAt(extensionId: string, anchorRect: { x: number; y: number; width:
 // ---------- extension hooks ----------
 
 const tabHooks: TabHooks = (profileId) => ({
-  createTab: async (details) => {
-    const rec = tabs.create({ profile: profileId, url: details.url || 'about:blank', activate: details.active !== false })
+  createTab: async (details, extension) => {
+    const rec = tabs.create({ profile: profileId, url: details.url || 'about:blank', activate: details.active !== false, openedBy: extension?.id })
     const wc = tabs.webContentsFor(rec.id)
     if (!wc) throw new Error('jbrow could not create a tab')
     return [wc, panel.win]
@@ -1746,6 +2098,16 @@ const tabHooks: TabHooks = (profileId) => ({
       webPreferences: { session: rt?.session, sandbox: true, contextIsolation: true },
     })
     const url = Array.isArray(details.url) ? details.url[0] : details.url
+    // The window has no address bar: links and popups from it open as tabs, where you see where you are.
+    win.webContents.setWindowOpenHandler(({ url }) => {
+      void tabs.create({ profile: profileId, url })
+      return { action: 'deny' }
+    })
+    win.webContents.on('will-navigate', (e, to) => {
+      if (to.startsWith('chrome-extension:')) return
+      e.preventDefault()
+      void tabs.create({ profile: profileId, url: to })
+    })
     if (url) void win.loadURL(url)
     rt?.extensions.addTab(win.webContents, win)
     return win
@@ -1753,16 +2115,58 @@ const tabHooks: TabHooks = (profileId) => ({
   removeWindow: (win) => {
     if (win !== panel.win && !win.isDestroyed()) (win as BrowserWindow).destroy()
   },
+  mainWindow: () => panel.win,
+  // Chrome lists a discarded tab with the title and address it had, and no more.
+  pagelessTabs: () => {
+    const [width, height] = panel.win.getSize()
+    return tabs.pageless(profileId).map(({ id, rec }) => ({
+      id,
+      windowId: panel.win.id,
+      index: -1,
+      active: false,
+      highlighted: false,
+      selected: false,
+      pinned: !!rec.pinned,
+      audible: false,
+      mutedInfo: { muted: false },
+      discarded: true,
+      autoDiscardable: true,
+      frozen: false,
+      groupId: -1,
+      incognito: false,
+      status: 'unloaded',
+      title: rec.title,
+      url: rec.url,
+      lastAccessed: rec.lastSeen,
+      width,
+      height,
+    }))
+  },
+  // A tab woken for an extension has a new ID; Chrome says so with tabs.onReplaced, as when a
+  // discarded tab came back.
+  tabFor: (id, wake) => {
+    const wc = tabs.pageFor(profileId, id, wake)
+    const rt = runtimes.get(profileId)
+    if (wc && wake && rt) libraryOf(rt).router.broadcastEvent('tabs.onReplaced', wc.id, id)
+    return wc
+  },
+  pagelessTab: (id) => {
+    const now = tabs.pagelessId(profileId, id)
+    return now === undefined ? undefined : tabHooks(profileId).pagelessTabs().find((t) => t.id === now)
+  },
+  removePagelessTab: (id) => tabs.closePageless(profileId, id),
 })
 
 // ---------- UI messages ----------
 
 function wireIpc() {
-  const on = <T>(name: string, fn: (data: T) => void) => ipcMain.on(`ui:${name}`, (_e, data: T) => fn(data))
+  const on = <T>(name: string, fn: (data: T) => void) => ipcMain.on(`ui:${name}`, (e, data: T) => e.sender === panel.ui && fn(data))
   on('ready', () => {
     pushState()
     sendDownloads()
+    if (!settings.welcomed) panel.ui.send('welcome', { first: true })
   })
+  on<{ pinned: boolean }>('welcome-done', ({ pinned }) => finishWelcome(pinned))
   on<{ id: string; action: DownloadAction }>('download', ({ id, action }) => downloads.act(id, action))
   on<{ id: string }>('activate', ({ id }) => tabs.activate(id))
   on<{ site: string }>('zoom-reset', ({ site }) => {
@@ -1774,9 +2178,16 @@ function wireIpc() {
     tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
     focusAddressBar()
   })
-  on<{ input: string; profile?: string; search?: boolean }>('navigate', ({ input, profile, search }) => {
+  on<{ input: string; profile?: string; search?: boolean; open?: 'tab' | 'split' }>('navigate', ({ input, profile, search, open }) => {
+    // A site with a profile of its own opens there, unless you picked one with Tab.
+    if (!profile && open !== 'split') profile = siteProfile(toUrl(input, settings.searchUrl, search))
     const cur = tabs.active()
-    if (!cur) tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
+    const known = !!profile && settings.profiles.some((p) => p.id === profile)
+    // The address bar's tools: in a new tab, or in a new pane beside the page (with no page to go beside, here).
+    if (open === 'split' && cur?.url) {
+      const error = tabs.splitNew()
+      if (error) return toast(error)
+    } else if (!cur || open === 'tab') tabs.newTab({ profile: known ? profile! : newTabProfile(), ...scopeFields() })
     else if (profile && profile !== cur.profile && settings.profiles.some((p) => p.id === profile)) {
       // Picked with Tab in the address bar. A loaded page stays put; what was typed opens next to it.
       if (cur.url) tabs.create({ profile, ...scopeFields() })
@@ -1787,9 +2198,22 @@ function wireIpc() {
   })
   on<{ input: string; profile?: string; seq: number }>('suggest', (request) => suggest(request))
   on('suggest-cancel', () => cancelSearchSuggestions())
+  on<{ url: string; profile?: string; seq: number }>('site-info', ({ url, profile, seq }) => {
+    const p = profile && settings.profiles.some((x) => x.id === profile) ? profile : (tabs.active()?.profile ?? settings.defaultProfile)
+    void siteInfo.ask(url, p, seq)
+  })
+  on<{ id: string }>('split-with', ({ id }) => {
+    const error = tabs.splitWith(id)
+    if (error) toast(error)
+  })
+  on<{ url: string }>('copy-link', ({ url }) => {
+    clipboard.writeText(url)
+    panel.ui.send('url-copied')
+  })
   on<{ profile?: string; url: string }>('forget-visit', ({ profile, url }) => visits.forget(profile ?? tabs.active()?.profile ?? settings.defaultProfile, url))
   on<{ id: string }>('close', ({ id }) => void closeTab(id))
   on<{ id: string }>('go-home', ({ id }) => tabs.goHome(id))
+  on<{ id: string; muted: boolean }>('mute', ({ id, muted }) => tabs.setMuted(id, muted))
   on<{ id: string }>('thread-menu', ({ id }) => threadMenu(id))
   on<{ id: string }>('close-pane', ({ id }) => tabs.closePane(id))
   on<{ id: string; sizes: number[]; done?: boolean }>('split-sizes', ({ id, sizes, done }) => tabs.resizeSplit(id, sizes, !!done))
@@ -1831,17 +2255,19 @@ function wireIpc() {
   on<{ on?: boolean } | undefined>('pin', (data) => setPinned(data?.on ?? !panel.pinned))
   on<{ profile: string }>('set-profile', ({ profile }) => {
     const id = tabs.activeId
-    if (id) switchProfile(id, profile)
+    if (id) switchProfile(id, profile, true)
   })
   on('new-tab-menu', () => newTabMenu())
-  on<{ action: 'back' | 'forward' | 'reload' | 'stop'; hard?: boolean }>('nav', ({ action, hard }) => {
-    const wc = tabs.activeWebContents()
-    if (!wc) return
+  // Without an id, the active tab; with one, another pane's, from its own address bar.
+  on<{ action: 'back' | 'forward' | 'reload' | 'stop'; hard?: boolean; id?: string }>('nav', ({ action, hard, id = tabs.activeId ?? undefined }) => {
+    const wc = id ? tabs.webContentsFor(id) : null
+    if (!id || !wc) return
     if (action === 'back') wc.navigationHistory.goBack()
     else if (action === 'forward') wc.navigationHistory.goForward()
-    else if (action === 'reload') tabs.reload(tabs.activeId!, hard)
+    else if (action === 'reload') tabs.reload(id, hard)
     else wc.stop()
   })
+  on('restyle-check', () => void restyler.checkAgents())
   on<{ prompt: string }>('restyle', ({ prompt }) => {
     const wc = tabs.activeWebContents()
     if (wc) void restyler.restyle(wc, prompt)
@@ -1887,15 +2313,24 @@ function wireIpc() {
   on('find-stop', () => finder.stop())
   on('shortcuts', () => sendShortcuts())
   on('apps', () => sendApps())
+  on('extensions', () => sendExtensions())
+  on<{ profile: string; id: string; on: boolean }>('extension-enabled', ({ profile, id, on: enabled }) => void setExtensionEnabled(profile, id, enabled))
+  on<{ profile: string; id: string }>('remove-extension', ({ profile, id }) => void removeExtension(profile, id))
   on<{ key: string; profile: string }>('app-profile', ({ key, profile }) => setAppProfile(key, profile))
   on<{ key: string }>('app-menu', ({ key }) => appMenu(key))
   on('add-app', () => void addApp())
-  on('add-profile', () => void addProfile())
-  on<{ id: string; name?: string; color?: string }>('profile', ({ id, ...change }) => updateProfile(id, change))
+  on<{ rename?: boolean } | undefined>('add-profile', (data) => void addProfile(data?.rename !== false))
+  on<{ id: string }>('delete-profile', ({ id }) => void deleteProfile(id))
+  on<{ id: string; name?: string; color?: string; icon?: string }>('profile', ({ id, ...change }) => updateProfile(id, change))
+  on('emoji-panel', () => app.showEmojiPanel())
   on<{ id: string }>('profile-menu', ({ id }) => profileMenu(id))
+  on<{ id: string; target: string; after: boolean }>('move-profile', ({ id, target, after }) => moveProfile(id, target, after))
   on<{ id: string }>('default-profile', ({ id }) => setDefaultProfile(id))
   on('default-browser', () => sendDefaultBrowser())
   on('make-default-browser', () => makeDefaultBrowser())
+  on('updates', () => sendUpdates())
+  on('check-updates', () => updates.check())
+  on('install-update', () => void restartToUpdate())
   on<{ on: boolean }>('recording-shortcut', ({ on: recording }) => setRecording(recording))
   on<{ id: ActionId; shortcut: string }>('set-action-key', ({ id, shortcut }) => {
     const error = setActionKey(id, shortcut)
@@ -1930,26 +2365,31 @@ function quietMenuItems(): Electron.MenuItemConstructorOptions[] {
 }
 
 function buildTray() {
-  tray = new Tray(nativeImage.createEmpty())
-  tray.setTitle('jb')
+  // A template image: macOS tints it for light and dark menu bars. The @2x file is picked up by name.
+  tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'img', 'trayTemplate.png')))
   tray.setToolTip('jbrow')
   const menu = () =>
     Menu.buildFromTemplate([
+      ...(updates.ready ? [{ label: `Restart to update to ${updates.ready}`, click: () => void restartToUpdate() }, { type: 'separator' as const }] : []),
       ...quietMenuItems(),
       { label: `Show jbrow (${shortcutLabel(actionKeys(settings.shortcuts).show)})`, click: () => void onHotkey() },
       { type: 'separator' },
-      {
-        label: 'Install test extensions',
-        submenu: [...runtimes.values()].map((rt) => ({
-          label: `Into ${rt.profile.name}`,
-          click: async () => {
-            new Notification({ title: 'jbrow', body: `Installing test extensions into ${rt.profile.name}…` }).show()
-            const results = await installTestExtensions(rt)
-            console.log(`[extensions] ${rt.profile.id}:\n  ${results.join('\n  ')}`)
-            new Notification({ title: `Extensions in ${rt.profile.name}`, body: results.join('\n') }).show()
-          },
-        })),
-      },
+      ...(DEV_TOOLS
+        ? [
+            {
+              label: 'Install test extensions',
+              submenu: [...runtimes.values()].map((rt) => ({
+                label: `Into ${rt.profile.name}`,
+                click: async () => {
+                  new Notification({ title: 'jbrow', body: `Installing test extensions into ${rt.profile.name}…` }).show()
+                  const results = await installTestExtensions(rt)
+                  console.log(`[extensions] ${rt.profile.id}:\n  ${results.join('\n  ')}`)
+                  new Notification({ title: `Extensions in ${rt.profile.name}`, body: results.join('\n') }).show()
+                },
+              })),
+            },
+          ]
+        : []),
       {
         label: 'Open Chrome Web Store',
         submenu: [...runtimes.values()].map((rt) => ({
@@ -1968,9 +2408,11 @@ function buildTray() {
           panel.ui.send('settings', { open: true })
         },
       },
+      { label: 'Welcome to jbrow', click: () => void showWelcome() },
       { label: 'Open settings.json', click: () => void shell.openPath(settingsPath()) },
       { label: 'Show log file', click: () => { const f = logPath(); if (f) shell.showItemInFolder(f) } },
-      { label: 'Open UI DevTools', click: () => panel.ui.openDevTools({ mode: 'detach' }) },
+      { label: 'Report a Bug…', click: () => void shell.openExternal(BUG_REPORT_URL) },
+      ...(DEV_TOOLS ? [{ label: 'Open UI DevTools', click: () => panel.ui.openDevTools({ mode: 'detach' }) }] : []),
       { label: 'Restart jbrow', click: () => void requestQuit(true) },
       { type: 'separator' },
       { label: 'Quit jbrow', click: () => void requestQuit() },
@@ -2010,6 +2452,14 @@ function buildAppMenu() {
         // The standard app menu, with a ⌘Q that asks about running downloads first.
         submenu: [
           { role: 'about' },
+          {
+            label: 'Check for Updates…',
+            click: () => {
+              if (updates.ready) return void restartToUpdate()
+              updates.check()
+              panel.ui.send('settings', { open: true, section: 'general' })
+            },
+          },
           { type: 'separator' },
           item('settings', 'Settings…'),
           { type: 'separator' },
@@ -2083,8 +2533,11 @@ function buildAppMenu() {
       {
         role: 'help',
         submenu: [
+          { label: 'Welcome to jbrow', click: () => void showWelcome() },
+          { type: 'separator' },
           { label: 'Open settings.json', click: () => void shell.openPath(settingsPath()) },
           { label: 'Show Log File', click: () => { const f = logPath(); if (f) shell.showItemInFolder(f) } },
+          { label: 'Report a Bug…', click: () => void shell.openExternal(BUG_REPORT_URL) },
         ],
       },
     ]),
@@ -2095,6 +2548,8 @@ function buildAppMenu() {
 
 app.whenReady().then(async () => {
   app.dock?.hide()
+  // Back from an update jbrow installed on its own: it comes back hidden or showing, as it was.
+  const updated = takeUpdateRelaunch()
   // Without this, macOS quits jbrow a few seconds after it hides: no windows, not frontmost.
   settings = loadSettings()
   nativeTheme.themeSource = settings.appearance
@@ -2139,8 +2594,13 @@ app.whenReady().then(async () => {
   panel.setPinned(settings.pinned)
   panel.ui.on('render-process-gone', (_e, details) => console.error('[jbrow] UI renderer gone:', details))
   // A UI that (re)loads has no archived list yet, and one sent while it was loading went nowhere.
+  // Nor is it recording a shortcut, showing settings or covering the page any more, whatever the
+  // old one said last.
   panel.ui.on('did-finish-load', () => {
     archivedSent = -1
+    setRecording(false)
+    settingsShown = false
+    panel.setOverlay(false)
     pushState()
   })
   panel.ui.on('before-input-event', (event, input) => {
@@ -2153,7 +2613,20 @@ app.whenReady().then(async () => {
     })
   })
 
-  permissions = new SitePermissions(() => panel.win)
+  prompts = new PermissionPrompts({
+    tabFor: (wc) => tabs?.idForWebContents(wc),
+    placement: (tabId) => tabs.placement(tabId),
+    float: (view, on) => panel.floatView(view, on),
+    theme: () => settings.theme,
+    onKey: (input) => onKey(input),
+    refocus: () => focusActive(),
+  })
+  // The profile is named only when there's more than one, as in the address bar.
+  permissions = new SitePermissions(
+    () => panel.win,
+    (wc, question) => prompts.ask(wc, settings.profiles.length > 1 ? question : { ...question, profile: '' }),
+  )
+  permissions.listen()
   restyler = new Restyler({
     settings: () => settings.restyle,
     pages: () => tabs.pages(),
@@ -2161,9 +2634,19 @@ app.whenReady().then(async () => {
     notify: toast,
   })
   restyler.load()
+  void restyler.checkAgents()
   certs = new Certificates(() => {
     tabs.layout()
     pushState()
+  })
+  siteInfo = new SiteInfo({
+    resolve: async (profile, host) => (await runtimes.get(profile)?.session.resolveHost(host))?.endpoints[0]?.address,
+    cert: (profile, host) => certs.seenOn(profile, host),
+    isPrivate: (url) => urlMatcher(settings.privateUrls)(url),
+    isSearch: (url) => isSearchPage(url, settings.searchUrl),
+    send: (reply) => {
+      if (!panel.win.isDestroyed()) panel.ui.send('site-info', reply)
+    },
   })
   dangerous = new DangerousSites({
     enabled: () => settings.dangerousSites,
@@ -2198,16 +2681,26 @@ app.whenReady().then(async () => {
   })
   tabs = new Tabs({
     window: () => panel.win,
+    // A popup that closes itself takes you back to the page that opened it.
+    closedByPage: (id) => {
+      const opener = tabs.get(id)?.opener
+      const back = tabs.activeId === id && opener && tabs.get(opener) ? opener : undefined
+      void closeTab(id, false, false).then(() => {
+        if (back && tabs.get(back)) tabs.activate(back)
+      })
+    },
     runtime: (id) => runtimes.get(id),
     contentBounds: () => panel.contentBounds(),
     contentVisible: () => panel.pageVisible(),
     onViewAdded: () => panel.keepOrder(),
+    whimsy: () => settings.whimsy && !systemPreferences.getAnimationSettings().prefersReducedMotion,
     onChange: () => pushState(),
     onActivated: () => {
       sidePanels?.layout()
       focusActive()
       tabSwitched()
     },
+    refocus: focusActive,
     onKey,
     searchUrl: () => settings.searchUrl,
     permissions,
@@ -2229,13 +2722,22 @@ app.whenReady().then(async () => {
       // The side panel steps aside for a fullscreen page and comes back after.
       sidePanels.layout()
     },
+    held: (wc) => !!extensionDebugger.holder(wc),
     confirmUnload,
+    besideClosed: (id) => besideClosed(threadsInView(), id, settings.newTabsAt),
     profiles: () => settings.profiles,
-    openInProfile: (fromId, profile, url) => {
+    openInProfile: (fromId, profile, url, background) => {
       const from = tabs.get(fromId)
-      if (filter !== 'all' && filter !== profile) filter = 'all'
-      tabs.create({ profile, url, scope: from?.scope, scopeName: from?.scopeName, app: from?.app })
+      if (!background && filter !== 'all' && filter !== profile) filter = 'all'
+      tabs.create({ profile, url, scope: from?.scope, scopeName: from?.scopeName, app: from?.app, ...(background && { activate: false, unread: true }) })
     },
+    siteProfile,
+    extensionInUse: () => {
+      const focused = BrowserWindow.getFocusedWindow()
+      const page = focused && !focused.isDestroyed() ? focused.webContents.getURL() : ''
+      return page.startsWith('chrome-extension://') || Date.now() - commands.lastRunAt < 2000
+    },
+    onLayout: () => prompts.layout(),
   })
 
   downloads = new Downloads({
@@ -2268,7 +2770,15 @@ app.whenReady().then(async () => {
     },
   })
   idle = new IdleWatcher()
+  extensionDebugger = new ExtensionDebugger(() => pushState())
   userScripts = new UserScripts()
+  updates = new Updates({
+    enabled: () => settings.autoUpdate,
+    quietMoment,
+    shown: () => panel.visible,
+    beforeInstall: () => panel.flush(),
+    onChange: () => sendUpdates(),
+  })
 
   wireIpc()
   wireSwipes(panel.win, (wc) => (tabs.idForWebContents(wc) ? wc : null), () => tabs.activeWebContents())
@@ -2279,8 +2789,10 @@ app.whenReady().then(async () => {
     devices,
     attach: (rt) => {
       idle.attach(rt)
+      extensionDebugger.attach(rt)
       sidePanels.attach(rt)
       userScripts.attach(rt)
+      attachStorageEvents(rt)
     },
   }
   runtimes = await setupProfiles(settings, profileDeps)
@@ -2310,6 +2822,7 @@ app.whenReady().then(async () => {
 
   registerHotkeys(true)
   if (!BACKGROUND) buildTray()
+  updates.start()
   // Back from picture-in-picture whenever jbrow is in front again, unless the video belongs to
   // another tab you switched away from: that one waits until you're on its tab.
   panel.win.on('focus', () => {
@@ -2325,7 +2838,7 @@ app.whenReady().then(async () => {
   const keys = actionKeys(settings.shortcuts)
   console.log(`[jbrow] ready. ${keys.show} for everything, ${keys.showApp || 'no key'} for the app in front.`)
   // `npm start -- --install-extensions=personal` installs the test extensions into that profile.
-  const installArg = process.argv.find((a) => a.startsWith('--install-extensions='))
+  const installArg = DEV_TOOLS && process.argv.find((a) => a.startsWith('--install-extensions='))
   const installInto = installArg && runtimes.get(installArg.split('=')[1])
   if (installInto) {
     const results = await installTestExtensions(installInto)
@@ -2335,7 +2848,10 @@ app.whenReady().then(async () => {
   // macOS launched jbrow to open these, which you asked for.
   for (const url of waitingLinks.splice(0)) await openFromApp(url, true)
   // Pinned, jbrow opens its window at launch like any browser. `npm start -- --show` does too.
-  if (settings.pinned || process.argv.includes('--show')) setTimeout(() => void onHotkey(), 600)
+  if (updated ? updated.shown : settings.pinned || process.argv.includes('--show')) {
+    // The log line tells automated runs (test/e2e) that jbrow is up and has handed out focus.
+    setTimeout(() => void onHotkey().then(() => console.log('[jbrow] shown')), 600)
+  }
 })
 
 app.on('will-quit', () => {

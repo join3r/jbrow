@@ -52,13 +52,17 @@ export class Certificates {
 
   /** A page's request met a bad certificate. Returns whether to let it through. */
   onError(tabId: string, profileId: string, url: string, error: string, cert: Certificate, isMainFrame: boolean): boolean {
-    const host = hostOf(url)
-    if (this.allowed.has(`${profileId}\n${host}\n${cert.fingerprint}`)) return true
+    if (this.trusted(profileId, url, cert)) return true
     if (isMainFrame) {
-      this.blocked.set(tabId, { url, host, error: errorName(error), cert })
+      this.blocked.set(tabId, { url, host: hostOf(url), error: errorName(error), cert })
       this.onChange()
     }
     return false
+  }
+
+  /** You chose to go ahead with this certificate on this site. */
+  trusted(profileId: string, url: string, cert: Certificate) {
+    return this.allowed.has(`${profileId}\n${hostOf(url)}\n${cert.fingerprint}`)
   }
 
   /** The tab is going somewhere new, or its page is gone. */
@@ -95,6 +99,13 @@ export class Certificates {
     if (!seen) return null
     const trusted = this.allowed.has(`${profileId}\n${host}\n${seen.cert.fingerprint}`)
     return { host, url, error: seen.error, blocked: false, trusted, fatal: FATAL.has(seen.error), chain: this.chain(seen.cert) }
+  }
+
+  /** The certificate the host showed this run and Chromium's verdict ('' when fine), or null if it wasn't contacted. */
+  seenOn(profileId: string, host: string): { cert: Certificate; error: string; trusted: boolean } | null {
+    const seen = this.seen.get(`${profileId}\n${host}`)
+    if (!seen) return null
+    return { ...seen, trusted: this.allowed.has(`${profileId}\n${host}\n${seen.cert.fingerprint}`) }
   }
 
   /** The site's certificate first, then each one that signed it. */

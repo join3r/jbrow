@@ -17,12 +17,15 @@ const ALL_TYPES = [
   'ping', 'csp_report', 'media', 'websocket', 'webtransport', 'webbundle', 'other',
 ]
 
+/** Where it's written. It isn't one of yours, so the Extensions settings leave it out. */
+export const jbrowExtensionDir = () => path.join(app.getPath('userData'), 'jbrow-extension')
+
 /**
  * Writes the extension into userData and returns its folder. `electronUserAgent` is the session's
  * own user agent, before jbrow makes it look like Chrome.
  */
 export function writeJbrowExtension(electronUserAgent: string): string {
-  const dir = path.join(app.getPath('userData'), 'jbrow-extension')
+  const dir = jbrowExtensionDir()
   const rules = [
     // Google sign-in rejects a browser that claims to be Chrome but doesn't behave like it
     // ("This browser or app may not be secure"). Told the truth, it serves its lighter sign-in

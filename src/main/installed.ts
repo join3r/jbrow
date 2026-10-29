@@ -2,6 +2,11 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { Session } from 'electron'
 
+const forgetters = new WeakMap<Session, (id: string) => void>()
+
+/** A removed extension counts as new if you add it again, so it gets its first-run setup. */
+export const forgetInstall = (sess: Session, id: string) => forgetters.get(sess)?.(id)
+
 /**
  * Electron never fires chrome.runtime.onInstalled. Extensions miss their first-run setup:
  * Bitwarden leaves its inline menu (the icon in login fields) off and never shows its welcome
@@ -23,6 +28,11 @@ export function trackInstalls(sess: Session) {
   try {
     seen = JSON.parse(readFileSync(file, 'utf8'))
   } catch {}
+  forgetters.set(sess, (id) => {
+    if (!(id in seen)) return
+    delete seen[id]
+    writeFileSync(file, JSON.stringify(seen, null, 2))
+  })
 
   const answer = (scope: string | undefined) => {
     const match = scope?.match(/^chrome-extension:\/\/([a-p]{32})\//)

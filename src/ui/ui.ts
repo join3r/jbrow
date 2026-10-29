@@ -1,10 +1,17 @@
 import { cssEase } from '../shared/ease'
 import { engineOf, isSearchUrl, SEARCH_ENGINES, suggestUrlFor } from '../shared/engines'
 import { urlMatcher } from '../shared/patterns'
-import { awayFromHome, displayName, folderThreads, isAsleep, isFolder, isPinned, keptThreads, numberedThreads, samePage, sections, threadsOf, type AppView, type FolderView, type KeptItem, type ThreadView } from '../shared/threads'
+import { awayFromHome, displayName, folderThreads, isAsleep, isFolder, isPinned, keptThreads, numberedThreads, sections, threadsOf, type AppView, type FolderView, type KeptItem, type ThreadView } from '../shared/threads'
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { dragDivider, PANE_GAP, paneSpans, splitOf } from '../shared/split'
-import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type Prefs, type Profile, type SearchReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type VisitView } from '../shared/types'
+import { EMOJI_GROUPS, splitEmoji } from './emoji'
+import { DAY_MS, esc, HOUR_MS, icon, since } from './markup'
+import type { LayoutHost, OpenIn, Outcome, SuggestLayout } from './suggest/layout'
+import { LAYOUTS, layoutPictureHtml, URL_BAR_LAYOUTS } from './suggest/layouts'
+import { isEmpty, suggestModel, type Item, type SuggestModel, type VisitItem } from './suggest/model'
+import { initWelcome } from './welcome'
+import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type ExtensionView, type PaneBar, type Prefs, type Profile, type SearchReply, type SiteInfoReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type UpdateView, type UrlBarStyle, type VisitView } from '../shared/types'
+import { afterRender, beforeRender, downloadsChanged, flourish, setWhimsy } from './whimsy'
 
 declare global {
   interface Window {
@@ -15,59 +22,6 @@ declare global {
   }
 }
 
-/** 24×24 stroke icons. The puzzle, pin, eye, eye-off, folder, store, open, copy, wand, undo, trash, lock, warn, search, user, archive, list-tree, grid, sparkles, shield, keyboard, palette and columns paths are from Lucide (ISC). */
-const ICONS: Record<string, string> = {
-  back: '<path d="m15 18-6-6 6-6"/>',
-  forward: '<path d="m9 18 6-6-6-6"/>',
-  reload: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>',
-  close: '<path d="M18 6 6 18M6 6l12 12"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>',
-  pin: '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>',
-  puzzle:
-    '<path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/>',
-  settings: '<path d="M20 7h-9M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>',
-  eyeOff:
-    '<path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.53 13.53 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><path d="m2 2 20 20"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/>',
-  folderPlus:
-    '<path d="M12 10v6M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
-  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
-  folderOpen:
-    '<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>',
-  store: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>',
-  pause: '<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
-  play: '<path d="M6 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L7.5 3.64A1 1 0 0 0 6 4.5z"/>',
-  open: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
-  copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
-  check: '<path d="M20 6 9 17l-5-5"/>',
-  alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>',
-  wand:
-    '<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/>',
-  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
-  eye: '<path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/>',
-  trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
-  lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
-  warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
-  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
-  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
-  user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
-  archive: '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
-  listTree: '<path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/>',
-  grid: '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
-  sparkles:
-    '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>',
-  shield:
-    '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
-  pip: '<path d="M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h4"/><rect width="10" height="7" x="12" y="13" rx="2"/>',
-  palette:
-    '<path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>',
-  keyboard: '<path d="M10 8h.01M12 12h.01M14 8h.01M16 12h.01M18 8h.01M6 8h.01M7 16h10M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/>',
-  up: '<path d="m18 15-6-6-6 6"/>',
-  down: '<path d="m6 9 6 6 6-6"/>',
-  usb: '<circle cx="10" cy="7" r="1"/><circle cx="4" cy="20" r="1"/><path d="M4.7 19.3 19 5"/><path d="m21 3-3 1 2 2Z"/><path d="M9.26 7.68 5 12l2 5"/><path d="m10 14 5 2 3.5-3.5"/><path d="m18 12 1-1 1 1-1 1Z"/>',
-  bluetooth: '<path d="m7 7 10 10-5 5V2l5 5L7 17"/>',
-  columns: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/>',
-}
-const icon = (name: string) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`
 document.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => (el.innerHTML = icon(el.dataset.icon!)))
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -84,17 +38,21 @@ const restylePane = $('restylePane')
 const restylePrompt = $<HTMLTextAreaElement>('restylePrompt')
 const settingsEl = $('settings')
 const privateMask = $('privateMask')
+const urlShow = $('urlShow')
 const rulesPop = $('rulesPop')
 const folderRules = $<HTMLTextAreaElement>('folderRules')
 const certPop = $('certPop')
 const devicePop = $('devicePop')
+const profilePop = $('profilePop')
+const filterPop = $('filterPop')
+const soundPop = $('soundPop')
 const send = window.jbrow.send
+const welcome = initWelcome($('welcome'), send, () => syncOverlay())
 
 let S: UiState | null = null
 let renaming: string | null = null
 let dragId: string | null = null
 let dragFolder = false
-let highlighted = 0
 let isPrivate: (url: string) => boolean = () => false
 let privateKey = ''
 /** Folder whose auto-file rules are being edited. */
@@ -104,7 +62,6 @@ let typedProfile: string | null = null
 /** Settings is open as its own tab in the sidebar; settingsEl.hidden says whether it's the one showing. */
 let settingsTab = false
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const profile = (id: string): Profile | undefined => S?.profiles.find((p) => p.id === id)
 const activeTab = () => S?.tabs.find((t) => t.id === S!.activeId)
 /** The active tab's address, or the one a bad certificate or the dangerous-site lists stopped it from loading. */
@@ -113,17 +70,6 @@ const activeUrl = () => (S?.cert?.blocked ? S.cert.url : S?.danger ? S.danger.ur
 const pageCovered = () => !!(S?.cert?.blocked || S?.danger || S?.login || S?.crash)
 /** The address as it may be shown on screen. */
 const shownUrl = (url: string) => (isPrivate(url) ? 'Private' : url)
-const HOUR_MS = 60 * 60 * 1000
-const DAY_MS = 24 * HOUR_MS
-/** "just now", "5 minutes ago", "3 hours ago", "2 days ago". */
-function since(ms: number): string {
-  const ago = Date.now() - ms
-  const unit = (n: number, what: string) => `${n} ${what}${n === 1 ? '' : 's'} ago`
-  if (ago < 60 * 1000) return 'just now'
-  if (ago < HOUR_MS) return unit(Math.floor(ago / 60000), 'minute')
-  if (ago < DAY_MS) return unit(Math.floor(ago / HOUR_MS), 'hour')
-  return unit(Math.floor(ago / DAY_MS), 'day')
-}
 /** A command's key as a menu writes it, '' when it has none. */
 const keyLabel = (id: ActionId) => (S?.keys[id] ? shortcutLabel(S.keys[id]) : '')
 /** " (⌘T)" for a tooltip. */
@@ -198,11 +144,8 @@ function render() {
   if (!S) return
   const active = activeTab()
 
-  // The dots double as the legend for the colored bars on tab rows.
+  renderFilter()
   const dot = (p: { color?: string }) => (p.color ? `<span class="dot" style="background:${esc(p.color)}"></span>` : '')
-  $('filter').innerHTML = [{ id: 'all', name: 'All', color: '' }, ...S.profiles]
-    .map((p) => `<button data-filter="${esc(p.id)}" aria-pressed="${S!.filter === p.id}">${dot(p)}${esc(p.name)}</button>`)
-    .join('')
 
   const key = S.prefs.privateUrls.join('\n')
   if (key !== privateKey) {
@@ -228,11 +171,12 @@ function render() {
   $('settingsButton').title = `Settings${keyHint('settings')}`
   $('pin').setAttribute('aria-pressed', String(S.pinned))
   $('pin').title = `${S.pinned ? 'Pinned: a regular window' : 'Pin: keep as a regular window'} with a Dock icon${keyHint('pin')}`
-  if (document.activeElement !== omnibox) showAddress()
+  if (!editing()) showAddress()
   $('extHead').textContent = `Extensions · ${p?.name ?? ''}`
   $('newTab').title = `New tab${S.filter !== 'all' ? ` in ${profile(S.filter)?.name ?? S.filter}` : ''}${keyHint('newTab')}, right-click for a profile`
   renderSettings()
   renderDownloadPop()
+  renderSound()
 
   if (S.activePartition) actions.setAttribute('partition', S.activePartition)
   if (S.activeWebContentsId != null) actions.setAttribute('tab', String(S.activeWebContentsId))
@@ -278,6 +222,7 @@ function render() {
   syncCovering()
   renderSidePanel()
   renderPanes()
+  settleActivate()
 }
 
 /** The header and the space for an extension's side panel; its page is a native view main lays over it. */
@@ -285,8 +230,9 @@ const sidePanelEl = $('sidePanel')
 let sideDrag: { x: number; width: number } | null = null
 function renderSidePanel() {
   const side = S?.sidePanel
-  sidePanelEl.hidden = !side
-  if (!side) {
+  // A window too narrow for it leaves the panel no width; its header goes with it.
+  sidePanelEl.hidden = !side?.width
+  if (!side?.width) {
     root.style.removeProperty('--side')
     root.style.removeProperty('--side-w')
     return
@@ -353,24 +299,28 @@ const shownPanes = () => activeSplit()?.tabs ?? (S?.activeId ? [S.activeId] : []
 /**
  * Around the pages main lays side by side: the room for each pane (a new tab has no page there
  * yet), the dividers in the gaps and the ring around the focused pane. The active tab's own
- * screens (new tab, certificate, crash) move into its pane through --fx and --fw.
+ * screens (new tab, certificate, crash) and its address bar move into its pane through --fx and
+ * --fw; the other panes get bars of their own.
  */
 function renderPanes() {
   const split = activeSplit()
   contentEl.classList.toggle('split', !!split)
   panesEl.hidden = !split || !settingsEl.hidden
+  renderBar(split)
   if (!split || !S) {
     paneBgs.innerHTML = ''
-    contentEl.style.removeProperty('--fx')
-    contentEl.style.removeProperty('--fw')
+    root.style.removeProperty('--fx')
+    root.style.removeProperty('--fw')
+    renderPaneBars([], [])
     return
   }
   const sizes = paneDrag?.id === split.id ? paneDrag.sizes : split.sizes
   const spans = paneSpans(contentEl.clientWidth, sizes)
   const focused = Math.max(0, split.tabs.indexOf(S.activeId!))
   const f = spans[focused]
-  contentEl.style.setProperty('--fx', `${f.x}px`)
-  contentEl.style.setProperty('--fw', `${f.width}px`)
+  root.style.setProperty('--fx', `${f.x}px`)
+  root.style.setProperty('--fw', `${f.width}px`)
+  barEl.classList.toggle('last', focused > 0 && focused === split.tabs.length - 1)
   paneBgs.innerHTML = split.tabs
     .map((id, i) => {
       const empty = i !== focused && !S!.tabs.find((t) => t.id === id)?.url
@@ -380,22 +330,136 @@ function renderPanes() {
   panesEl.innerHTML =
     `<div class="pane-ring" style="left:${f.x}px;width:${f.width}px"></div>` +
     spans
-      .map((s, i) => `<button class="pane-x" data-close-pane="${esc(split.tabs[i])}" style="left:${s.x + s.width}px" title="Take out of split view" aria-label="Take out of split view">${icon('close')}</button>`)
-      .join('') +
-    spans
       .slice(1)
       .map((s, i) => `<div class="pane-split${paneDrag?.i === i ? ' drag' : ''}" data-divider="${i}" style="left:${s.x - PANE_GAP}px" title="Drag to resize"></div>`)
       .join('')
+  renderPaneBars(split.tabs, spans)
 }
+
+// ---------- address bars ----------
+
+const barEl = $('bar')
+const paneBarsEl = $('paneBars')
+const paneBar = (id: string): PaneBar | undefined => S?.panes.find((p) => p.id === id)
+
+/** Whether light text reads better than dark on a #rrggbb color, by its relative luminance as WCAG works it out. */
+function isDark(hex: string): boolean {
+  const n = parseInt(hex.slice(1), 16)
+  const lin = (c: number) => ((c /= 255) <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+  return 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255) < 0.18
+}
+
+/** A bar takes its page's color, or keeps jbrow's surface. */
+function paintBar(el: HTMLElement, color: string | null) {
+  if (color) el.style.setProperty('--site', color)
+  else el.style.removeProperty('--site')
+  el.classList.toggle('tone-dark', !!color && isDark(color))
+  el.classList.toggle('tone-light', !!color && !isDark(color))
+}
+
+/** The active tab's bar: its color, and the × that takes it out of a split. */
+function renderBar(split = activeSplit()) {
+  paintBar(barEl, (S?.activeId && paneBar(S.activeId)?.color) || null)
+  $('paneClose').hidden = !split
+  if (!split) barEl.classList.remove('last')
+}
+
+/**
+ * The bars of a split's other panes. Each shows its own tab: back, reload, profile, lock, the
+ * address and its profile's pinned extensions, which work in place. Clicking the address or the
+ * extensions makes the pane active first, so its keyboard and popovers are the live bar's.
+ */
+function renderPaneBars(ids: string[], spans: { x: number; width: number }[]) {
+  const others = new Set(ids.filter((id) => id !== S?.activeId))
+  for (const el of [...paneBarsEl.children] as HTMLElement[]) if (!others.has(el.dataset.bar!)) el.remove()
+  ids.forEach((id, i) => {
+    const p = paneBar(id)
+    const t = S?.tabs.find((x) => x.id === id)
+    if (!others.has(id) || !p || !t || !S) return
+    let el = paneBarsEl.querySelector<HTMLElement>(`[data-bar="${CSS.escape(id)}"]`)
+    if (!el) {
+      el = document.createElement('div')
+      el.className = 'bar pane-bar'
+      el.dataset.bar = id
+      el.innerHTML = `<div class="bar-main" style="display:contents"></div><div class="pinned-actions"></div>
+        <button class="icon sm bar-btn" data-bar-ext title="Extensions" aria-label="Extensions">${icon('puzzle')}</button>
+        <button class="icon sm bar-btn" data-close-pane title="Take out of split view" aria-label="Take out of split view">${icon('close')}</button>`
+      paneBarsEl.append(el)
+    }
+    el.style.left = `${spans[i].x}px`
+    el.style.width = `${spans[i].width}px`
+    paintBar(el, p.color)
+    const prof = profile(t.profile)
+    const named = !!prof && S.profiles.length > 1
+    const masked = isPrivate(t.url)
+    const lockTitle = p.lock === 'warn' ? 'Not secure' : 'Secure connection'
+    const main =
+      `<div class="profile-band${named ? ' on' : ''}" style="--pc:${esc(prof?.color || '#8a93a1')}">` +
+      `<div class="nav"><button class="icon sm" data-nav="back" title="Back" aria-label="Back"${p.canGoBack ? '' : ' disabled'}>${icon('back')}</button>` +
+      `<button class="icon sm reload" data-nav="${p.loading ? 'stop' : 'reload'}" title="${p.loading ? 'Stop' : 'Reload'}" aria-label="${p.loading ? 'Stop' : 'Reload'}">${icon(p.loading ? 'close' : 'reload')}</button></div>` +
+      (named ? `<span class="profile-name">${esc(prof.name)}</span>` : '') +
+      `</div>` +
+      (p.lock && !masked ? `<span class="lock${p.lock === 'warn' ? ' warn' : ''}" title="${lockTitle}" aria-label="${lockTitle}">${icon(p.lock === 'warn' ? 'warn' : 'lock')}</span>` : '') +
+      `<button class="pane-url" data-focus-bar title="${esc(masked ? 'Private' : t.url)}">${
+        !t.url ? '<span class="none">New tab</span>' : masked ? '<span class="none">Private</span>' : addressHtml(t.url)
+      }</button>`
+    const mainEl = el.querySelector<HTMLElement>('.bar-main')!
+    if (mainEl.dataset.key !== main) {
+      mainEl.dataset.key = main
+      mainEl.innerHTML = main
+    }
+    // The hidden list loads the profile's extensions for the buttons, which draw from it.
+    const pinned = S.prefs.pinnedExtensions.filter((x) => p.extensions.includes(x))
+    const tab = p.webContentsId != null ? String(p.webContentsId) : '-1'
+    const partition = esc(p.partition ?? '')
+    const acts =
+      `<browser-action-list hidden partition="${partition}" tab="${tab}"></browser-action-list>` +
+      pinned.map((x) => `<button is="browser-action" class="pinned-action" id="${esc(x)}" partition="${partition}" tab="${tab}" alignment="bottom left"></button>`).join('')
+    const actsEl = el.querySelector<HTMLElement>('.pinned-actions')!
+    if (actsEl.dataset.key !== acts) {
+      actsEl.dataset.key = acts
+      actsEl.innerHTML = acts
+    }
+  })
+}
+
+/** A pane made active from its bar, and what to do once it is: the keyboard into the address, or its extensions open. */
+let afterActivate: { id: string; then: 'type' | 'extensions' } | null = null
+function activateFromBar(id: string, then: 'type' | 'extensions') {
+  afterActivate = { id, then }
+  send('activate', { id })
+}
+/** Runs once the state says the pane is active. */
+function settleActivate() {
+  if (!afterActivate || S?.activeId !== afterActivate.id) return
+  const { then } = afterActivate
+  afterActivate = null
+  if (then === 'extensions') return setExtensions(true)
+  focusUi()
+  omnibox.focus()
+  omnibox.select()
+}
+
+paneBarsEl.addEventListener('mousedown', (e) => {
+  // The address takes the keyboard on click, as the live bar's does, without the page grabbing it back first.
+  if ((e.target as HTMLElement).closest('[data-focus-bar]')) e.preventDefault()
+})
+paneBarsEl.addEventListener('click', (e) => {
+  const el = e.target as HTMLElement
+  const id = el.closest<HTMLElement>('[data-bar]')?.dataset.bar
+  if (!id) return
+  const nav = el.closest<HTMLElement>('[data-nav]')?.dataset.nav
+  if (nav) return send('nav', { action: nav, id, hard: nav === 'reload' && e.shiftKey })
+  if (el.closest('[data-close-pane]')) return send('close-pane', { id })
+  if (el.closest('[data-focus-bar]')) return activateFromBar(id, 'type')
+  if (el.closest('[data-bar-ext]')) activateFromBar(id, 'extensions')
+})
+$('paneClose').addEventListener('click', () => S?.activeId && send('close-pane', { id: S.activeId }))
 new ResizeObserver(() => renderPanes()).observe(contentEl)
 // A pane without a page is jbrow's; clicking it focuses its tab. Panes with a page focus themselves.
 paneBgs.addEventListener('mousedown', (e) => {
   const id = (e.target as HTMLElement).closest<HTMLElement>('[data-pane]')?.dataset.pane
   if (id && id !== S?.activeId) send('activate', { id })
-})
-panesEl.addEventListener('click', (e) => {
-  const id = (e.target as HTMLElement).closest<HTMLElement>('[data-close-pane]')?.dataset.closePane
-  if (id) send('close-pane', { id })
 })
 // Drag a gap between panes to resize them, as with the side panel.
 panesEl.addEventListener('mousedown', (e) => {
@@ -429,7 +493,7 @@ panesEl.addEventListener('mousedown', (e) => {
 })
 
 /**
- * Pinned extensions, as <browser-action> buttons in the toolbar. Only those the current profile
+ * Pinned extensions, as <browser-action> buttons in the active tab's address bar. Only those the current profile
  * has show. The buttons draw from the state the popover's <browser-action-list> loads.
  */
 const pinnedEl = $('pinnedActions')
@@ -452,15 +516,116 @@ function renderPinnedActions() {
 }
 /** Redraws pinned buttons when an extension changes its icon or badge. */
 function refreshPinnedActions() {
-  for (const b of pinnedEl.children) b.setAttribute('tab', b.getAttribute('tab') ?? '-1')
+  for (const b of document.querySelectorAll('.pinned-action')) b.setAttribute('tab', b.getAttribute('tab') ?? '-1')
 }
 ;(window as unknown as { browserAction?: { addEventListener(name: string, fn: () => void): void } }).browserAction?.addEventListener(
   'update',
   () => queueMicrotask(refreshPinnedActions),
 )
 
-/** Fills the address bar while it isn't being edited, masking private addresses. */
 /** The address bar's profile: the tab's own, or the one Tab picked for what's being typed. */
+// ---------- profile switcher ----------
+
+/** How much of each profile the switcher shows, from most to least room needed. */
+type FilterFit = 'full' | 'selected' | 'icons' | 'menu'
+const FILTER_FITS: FilterFit[] = ['full', 'selected', 'icons', 'menu']
+const filterEl = $('filter')
+/** What the switcher was last fitted for, so it's only measured again when that changes. */
+let filterKey = ''
+
+const filterChoices = (): Profile[] => [{ id: 'all', name: 'All', color: '' }, ...S!.profiles]
+
+/** A profile's emoji, else its color dot, which doubles as the legend for the colored bars on tab rows. All gets a grid. */
+function profileMark(p: Profile) {
+  if (p.icon) return `<span class="mark emoji">${esc(p.icon)}</span>`
+  if (p.color) return `<span class="mark"><span class="dot" style="background:${esc(p.color)}"></span></span>`
+  return `<span class="mark">${icon('grid')}</span>`
+}
+
+function filterHtml(fit: FilterFit) {
+  const choices = filterChoices()
+  if (fit === 'menu') {
+    const cur = choices.find((p) => p.id === S!.filter) ?? choices[0]
+    return `<button class="filter-menu" aria-haspopup="menu" aria-expanded="${!filterPop.hidden}" title="Show profile">${profileMark(cur)}<span class="name">${esc(cur.name)}</span>${icon('down')}</button>`
+  }
+  return choices
+    .map((p) => {
+      const on = S!.filter === p.id
+      // In full, All stays a plain word, as the profiles' dots are what tells them apart.
+      const mark = fit === 'full' && p.id === 'all' ? '' : profileMark(p)
+      const label = fit === 'full' || (fit === 'selected' && on) ? esc(p.name) : ''
+      const title = label ? '' : ` title="${esc(p.name)}" aria-label="${esc(p.name)}"`
+      return `<button data-filter="${esc(p.id)}" aria-pressed="${on}"${title}>${mark}${label}</button>`
+    })
+    .join('')
+}
+
+/** Nothing cut off: no name in an ellipsis, no button pushed past the end. */
+const filterFits = () => filterEl.scrollWidth <= filterEl.clientWidth && [...filterEl.children].every((b) => b.scrollWidth <= b.clientWidth)
+
+/**
+ * The profile switcher above the tabs, hidden with a single profile. Every name while they fit,
+ * then only the selected one's beside the others' marks, then marks alone, then a menu; or always
+ * the menu, if you picked it in settings.
+ */
+function renderFilter() {
+  if (!S) return
+  filterEl.hidden = S.profiles.length < 2
+  if (filterEl.hidden) {
+    filterKey = ''
+    return setFilterPop(false)
+  }
+  const key = JSON.stringify([S.profiles, S.filter, S.prefs.profileSwitcher, !filterPop.hidden])
+  if (key === filterKey) return
+  const fits = S.prefs.profileSwitcher === 'menu' ? (['menu'] as const) : FILTER_FITS
+  for (const fit of fits) {
+    filterEl.dataset.fit = fit
+    filterEl.innerHTML = filterHtml(fit)
+    if (fit === 'menu' || filterFits()) break
+  }
+  // Not laid out yet, so nothing measured: fit again next time.
+  filterKey = filterEl.clientWidth ? key : ''
+  if (!filterPop.hidden) renderFilterPop()
+}
+const refitFilter = () => {
+  filterKey = ''
+  renderFilter()
+}
+new ResizeObserver(refitFilter).observe(filterEl)
+void document.fonts.ready.then(refitFilter)
+
+function renderFilterPop() {
+  filterPop.innerHTML = filterChoices()
+    .map(
+      (p) =>
+        `<button class="pop-item" role="menuitemradio" aria-checked="${S!.filter === p.id}" data-filter="${esc(p.id)}">${profileMark(p)}<span class="name">${esc(p.name)}</span></button>`,
+    )
+    .join('')
+}
+
+function setFilterPop(open: boolean) {
+  if (open === !filterPop.hidden) return
+  filterPop.hidden = !open
+  if (open) renderFilterPop()
+  filterEl.querySelector('.filter-menu')?.setAttribute('aria-expanded', String(open))
+}
+
+filterEl.addEventListener('click', (e) => {
+  const target = e.target as HTMLElement
+  if (target.closest('.filter-menu')) return setFilterPop(!!filterPop.hidden)
+  const b = target.closest<HTMLElement>('[data-filter]')
+  if (b) send('filter', { filter: b.dataset.filter })
+})
+filterPop.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-filter]')
+  if (!b) return
+  setFilterPop(false)
+  send('filter', { filter: b.dataset.filter })
+})
+document.addEventListener('mousedown', (e) => {
+  if (!filterPop.hidden && !(e.target as HTMLElement).closest('#filterPop, .filter-menu')) setFilterPop(false)
+})
+
 function renderProfileBand() {
   const active = activeTab()
   const p = active && profile(typedProfile ?? active.profile)
@@ -474,11 +639,64 @@ function renderProfileBand() {
   name.textContent = p.name
   band.style.setProperty('--pc', p.color || '#8a93a1')
   band.classList.toggle('typed', other)
+  const others = S!.profiles.filter((x) => x.id !== p.id)
+  const pick = others.length === 1 ? others[0].name : 'another profile'
   name.title =
-    document.activeElement !== omnibox ? `This tab is in the ${p.name} profile`
+    document.activeElement !== omnibox ? `This tab is in the ${p.name} profile. Click to reload it in ${pick}`
     : other ? `Opens in a new tab in ${p.name} (Tab to switch)`
     : `Opens in ${p.name} (Tab to switch)`
+  if (!profilePop.hidden) renderProfilePop()
 }
+
+/**
+ * The profile in the address bar, clicked: with two profiles, the other one; with more, a menu.
+ * While you type, it picks where what's typed opens, as Tab does. Otherwise the tab itself moves,
+ * its page loading again in the profile picked.
+ */
+function pickProfile(id: string) {
+  const active = activeTab()
+  if (!S || !active) return
+  setProfilePop(false)
+  if (document.activeElement === omnibox) setTypedProfile(id)
+  else send('set-profile', { profile: id })
+}
+
+function renderProfilePop() {
+  const active = activeTab()
+  if (!S || !active) return setProfilePop(false)
+  const cur = typedProfile ?? active.profile
+  profilePop.innerHTML = S.profiles
+    .map(
+      (p) =>
+        `<button class="pop-item" role="menuitemradio" aria-checked="${p.id === cur}" data-profile="${esc(p.id)}" style="--pc:${esc(p.color || '#8a93a1')}"><span class="dot"></span>${esc(p.name)}</button>`,
+    )
+    .join('')
+}
+
+function setProfilePop(open: boolean) {
+  if (open === !profilePop.hidden) return
+  profilePop.hidden = !open
+  $('profileName').setAttribute('aria-expanded', String(open))
+  if (open) renderProfilePop()
+  syncOverlay()
+}
+
+$('profileName').addEventListener('mousedown', (e) => e.preventDefault())
+$('profileName').addEventListener('click', () => {
+  const active = activeTab()
+  if (!S || !active) return
+  if (S.profiles.length > 2) return setProfilePop(!!profilePop.hidden)
+  const other = S.profiles.find((p) => p.id !== (typedProfile ?? active.profile))
+  if (other) pickProfile(other.id)
+})
+profilePop.addEventListener('mousedown', (e) => e.preventDefault())
+profilePop.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-profile]')
+  if (b?.dataset.profile) pickProfile(b.dataset.profile)
+})
+document.addEventListener('mousedown', (e) => {
+  if (!profilePop.hidden && !(e.target as HTMLElement).closest('#profilePop, #profileName')) setProfilePop(false)
+})
 
 /** Tab and ⇧Tab in the address bar step through the profiles what's typed will open in. */
 function cycleTypedProfile(step: number) {
@@ -486,18 +704,51 @@ function cycleTypedProfile(step: number) {
   if (!S || !active) return
   const ids = S.profiles.map((p) => p.id)
   const i = ids.indexOf(typedProfile ?? active.profile)
-  typedProfile = ids[(i + step + ids.length) % ids.length]
-  // An empty tab has nothing to lose, so it moves over right away.
-  if (!active.url) send('set-profile', { profile: typedProfile })
-  render()
+  setTypedProfile(ids[(i + step + ids.length) % ids.length])
 }
 
+/** Picks the profile what's typed in the address bar opens in. */
+function setTypedProfile(id: string) {
+  const active = activeTab()
+  if (!active) return
+  typedProfile = id
+  // An empty tab has nothing to lose, so it moves over right away.
+  if (!active.url) send('set-profile', { profile: id })
+  render()
+  // The other profile has its own history, so the suggestions and any completion change too.
+  if (typed && !untouched) {
+    mayComplete ||= !!completion()
+    requestSuggestions()
+  }
+  if (!suggest.hidden) showSuggestions()
+}
+
+/** Fills the address bar while it isn't being edited, masking private addresses. */
 function showAddress() {
   const url = activeUrl()
   const masked = isPrivate(url)
   omnibox.value = masked ? '' : url
   omnibox.placeholder = masked ? '' : 'Search or type a tab name'
   privateMask.hidden = !masked
+  // At rest it reads as the site, the rest of the address dimmed after it.
+  const dressed = !masked && !!url
+  omnibox.classList.toggle('dressed', dressed)
+  urlShow.hidden = !dressed
+  if (dressed) urlShow.innerHTML = addressHtml(url)
+}
+
+/** An address as a bar shows it at rest: the site (with its port), then the rest dimmed. Other addresses whole. */
+function addressHtml(url: string): string {
+  try {
+    const u = new URL(url)
+    if (u.protocol === 'http:' || u.protocol === 'https:') {
+      const rest = (u.pathname === '/' ? '' : u.pathname) + u.search + u.hash
+      return `<span class="host">${esc(u.host.replace(/^www\./, ''))}</span><span class="rest">${esc(rest)}</span>`
+    }
+  } catch {
+    // Not an address URL can read; shown as it is.
+  }
+  return `<span class="host">${esc(url)}</span>`
 }
 
 function renderThreads() {
@@ -508,8 +759,8 @@ function renderThreads() {
   const draft = renameInput ? { value: renameInput.value, start: renameInput.selectionStart, end: renameInput.selectionEnd } : null
 
   const appNames = Object.fromEntries(Object.entries(S.apps).map(([k, l]) => [k, l.name]))
-  const s = sections(S.tabs, { filter: S.filter, scope: S.scope?.key ?? null, activeId: S.activeId, now: S.now, folders: S.folders, appNames, earlierAfterMs: S.prefs.earlierAfterHours * HOUR_MS })
-  const numbered = new Map(numberedThreads(s).map((v, i) => [v.root.id, i + 1]))
+  const s = sections(S.tabs, { filter: S.filter, scope: S.scope?.key ?? null, activeId: S.activeId, now: S.now, folders: S.folders, appNames, earlierAfterMs: S.prefs.earlierAfterHours * HOUR_MS, newTabsAt: S.prefs.newTabsAt })
+  const numbered = new Map(numberedThreads(s, { from: S.prefs.numberFrom, openApps: S.prefs.openApps }).map((v, i) => [v.root.id, i + 1]))
   // As in Arc, a split view is one row, where the first of its tabs comes in the sidebar; its
   // other tabs don't show again further down. Pinned tabs stay icons.
   const listed = new Map([...keptThreads(s), ...s.today, ...s.apps.flatMap((a) => [...a.threads, ...a.earlier]), ...s.earlier].map((v) => [v.root.id, v]))
@@ -526,6 +777,8 @@ function renderThreads() {
   const appBlock = (v: ThreadView<UiTab>) => tile(v, false)
   // While filtered to a profile or an app, folders with nothing to show stay out of the way.
   const narrowed = S.filter !== 'all' || !!S.scope
+  const animated = [threadsEl, pinsEl]
+  beforeRender(animated)
   renderPins(s.pinned, numbered)
   let html = settingsTab
     ? `<div class="row set-row ${settingsEl.hidden ? '' : 'cur'}" role="button" tabindex="0" data-settings>
@@ -541,14 +794,22 @@ function renderThreads() {
   html += `<div id="kept" class="kept">${kept}</div><div class="keep-zone"></div>`
   html += `<div class="head" data-head="today">${recentLabel(S.prefs.earlierAfterHours)}</div>`
   html += s.today.map(block).join('') || `<div class="empty">Nothing here yet</div>`
-  html += s.apps.map((a) => appSection(a, appBlock)).join('')
-  // Earlier sits at the bottom of the sidebar, away from what's current, and the way to archived threads under it.
+  // Earlier sits at the bottom of the sidebar, away from what's current, with the way to archived
+  // threads under it. Apps' sections come last, collapsed until opened.
   const archivedLink = archivedList.length
     ? `<button class="archived-link" data-show-archived title="Archived tabs">${icon('archive')}${archivedList.length.toLocaleString()} archived</button>`
     : ''
-  if (s.earlier.length) html += `<div class="earlier-sec"><div class="head" data-head="today">Earlier</div><div class="earlier">${s.earlier.map(block).join('')}</div>${archivedLink}</div>`
-  else html += archivedLink
+  let bottom = s.earlier.length ? `<div class="earlier-sec"><div class="head" data-head="today">Earlier</div><div class="earlier">${s.earlier.map(block).join('')}</div>${archivedLink}</div>` : archivedLink
+  bottom += s.apps.map((a) => appSection(a, appBlock)).join('')
+  if (bottom) html += `<div class="bottom-sec">${bottom}</div>`
   threadsEl.innerHTML = html
+  afterRender(animated, {
+    tabIds: S.tabs.map((t) => t.id),
+    activeId: S.activeId,
+    filter: `${S.filter}|${S.scope?.key ?? ''}`,
+    clip: sidebarEl.getBoundingClientRect(),
+  })
+  revealNewTab()
 
   const input = document.getElementById('ren') as HTMLInputElement | null
   if (input) {
@@ -558,6 +819,29 @@ function renderThreads() {
     } else input.select()
     input.focus()
   }
+}
+
+/** Tab IDs as of the last sidebar render, to tell which tabs just opened. */
+let renderedTabs: Set<string> | null = null
+
+/**
+ * Scrolls the sidebar to a tab that just opened, in front or in the background, when it lands
+ * above or below what's in view: beside its opener, or at the top or bottom of Today.
+ */
+function revealNewTab() {
+  const ids = S!.tabs.map((t) => t.id)
+  const fresh = renderedTabs ? ids.filter((id) => !renderedTabs!.has(id)) : []
+  renderedTabs = new Set(ids)
+  const id = fresh.includes(S!.activeId ?? '') ? S!.activeId! : fresh.at(-1)
+  const row = id && threadsEl.querySelector<HTMLElement>(`.row[data-id="${CSS.escape(id)}"]`)
+  if (!row) return
+  // From the row's middle, as it may be scaling in.
+  const box = threadsEl.getBoundingClientRect()
+  const r = row.getBoundingClientRect()
+  const top = r.top + r.height / 2 - row.offsetHeight / 2 - box.top
+  const bottom = top + row.offsetHeight - threadsEl.clientHeight
+  const by = top < 0 ? top : bottom > 0 ? bottom : 0
+  if (by) threadsEl.scrollBy({ top: by, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
 }
 
 // ---------- pinned tabs ----------
@@ -611,16 +895,19 @@ function renderPins(pinned: ThreadView<UiTab>[], numbered: Map<string, number>) 
       const letter = esc((hostOf(t.url) || displayName(t)).charAt(0).toUpperCase())
       const away = awayFromHome(t)
       const title = `${away ? `${t.home!.title || t.home!.url} / ` : ''}${displayName(t)}${n ? ` (⌘${n})` : ''}${away && open ? '\nClick to go back to the pinned page' : ''}`
+      const snd = soundOf(v.all)
       return `<button class="${classes}" role="listitem" draggable="true" data-id="${t.id}" data-target="${open ? t.id : v.last.id}"${away ? ' data-away' : ''}
         title="${esc(title)}" aria-label="${esc(displayName(t))}" style="--pc:${esc(profile(t.profile)?.color ?? '')}">${
           fav ? `<img class="fav" src="${esc(fav)}" alt="">` : `<span class="fav letter">${letter}</span>`
-        }</button>`
+        }${snd ? `<span class="snd-badge${snd.muted ? ' muted' : ''}" data-mute="${snd.id}" title="${snd.muted ? 'Unmute' : 'Mute'}">${icon(snd.muted ? 'volumeX' : 'volume')}</span>` : ''}</button>`
     })
     .join('')
   layoutPins()
 }
 
 pinsEl.addEventListener('click', (e) => {
+  const mute = (e.target as HTMLElement).closest<HTMLElement>('[data-mute]')
+  if (mute) return toggleMute(mute.dataset.mute!)
   const tile = (e.target as HTMLElement).closest<HTMLElement>('.pin-tile')
   if (!tile) return
   showSettings(false)
@@ -640,10 +927,27 @@ pinsEl.addEventListener('dragstart', (e) => {
   startDrag(tile.dataset.id!, false, e)
 })
 
+/**
+ * The icon a drop between icons (in the gap, or past the end of the last row) goes beside: the
+ * nearest one in the pointer's row, else the nearest of all.
+ */
+function nearestPin(e: DragEvent): HTMLElement | null {
+  let best: { tile: HTMLElement; far: number; inRow: boolean } | null = null
+  for (const tile of pinsEl.querySelectorAll<HTMLElement>('.pin-tile')) {
+    const box = tile.getBoundingClientRect()
+    const inRow = e.clientY >= box.top && e.clientY <= box.bottom
+    const dx = Math.max(box.left - e.clientX, 0, e.clientX - box.right)
+    const dy = Math.max(box.top - e.clientY, 0, e.clientY - box.bottom)
+    const far = Math.hypot(dx, dy)
+    if (!best || (inRow && !best.inRow) || (inRow === best.inRow && far < best.far)) best = { tile, far, inRow }
+  }
+  return best?.tile ?? null
+}
+
 /** Where a drag over the icons would land: beside an icon, by which half it's over, or after the last. */
 function pinDrop(e: DragEvent): { el: HTMLElement; target: string | null; after: boolean } | null {
   if (!dragId || dragFolder) return null
-  const tile = (e.target as HTMLElement).closest<HTMLElement>('.pin-tile')
+  const tile = (e.target as HTMLElement).closest<HTMLElement>('.pin-tile') ?? nearestPin(e)
   if (!tile) return { el: pinsEl, target: null, after: true }
   if (tile.dataset.id === dragId) return null
   const box = tile.getBoundingClientRect()
@@ -675,7 +979,7 @@ let pinDrag: { y: number; height: number } | null = null
 pinDivider.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return
   pinDrag = { y: e.clientY, height: pinLayout(pinCount, pinRows()).total }
-  pinRowsDraft = pinRows()
+  pinRowsDraft = null
   pinDivider.setPointerCapture(e.pointerId)
   pinDivider.classList.add('dragging')
 })
@@ -686,7 +990,8 @@ pinDivider.addEventListener('pointermove', (e) => {
   for (let r = 1; r <= pinCount; r++) {
     if (Math.abs(pinLayout(pinCount, r).total - want) < Math.abs(pinLayout(pinCount, best).total - want)) best = r
   }
-  if (best !== pinRowsDraft) {
+  // Until it changes the rows, it's a click: what was set stays, even with fewer icons to show it.
+  if (best !== pinRows()) {
     pinRowsDraft = best
     layoutPins()
   }
@@ -695,7 +1000,7 @@ const endPinDrag = () => {
   if (!pinDrag) return
   pinDrag = null
   pinDivider.classList.remove('dragging')
-  setPinnedRows(pinRowsDraft ?? 1)
+  if (pinRowsDraft !== null) setPinnedRows(pinRowsDraft)
 }
 pinDivider.addEventListener('pointerup', endPinDrag)
 pinDivider.addEventListener('pointercancel', endPinDrag)
@@ -727,12 +1032,27 @@ function recentLabel(hours: number): string {
   return 'This week'
 }
 
+/** An app's section: its heading toggles it, and collapsed it still shows the thread you're on. */
 function appSection(a: AppView<UiTab>, block: (v: ThreadView<UiTab>) => string): string {
+  const open = !!S?.prefs.openApps.includes(a.scope)
+  const count = a.threads.length + a.earlier.length
   const icons = (S?.apps[a.scope]?.icons ?? []).map((src) => `<img src="${esc(src)}" alt="">`).join('')
-  let html = `<div class="head app-head" title="${esc(a.name)}">${icons ? `<span class="app-icons">${icons}</span>` : ''}<span>${esc(a.name)}</span></div>`
-  html += a.threads.map(block).join('')
-  if (a.earlier.length) html += `<div class="earlier">${a.earlier.map(block).join('')}</div>`
+  let html = `<div class="head app-head" role="button" tabindex="0" aria-expanded="${open}" data-app-head="${esc(a.scope)}" title="${esc(a.name)}">
+    <span class="chev">${icon('forward')}</span>${icons ? `<span class="app-icons">${icons}</span>` : ''}<span class="app-name">${esc(a.name)}</span>${!open && playingIn([...a.threads, ...a.earlier]) ? soundMark : ''}<span class="meta">${count}</span>
+  </div>`
+  const shown = (v: ThreadView<UiTab>) => open || holdsActive(v)
+  html += a.threads.filter(shown).map(block).join('')
+  const earlier = a.earlier.filter(shown)
+  if (earlier.length) html += `<div class="earlier">${earlier.map(block).join('')}</div>`
   return html
+}
+
+function toggleApp(scope: string) {
+  if (!S) return
+  const open = S.prefs.openApps
+  S.prefs.openApps = open.includes(scope) ? open.filter((k) => k !== scope) : [...open, scope]
+  sendPrefs({ openApps: S.prefs.openApps })
+  renderThreads()
 }
 
 /** A folder's row and, when open, the folders and threads inside it. */
@@ -745,7 +1065,7 @@ function folderRow(v: FolderView<UiTab>, block: (v: ThreadView<UiTab>) => string
       ? `<input class="ren" id="ren" value="${esc(f.name)}" aria-label="Folder name">`
       : `<span class="t">${esc(f.name)}</span>`
   const html = `<div class="row frow" role="button" tabindex="0" draggable="true" aria-expanded="${open}" data-folder="${f.id}">
-    <span class="fav">${icon(open ? 'folderOpen' : 'folder')}</span>${name}<span class="end"><span class="meta">${count || ''}</span></span>
+    <span class="fav">${icon(open ? 'folderOpen' : 'folder')}</span>${name}<span class="end">${!open && playingIn(folderThreads(v)) ? soundMark : ''}<span class="meta">${count || ''}</span></span>
   </div>`
   // A collapsed folder still shows the thread you're on, and the folders down to it.
   const shown = (i: KeptItem<UiTab>) =>
@@ -778,9 +1098,18 @@ function row(t: UiTab, thread: ThreadView<UiTab>, number?: number, showApp = tru
   // its favicon turns into a way back on hover.
   const away = awayFromHome(t)
   const img = t.favicon ? `<img class="fav" src="${esc(t.favicon)}" alt="">` : `<span class="fav none"></span>`
-  const fav = away
+  const page = away
     ? `<span class="fav-home" data-home="${t.id}" title="${esc(`Back to ${t.home!.title || t.home!.url}`)}">${img}${icon('undo')}</span>`
     : img
+  // An extension that opened the tab, or is working in it now (Stem), badges its favicon: faint
+  // for the one, solid for the other.
+  const by = t.drivenBy ?? t.openedBy
+  const ext = by ? S.tabExtensions[by] : undefined
+  const fav = ext
+    ? `<span class="fav-ext" title="${esc(t.drivenBy ? `${ext.name} is working in this tab` : `Opened by ${ext.name}`)}">${page}${
+        ext.icon ? `<img class="ext-badge${t.drivenBy ? ' live' : ''}" src="${esc(ext.icon)}" alt="">` : `<span class="ext-badge${t.drivenBy ? ' live' : ''}">${icon('puzzle')}</span>`
+      }</span>`
+    : page
   const name =
     renaming === t.id
       ? `<input class="ren" id="ren" value="${esc(displayName(t))}" aria-label="Tab name">`
@@ -801,29 +1130,23 @@ function row(t: UiTab, thread: ThreadView<UiTab>, number?: number, showApp = tru
   const split = splitOf(S.splits, t.id)
   const partners = split?.tabs.filter((id) => id !== t.id).map((id) => S!.tabs.find((x) => x.id === id)).filter((x) => !!x) ?? []
   const mark = split ? `<span class="split-mark" title="${esc(`Split view with ${partners.map(displayName).join(', ')}`)}">${icon('columns')}</span>` : ''
+  const snd = soundOf(thread.all)
+  const sound = snd ? `<button class="snd${snd.muted ? ' muted' : ''}" data-mute="${snd.id}" title="${snd.muted ? 'Unmute' : 'Mute'}" aria-label="${snd.muted ? 'Unmute' : 'Mute'}">${icon(snd.muted ? 'volumeX' : 'volume')}</button>` : ''
   return `<div class="${classes}" role="button" tabindex="0" draggable="true" data-id="${t.id}" data-target="${t.id}" style="--pc:${esc(color)}">
-    ${fav}${name}<span class="end">${mark}<span class="meta">${esc(meta || key)}</span>${closable ? `<button class="act" data-close="${t.id}" title="Close" aria-label="Close">${icon('close')}</button>` : ''}</span>
+    ${fav}${name}<span class="end">${sound}${mark}<span class="meta">${esc(meta || key)}</span>${closable ? `<button class="act" data-close="${t.id}" title="Close" aria-label="Close">${icon('close')}</button>` : ''}</span>
     ${asleep ? `<span class="sum">${esc(sleepSummary(thread, S.now))}</span>` : ''}
   </div>`
 }
 
 // ---------- suggestions ----------
-
-interface Suggestion {
-  kind: 'tab' | 'archived' | 'go' | 'visit' | 'search'
-  id?: string
-  /** Where a history row, or the site the address bar completed to, goes. */
-  url?: string
-  title: string
-  sub: string
-  tag: string
-  favicon?: string
-  /** Shown instead of a favicon. */
-  icon?: string
-}
+// What the address bar offers is built in suggest/model.ts and drawn by the layout picked in
+// settings (suggest/layout.ts); this part keeps the address bar: focus, typing, the completion,
+// main's answers, and what picking something does.
 
 /** What was typed in the address bar, without the completion added after it. */
 let typed = ''
+/** The text is still the address the bar showed when it got focus, so nothing counts as typed. */
+let untouched = false
 /** The site the address bar completed `typed` to, its rest selected after the caret. */
 let completed: CompletionView | null = null
 /** The last key typed at the end of the text, so a completion may follow. Deleting never completes. */
@@ -833,119 +1156,67 @@ let suggestSeq = 0
 /** Main's answers: history pages for `typed`, and the search engine's suggestions for recent text. */
 let visitHits: VisitView[] = []
 let searchHits: SearchReply | null = null
-/** The highlight was moved with the arrows, so ⇧Delete means that row, not the text. */
-let arrowed = false
+/** What the suggestions show now, and the layout showing it. */
+let model: SuggestModel | null = null
+let layout: SuggestLayout | null = null
+let layoutId: UrlBarStyle | null = null
 
 /** The profile what's typed opens in, whose history the suggestions come from. */
 const typedIn = () => typedProfile ?? activeTab()?.profile
 /** The completion, while it's still there as the address bar added it. Accepting it with → keeps it. */
 const completion = () => (completed && omnibox.value.toLowerCase() === completed.text.toLowerCase() ? completed : null)
-const tabMatches = (t: TabRecord, q: string) =>
-  `${displayName(t)} ${t.title} ${t.url}`.toLowerCase().includes(q)
 
 function requestSuggestions() {
   send('suggest', { input: typed, profile: typedIn(), seq: ++suggestSeq })
 }
 
-function suggestions(): Suggestion[] {
-  if (!S) return []
-  const q = typed.trim().toLowerCase()
-  const comp = completion()
-  const tabs = [...S.tabs]
-    .filter((t) => t.url && (!q || tabMatches(t, q)))
-    .sort((a, b) => b.lastSeen - a.lastSeen)
-    .slice(0, q ? 5 : 8)
-    .map<Suggestion>((t) => ({
-      kind: 'tab',
-      id: t.id,
-      title: displayName(t),
-      sub: shownUrl(t.url),
-      tag: profile(t.profile)?.name ?? t.profile,
-      favicon: t.favicon,
-    }))
-  // Archived threads only turn up when searched for.
-  const archivedTabs = !q ? [] : archived.filter((t) => t.url && tabMatches(t, q)).sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0))
-  const archivedRows = archivedTabs
-    .slice(0, 3)
-    .map<Suggestion>((t) => ({ kind: 'archived', id: t.id, title: displayName(t), sub: shownUrl(t.url), tag: 'archived', favicon: t.favicon }))
-  // History leaves out pages already open or archived: their own rows bring them back as they were.
-  const seen = new Set([...S.tabs, ...archivedTabs].map((t) => samePage(t.url)))
-  if (comp) seen.add(samePage(comp.url))
-  const visits = !q
-    ? []
-    : visitHits
-        .filter((v) => !seen.has(samePage(v.url)) && !!seen.add(samePage(v.url)))
-        .slice(0, 5)
-        .map<Suggestion>((v) => ({
-          kind: 'visit',
-          url: v.url,
-          title: v.title || (isPrivate(v.url) ? 'Private' : v.url.replace(/^https?:\/\/(www\.)?/, '')),
-          sub: shownUrl(v.url),
-          tag: 'history',
-          icon: 'clock',
-        }))
-  // Older search suggestions stay while you type on, as long as they still fit what's typed.
-  const sh = searchHits
-  const exact = !!sh && sh.input.trim().toLowerCase() === q
-  const searches =
-    !q || !sh || !S.prefs.searchSuggestions || !q.startsWith(sh.input.trim().toLowerCase())
-      ? []
-      : sh.searches
-          .filter((s) => s.toLowerCase() !== q && (exact || s.toLowerCase().startsWith(q)))
-          .slice(0, 4)
-          .map<Suggestion>((s) => ({ kind: 'search', title: s, sub: '', tag: 'search', icon: 'search' }))
-  const text = typed.trim()
-  const go: Suggestion[] = comp
-    ? [{ kind: 'go', url: comp.url, title: `Go to ${comp.text}`, sub: comp.url, tag: 'web' }]
-    : q
-      ? [{ kind: 'go', title: looksLikeUrl(q) ? `Go to ${text}` : `Search for "${text}"`, sub: '', tag: 'web' }]
-      : []
-  // A typed or completed address goes first; a typed word goes after matching tabs and history.
-  return comp || looksLikeUrl(q) ? [...go, ...tabs, ...visits, ...archivedRows, ...searches] : [...tabs, ...visits, ...archivedRows, ...go, ...searches]
-}
-
-const looksLikeUrl = (q: string) => /^[a-z][a-z0-9+.-]*:\/\//i.test(q) || (/^[\w-]+(\.[\w-]+)+(:\d+)?(\/\S*)?$/i.test(q) && !q.includes(' '))
-
-/** Identifies a row across re-renders, so the highlight stays on it when answers arrive. */
-const rowKey = (s: Suggestion | undefined) => (s ? `${s.kind}:${s.id ?? s.url ?? s.title}` : '')
-
-let current: Suggestion[] = []
-/** `keep` holds the highlight on the row the arrows picked, for answers that arrive later. */
-function showSuggestions(keep = false) {
-  const was = keep && arrowed ? rowKey(current[highlighted]) : ''
-  current = suggestions()
-  const at = was ? current.findIndex((s) => rowKey(s) === was) : -1
-  if (at >= 0) highlighted = at
-  else {
-    highlighted = 0
-    arrowed = false
+/** The layout settings picked, made anew when that changes. */
+function suggestLayout(): SuggestLayout {
+  const id = S?.prefs.urlBarStyle && LAYOUTS[S.prefs.urlBarStyle] ? S.prefs.urlBarStyle : 'columns'
+  if (!layout || id !== layoutId) {
+    layout = LAYOUTS[id](layoutHost)
+    layoutId = id
   }
-  if (!current.length) return hideSuggestions()
-  suggest.innerHTML =
-    current
-      .map((s, i) => {
-        const fav = s.favicon ? `<img src="${esc(s.favicon)}" alt="">` : `<span class="fav">${s.icon ? icon(s.icon) : ''}</span>`
-        const forget =
-          s.kind === 'visit'
-            ? `<span class="sg-x" role="button" data-forget="${i}" title="Remove from history (⇧Delete)" aria-label="Remove from history">${icon('close')}</span>`
-            : ''
-        return `<button class="sg ${i === highlighted ? 'hi' : ''} sg-${s.kind}" data-sg="${i}">
-        ${fav}<span class="sg-t">${esc(s.title)}</span>${s.sub ? `<span class="sg-s">${esc(s.sub)}</span>` : ''}<span class="sg-tag">${esc(s.tag)}</span>${forget}
-      </button>`
-      })
-      .join('') + switchHint()
+  return layout
+}
+const layoutHost: LayoutHost = {
+  askSite: (url, profile, seq) => send('site-info', { url, profile: profile ?? typedIn(), seq }),
+  focusText: () => omnibox.focus(),
+}
+/** The keyboard is in the address bar: its text, or a field of the layout's own in the suggestions. */
+const barFocused = () => document.activeElement === omnibox || suggest.contains(document.activeElement)
+/**
+ * The address bar is being edited: it has the keyboard and jbrow's UI has it. A page that takes the
+ * keyboard (clicked, or made active when a pane closes) leaves the address bar the UI's focused
+ * element all the same, though nothing is typed there until the UI has the keyboard back.
+ */
+const editing = () => document.hasFocus() && barFocused()
+/** Focus moving between the text and the suggestions' own fields, which keeps the address bar open. */
+const withinBar = (to: EventTarget | null) => to instanceof Node && (to === omnibox || suggest.contains(to))
+
+/** Draws the suggestions for what's there now. The layout keeps its selection on the same item where it can. */
+function showSuggestions() {
+  if (!S) return
+  model = suggestModel({
+    typed,
+    untouched,
+    completion: completion(),
+    tabs: S.tabs,
+    archived,
+    profiles: S.profiles,
+    opensIn: typedIn(),
+    visits: visitHits,
+    searchReply: searchHits,
+    searchSuggestions: S.prefs.searchSuggestions,
+    searchUrl: S.prefs.searchUrl,
+    isPrivate,
+  })
+  if (isEmpty(model)) return hideSuggestions()
+  const l = suggestLayout()
+  suggest.dataset.layout = layoutId!
+  l.render(suggest, model)
   suggest.hidden = false
   syncOverlay()
-}
-/** Under the suggestions, with more than one profile: Tab sends what's typed to the next one. */
-function switchHint(): string {
-  const ids = S?.profiles.map((p) => p.id) ?? []
-  const from = typedIn()
-  if (ids.length < 2 || !from) return ''
-  const next = profile(ids[(ids.indexOf(from) + 1) % ids.length])
-  if (!next) return ''
-  const dot = next.color ? `<span class="dot" style="background:${esc(next.color)}"></span>` : ''
-  return `<div class="sg-hint"><kbd>Tab</kbd>to open in ${dot}${esc(next.name)}</div>`
 }
 function hideSuggestions() {
   suggest.hidden = true
@@ -954,38 +1225,32 @@ function hideSuggestions() {
 
 /**
  * Completes what's typed to the site main found, Chrome's inline autocompletion: "git" becomes
- * "github.com" with "hub.com" selected, so typing on replaces it and Backspace removes it. Not
- * while an open tab matches, so Return still goes to the tab you're typing the name of.
+ * "github.com" with "hub.com" selected, so typing on replaces it and Backspace removes it. "you"
+ * means youtube.com's front page even with a YouTube tab open; that tab is a row further down.
+ * Only a name you gave a tab beats it, so Return still goes to the tab you're typing the name of.
  */
 function applyCompletion(c: CompletionView | null) {
   const q = typed.trim().toLowerCase()
-  const tabHit = !!S?.tabs.some((t) => t.url && tabMatches(t, q))
-  const fits = !!c && !tabHit && c.text.toLowerCase().startsWith(typed.toLowerCase()) && c.text.length > typed.length
+  const named = !!q && !!S?.tabs.some((t) => t.url && t.name?.toLowerCase().split(/\s+/).some((w) => w.startsWith(q)))
+  const fits = !!c && !named && c.text.toLowerCase().startsWith(typed.toLowerCase()) && c.text.length > typed.length
   completed = fits ? c : null
   const value = fits ? typed + c!.text.slice(typed.length) : typed
   if (omnibox.value !== value) omnibox.value = value
   if (fits) omnibox.setSelectionRange(typed.length, value.length)
 }
 
-/** ⇧Delete on a history row, or its ×: the page leaves the history and the suggestions. */
-function forgetVisit(s: Suggestion | undefined) {
-  if (s?.kind !== 'visit' || !s.url) return
-  send('forget-visit', { profile: typedIn(), url: s.url })
-  visitHits = visitHits.filter((v) => v.url !== s.url)
-  const at = highlighted
+/** ⇧Delete on a history page, or its ×: the page leaves the history and the suggestions. */
+function forgetVisit(v: VisitItem) {
+  send('forget-visit', { profile: typedIn(), url: v.url })
+  visitHits = visitHits.filter((x) => x.url !== v.url)
+  // The layout keeps the selection where it was, on the page that moved up.
   showSuggestions()
-  // The highlight stays where it was, on the row that moved up.
-  if (current.length && at > 0) {
-    highlighted = Math.min(at, current.length - 1)
-    arrowed = true
-    suggest.querySelectorAll('.sg').forEach((el, i) => el.classList.toggle('hi', i === highlighted))
-  }
 }
 
 /** The page hides while anything of jbrow's own covers it; see Panel.setOverlay. */
 let overlaySent = false
 function syncOverlay() {
-  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !certPop.hidden || !devicePop.hidden || !settingsEl.hidden
+  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !certPop.hidden || !devicePop.hidden || !profilePop.hidden || !soundPop.hidden || !settingsEl.hidden || welcome.isOpen
   if (on !== overlaySent) {
     overlaySent = on
     send('overlay', { on })
@@ -997,26 +1262,49 @@ function syncOverlay() {
 function syncCovering() {
   root.classList.toggle('covering', overlaySent && !!activeTab()?.url && !pageCovered())
 }
-function moveHighlight(delta: number) {
-  if (!current.length) return
-  arrowed = true
-  highlighted = (highlighted + delta + current.length) % current.length
-  suggest.querySelectorAll('.sg').forEach((el, i) => el.classList.toggle('hi', i === highlighted))
+/** Takes the keyboard out of the address bar, from its text or a field in the suggestions. */
+function leaveBar() {
+  if (barFocused()) (document.activeElement as HTMLElement).blur()
 }
-function pick(s: Suggestion | undefined) {
+/** Does what Return does with an item. Null: what's typed, as it's typed. With `open`, opens it somewhere else instead. */
+function pick(item: Item | null, open?: OpenIn) {
   const text = omnibox.value
   const opensIn = typedProfile ?? undefined
+  const from = typedIn()
+  const next = model?.nextProfile?.id
   hideSuggestions()
-  omnibox.blur()
-  if (s || text.trim()) showSettings(false)
-  if (s?.kind === 'tab' && s.id) send('activate', { id: s.id })
-  else if (s?.kind === 'archived' && s.id) send('restore', { id: s.id })
-  else if (s?.url) send('navigate', { input: s.url, profile: opensIn })
-  else if (s?.kind === 'search') send('navigate', { input: s.title, profile: opensIn, search: true })
+  leaveBar()
+  if (item || text.trim()) showSettings(false)
+  if (item && open) {
+    // An open tab goes beside the active one itself; anything else opens its page.
+    if (open === 'split' && item.kind === 'tab') return send('split-with', { id: item.id })
+    const input = item.kind === 'address' ? item.input : item.kind === 'search' ? item.query : item.url
+    // Without one picked with Tab, a new tab goes where its site belongs (see siteProfile).
+    const profile = open === 'profile' ? next : item.kind === 'tab' ? (item.profile?.id ?? from) : open === 'tab' ? opensIn : from
+    return send('navigate', { input, profile, search: item.kind === 'search', open: open === 'profile' ? undefined : open })
+  }
+  if (item?.kind === 'tab') send('activate', { id: item.id })
+  else if (item?.kind === 'archived') send('restore', { id: item.id })
+  else if (item?.kind === 'site' || item?.kind === 'visit') send('navigate', { input: item.url, profile: opensIn })
+  else if (item?.kind === 'address') send('navigate', { input: item.input, profile: opensIn })
+  else if (item?.kind === 'search') send('navigate', { input: item.query, profile: opensIn, search: true })
   else if (text.trim()) send('navigate', { input: text, profile: opensIn })
 }
+/** Acts on what the layout made of a key or a click. */
+function suggestOutcome(out: Outcome) {
+  if (out.do === 'moved' && model) layout?.render(suggest, model)
+  else if (out.do === 'pick') pick(out.item, out.open)
+  else if (out.do === 'forget') forgetVisit(out.item)
+  else if (out.do === 'copy') {
+    hideSuggestions()
+    leaveBar()
+    send('copy-link', { url: out.item.url })
+  }
+}
 
-omnibox.addEventListener('focus', () => {
+omnibox.addEventListener('focus', (e) => {
+  // Back from a field in the suggestions: everything stays as it was.
+  if (withinBar(e.relatedTarget)) return
   // Clicking the address bar is how a private address is revealed.
   omnibox.value = activeUrl()
   omnibox.placeholder = 'Search or type a tab name'
@@ -1025,24 +1313,32 @@ omnibox.addEventListener('focus', () => {
   renderProfileBand()
   omnibox.select()
   typed = omnibox.value
+  untouched = true
   completed = null
   mayComplete = false
   visitHits = []
   searchHits = null
+  suggestLayout().reset()
   requestSuggestions()
   showSuggestions()
 })
 omnibox.addEventListener('input', (e) => {
   const ie = e as InputEvent
   typed = omnibox.value
+  untouched = false
   completed = null
   // Only typing at the end completes. Pasting doesn't, and deleting doesn't, or Backspace could
   // never take a completion away.
   mayComplete = ie.inputType === 'insertText' && !ie.isComposing && omnibox.selectionEnd === typed.length
+  suggestLayout().reset()
   requestSuggestions()
   showSuggestions()
 })
-omnibox.addEventListener('blur', () => {
+omnibox.addEventListener('blur', (e) => {
+  if (!withinBar(e.relatedTarget)) closeBar()
+})
+/** The keyboard left the address bar: the suggestions go, and it shows the page's address again. */
+function closeBar() {
   send('suggest-cancel')
   completed = null
   hideSuggestions()
@@ -1051,36 +1347,44 @@ omnibox.addEventListener('blur', () => {
     typedProfile = null
     render()
   } else renderProfileBand()
-})
+}
 omnibox.addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowDown') (e.preventDefault(), moveHighlight(1))
-  else if (e.key === 'ArrowUp') (e.preventDefault(), moveHighlight(-1))
-  else if (e.key === 'Enter') {
+  // Return or Escape while an input method composes picks or drops its candidate, nothing else.
+  if (e.isComposing) return
+  if (e.key === 'Escape') return omnibox.blur()
+  // The layout has the keys first: moving through the suggestions, Return on what's selected.
+  const out = model && !suggest.hidden ? suggestLayout().key(e, model) : { do: 'none' as const }
+  if (out.do !== 'none') {
     e.preventDefault()
-    // With no suggestion chosen by the arrows, Enter takes the first: a completed or typed
-    // address, a matching tab, or the search.
-    pick(current[highlighted])
-  } else if (e.key === 'Escape') omnibox.blur()
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && e.shiftKey && arrowed && current[highlighted]?.kind === 'visit') {
+    return suggestOutcome(out)
+  }
+  if (e.key === 'Enter') {
     e.preventDefault()
-    forgetVisit(current[highlighted])
+    pick(null)
   } else if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey && (S?.profiles.length ?? 0) > 1) {
     e.preventDefault()
     cycleTypedProfile(e.shiftKey ? -1 : 1)
-    // The other profile has its own history, so the suggestions and any completion change too.
-    if (typed) {
-      mayComplete ||= !!completion()
-      requestSuggestions()
-    }
-    if (!suggest.hidden) showSuggestions(true)
   }
 })
-suggest.addEventListener('mousedown', (e) => e.preventDefault())
+// Clicks keep the keyboard in the text, except on a field of the layout's own.
+suggest.addEventListener('mousedown', (e) => {
+  if (!(e.target instanceof HTMLInputElement)) e.preventDefault()
+})
 suggest.addEventListener('click', (e) => {
-  const x = (e.target as HTMLElement).closest<HTMLElement>('[data-forget]')
-  if (x) return forgetVisit(current[Number(x.dataset.forget)])
-  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-sg]')
-  if (el) pick(current[Number(el.dataset.sg)])
+  if (model) suggestOutcome(suggestLayout().click(e.target as HTMLElement, model))
+})
+// A field of the layout's own (preview's search field) passes its keys to the layout as the text does.
+suggest.addEventListener('keydown', (e) => {
+  if (!(e.target instanceof HTMLInputElement)) return
+  if (e.key === 'Escape') return e.target.blur()
+  const out = model ? suggestLayout().key(e, model) : { do: 'none' as const }
+  if (out.do !== 'none') {
+    e.preventDefault()
+    suggestOutcome(out)
+  }
+})
+suggest.addEventListener('focusout', (e) => {
+  if (!withinBar(e.relatedTarget)) closeBar()
 })
 
 // ---------- sidebar interaction ----------
@@ -1090,6 +1394,8 @@ threadsEl.addEventListener('click', (e) => {
   if (el.closest('#ren')) return
   const closeBtn = el.closest<HTMLElement>('[data-close]')
   if (closeBtn) return send('close', { id: closeBtn.dataset.close })
+  const mute = el.closest<HTMLElement>('[data-mute]')
+  if (mute) return toggleMute(mute.dataset.mute!)
   const home = el.closest<HTMLElement>('[data-home]')
   if (home) {
     showSettings(false)
@@ -1100,6 +1406,8 @@ threadsEl.addEventListener('click', (e) => {
   if (el.closest('[data-settings]')) return showSettings(true)
   const folder = el.closest<HTMLElement>('.frow')
   if (folder) return void (!renaming && toggleFolder(folder.dataset.folder!))
+  const appHead = el.closest<HTMLElement>('[data-app-head]')
+  if (appHead) return toggleApp(appHead.dataset.appHead!)
   const r = el.closest<HTMLElement>('.row')
   if (r && !renaming) {
     showSettings(false)
@@ -1122,12 +1430,19 @@ threadsEl.addEventListener('contextmenu', (e) => {
 threadsEl.addEventListener('keydown', (e) => {
   const el = e.target as HTMLElement
   if (el.id === 'ren') {
+    if (e.isComposing) return
     if (e.key === 'Enter') commitRename()
     if (e.key === 'Escape') {
+      // Only the rename ends: the document's Escape would close settings or a popover too.
+      e.stopPropagation()
       renaming = null
       renderThreads()
     }
     return
+  }
+  if ((e.key === 'Enter' || e.key === ' ') && el.dataset.appHead) {
+    e.preventDefault()
+    return toggleApp(el.dataset.appHead)
   }
   if ((e.key === 'Enter' || e.key === ' ') && el.classList.contains('row')) {
     e.preventDefault()
@@ -1141,7 +1456,9 @@ threadsEl.addEventListener('keydown', (e) => {
   if (e.key === 'F2' && el.classList.contains('row') && !el.hasAttribute('data-settings')) startRename(el.dataset.id ?? el.dataset.folder!)
 })
 threadsEl.addEventListener('focusout', (e) => {
-  if ((e.target as HTMLElement).id === 'ren') setTimeout(() => renaming && commitRename(), 0)
+  // A re-render replaces the field, which blurs it too; the new one carries on.
+  const field = e.target as HTMLElement
+  if (field.id === 'ren') setTimeout(() => renaming && field.isConnected && commitRename(), 0)
 })
 
 function startRename(id: string) {
@@ -1156,7 +1473,7 @@ function startRename(id: string) {
  * it would reveal a private address and open the suggestions.
  */
 function focusUi() {
-  if (document.activeElement === omnibox) omnibox.blur()
+  leaveBar()
   send('focus-ui')
 }
 function commitRename() {
@@ -1172,7 +1489,8 @@ function commitRename() {
 
 threadsEl.addEventListener('dragstart', (e) => {
   const r = (e.target as HTMLElement).closest<HTMLElement>('.row')
-  if (!r) return
+  // Text dragged out of the rename field is text, not the row.
+  if (!r || e.target instanceof HTMLInputElement) return
   startDrag(r.dataset.id ?? r.dataset.folder!, !!r.dataset.folder, e)
 })
 
@@ -1180,8 +1498,13 @@ threadsEl.addEventListener('dragstart', (e) => {
 function startDrag(id: string, folder: boolean, e: DragEvent) {
   dragId = id
   dragFolder = folder
-  threadsEl.classList.add('dragging')
-  sidebarEl.classList.add('dragging')
+  // The drop strips for an empty Kept or no pins push the row down when they show. Chromium
+  // cancels a drag whose source moves during dragstart, so they wait until it's under way.
+  setTimeout(() => {
+    if (dragId !== id) return
+    threadsEl.classList.add('dragging')
+    sidebarEl.classList.add('dragging')
+  })
   e.dataTransfer!.effectAllowed = 'move'
   e.dataTransfer!.setData('text/plain', id)
 }
@@ -1290,10 +1613,6 @@ document.addEventListener('mousedown', (e) => {
 
 // ---------- toolbar ----------
 
-$('filter').addEventListener('click', (e) => {
-  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-filter]')
-  if (b) send('filter', { filter: b.dataset.filter })
-})
 $('scope').addEventListener('click', (e) => {
   if ((e.target as HTMLElement).closest('[data-unscope]')) send('unscope')
 })
@@ -1312,9 +1631,109 @@ $('newTab').addEventListener('contextmenu', (e) => {
 $('back').addEventListener('click', () => send('nav', { action: 'back' }))
 $('forward').addEventListener('click', () => send('nav', { action: 'forward' }))
 // ⇧-click reloads past the cache, as in Chrome.
-$('reload').addEventListener('click', (e) => send('nav', S?.nav.loading ? { action: 'stop' } : { action: 'reload', hard: e.shiftKey }))
+$('reload').addEventListener('click', (e) => {
+  if (!S?.nav.loading) flourish($('reload'), 'spin')
+  send('nav', S?.nav.loading ? { action: 'stop' } : { action: 'reload', hard: e.shiftKey })
+})
 $('pin').addEventListener('click', () => send('pin'))
-$('newTab').addEventListener('click', () => send('new'))
+$('newTab').addEventListener('click', () => {
+  flourish($('newTab').querySelector('svg'), 'twirl')
+  send('new')
+})
+
+// ---------- sound ----------
+// A page can play sound from anywhere: a tab in a closed folder, another profile, or the Earlier
+// section. Each tab says so with a speaker, and so does the foot of the sidebar, with a list to go there from.
+
+const heard = (t: UiTab) => !!t.audible && !t.muted
+
+/** The tab of a thread whose speaker shows: one making sound, or else a muted one. */
+const soundOf = (tabs: UiTab[]) => tabs.find(heard) ?? tabs.find((t) => t.muted)
+
+const playingIn = (threads: ThreadView<UiTab>[]) => threads.some((v) => v.all.some(heard))
+const soundMark = `<span class="snd-mark" title="A tab in here is playing sound">${icon('volume')}</span>`
+
+function toggleMute(id: string) {
+  const t = S?.tabs.find((x) => x.id === id)
+  if (t) send('mute', { id, muted: !t.muted })
+}
+
+/**
+ * How long the speaker at the foot of the sidebar stays after a tab goes quiet, so a sound that
+ * just ended can still be clicked through to its tab. Muting one doesn't linger: that's dealt with.
+ */
+const SOUND_LINGER_MS = 10_000
+/** Tabs heard as of the last render, and when the ones that went quiet since did. */
+let heardIds = new Set<string>()
+const quietAt = new Map<string, number>()
+let quietTimer: ReturnType<typeof setTimeout> | undefined
+
+function renderSound() {
+  if (!S) return
+  const now = Date.now()
+  const open = !soundPop.hidden
+  // Kept while the list is open or the pointer is on the speaker, not to take it from under the click.
+  const held = open || $('sound').matches(':hover')
+  for (const t of S.tabs) {
+    if (heard(t) || t.muted) quietAt.delete(t.id)
+    else if (heardIds.has(t.id)) quietAt.set(t.id, now)
+  }
+  heardIds = new Set(S.tabs.filter(heard).map((t) => t.id))
+  const ids = new Set(S.tabs.map((t) => t.id))
+  for (const [id, at] of quietAt) if (!ids.has(id) || (!held && now - at >= SOUND_LINGER_MS)) quietAt.delete(id)
+  clearTimeout(quietTimer)
+  if (quietAt.size && !held) quietTimer = setTimeout(renderSound, Math.min(...quietAt.values()) + SOUND_LINGER_MS - now)
+
+  const playing = S.tabs.filter((t) => t.audible)
+  const quiet = S.tabs.filter((t) => !t.audible && quietAt.has(t.id))
+  const loud = playing.filter(heard)
+  // Muting the last one from the list leaves the list up, to take it back.
+  const shown = loud.length > 0 || quiet.length > 0 || (open && playing.length > 0)
+  $('sound').hidden = !shown
+  if (!shown) return setSoundPop(false)
+  // Nothing heard now: it names what played a moment ago.
+  const past = !loud.length && quiet.length > 0
+  const named = past ? quiet : loud
+  const button = $('soundButton')
+  button.title = named.length === 1 ? `${past ? 'Played' : 'Playing'} sound: ${displayName(named[0])}` : `${named.length || 'No'} tabs ${past ? 'played' : 'playing'} sound`
+  $('soundHead').textContent = past ? 'Played sound' : 'Playing sound'
+  $('soundList').innerHTML = [...playing, ...quiet]
+    .map((t) => {
+      const img = t.favicon ? `<img class="fav" src="${esc(t.favicon)}" alt="">` : `<span class="fav none"></span>`
+      const p = profile(t.profile)
+      return `<div class="sound-item${t.muted ? ' muted' : ''}${t.audible ? '' : ' quiet'}" style="--pc:${esc(p?.color ?? '')}">
+        <button class="pop-item" data-go="${t.id}" title="${esc(isPrivate(t.url) ? displayName(t) : t.url)}">${img}<span class="name">${esc(displayName(t))}</span>${S!.profiles.length > 1 && p ? `<span class="prof">${esc(p.name)}</span>` : ''}</button>
+        <button class="icon sm" data-mute="${t.id}" title="${t.muted ? 'Unmute' : 'Mute'}" aria-label="${t.muted ? 'Unmute' : 'Mute'}">${icon(t.muted ? 'volumeX' : 'volume')}</button>
+      </div>`
+    })
+    .join('')
+}
+
+function setSoundPop(open: boolean) {
+  if (open === !soundPop.hidden) return
+  soundPop.hidden = !open
+  $('soundButton').setAttribute('aria-expanded', String(open))
+  if (open) focusUi()
+  syncOverlay()
+  // Closed with nothing heard, the button goes too.
+  if (!open) renderSound()
+}
+$('soundButton').addEventListener('click', () => setSoundPop(!!soundPop.hidden))
+// A sound that ended while the pointer was on the speaker goes once the pointer does.
+$('sound').addEventListener('mouseleave', () => renderSound())
+soundPop.addEventListener('click', (e) => {
+  const el = e.target as HTMLElement
+  const mute = el.closest<HTMLElement>('[data-mute]')
+  if (mute) return toggleMute(mute.dataset.mute!)
+  const go = el.closest<HTMLElement>('[data-go]')
+  if (!go) return
+  setSoundPop(false)
+  showSettings(false)
+  send('activate', { id: go.dataset.go })
+})
+document.addEventListener('mousedown', (e) => {
+  if (!soundPop.hidden && !(e.target as HTMLElement).closest('.sound')) setSoundPop(false)
+})
 
 // ---------- extensions popover ----------
 
@@ -1339,6 +1758,10 @@ $('addExtension').addEventListener('click', () => {
 $('openStore').addEventListener('click', () => {
   setExtensions(false)
   send('open-store')
+})
+$('manageExtensions').addEventListener('click', () => {
+  setExtensions(false)
+  setSettings(true, 'extensions')
 })
 document.addEventListener('mousedown', (e) => {
   if (!extPop.hidden && !(e.target as HTMLElement).closest('.ext')) setExtensions(false)
@@ -1456,7 +1879,7 @@ function renderDownloadPop() {
 
 function setDownload(id: string | null) {
   if (id === dlOpen) return
-  // Looking at a finished download is what takes it off the toolbar.
+  // Looking at a finished download is what takes it off the sidebar.
   const prev = downloads.find((d) => d.id === dlOpen)
   if (prev && finished(prev)) send('download', { id: prev.id, action: 'dismiss' })
   dlOpen = id
@@ -1497,6 +1920,9 @@ function renderRestyle() {
   if (!S) return
   const r = S.restyle
   const button = $<HTMLButtonElement>('restyleButton')
+  // Only while restyling is on and the agent it uses is installed.
+  button.hidden = !S.prefs.restyleEnabled || !S.restyleAgents[S.prefs.restyleAgent]
+  if (button.hidden) return setRestyle(false)
   button.disabled = !r
   button.classList.toggle('styled', !!r && r.enabled && r.changes.length > 0)
   button.classList.toggle('busy', !!r?.running)
@@ -1509,8 +1935,8 @@ function renderRestyle() {
   $('restyleRunning').hidden = !r.running
   clearInterval(restyleTimer)
   if (r.running) {
-    const { startedAt, prompt, agent } = r.running
-    const tick = () => ($('restyleRunText').textContent = `${agent} is working on “${prompt}” · ${Math.round((Date.now() - startedAt) / 1000)} s`)
+    const { startedAt, agent, doing } = r.running
+    const tick = () => ($('restyleRunText').textContent = `${agent} is ${doing} · ${Math.round((Date.now() - startedAt) / 1000)} s`)
     tick()
     restyleTimer = window.setInterval(tick, 1000)
   }
@@ -1532,7 +1958,7 @@ function renderRestyle() {
 
 function setRestyle(open: boolean) {
   if (open === !restylePane.hidden) return
-  if (open && !S?.restyle) return
+  if (open && (!S?.restyle || $('restyleButton').hidden)) return
   restylePane.hidden = !open
   $('sidebar').classList.toggle('restyling', open)
   $('restyleButton').setAttribute('aria-expanded', String(open))
@@ -1581,6 +2007,8 @@ const pinWindow = $<HTMLInputElement>('pinWindow')
 const pipOnlySites = $<HTMLTextAreaElement>('pipOnlySites')
 const pipExceptSites = $<HTMLTextAreaElement>('pipExceptSites')
 const quietLinks = $<HTMLInputElement>('quietLinks')
+const whimsy = $<HTMLInputElement>('whimsy')
+const autoUpdate = $<HTMLInputElement>('autoUpdate')
 const keepLoadedPinned = $<HTMLInputElement>('keepLoadedPinned')
 const keepLoadedKept = $<HTMLInputElement>('keepLoadedKept')
 const dangerousSites = $<HTMLInputElement>('dangerousSites')
@@ -1591,13 +2019,14 @@ const settingsSearch = $<HTMLInputElement>('settingsSearch')
 const shortcutSearch = $<HTMLInputElement>('shortcutSearch')
 const SECTION_NAMES: Record<string, string> = {
   general: 'General',
+  addressBar: 'Address bar',
   appearance: 'Appearance',
-  profiles: 'Profiles',
   threads: 'Tabs',
   archived: 'Archived',
+  profiles: 'Profiles',
   apps: 'Apps',
+  extensions: 'Extensions',
   miniPlayer: 'Mini player',
-  animation: 'Animation',
   restyling: 'Restyling',
   privacy: 'Privacy',
   shortcuts: 'Shortcuts',
@@ -1616,6 +2045,8 @@ function setSettings(open: boolean, to?: string) {
 function showSettings(show: boolean) {
   if (show === !settingsEl.hidden || (show && !settingsTab)) return
   settingsEl.hidden = !show
+  root.classList.toggle('settings-open', show)
+  if (!show) setEmojiPop(null)
   $('settingsButton').setAttribute('aria-pressed', String(show))
   // So your key for closing a tab closes settings while it's the one showing.
   send('settings-shown', { on: show })
@@ -1627,8 +2058,12 @@ function showSettings(show: boolean) {
     settingsEl.focus()
     renderSettings(true)
     send('shortcuts')
+    send('extensions')
     send('apps')
     send('default-browser')
+    send('updates')
+    // You may have installed or removed claude or codex since jbrow looked.
+    send('restyle-check')
   } else {
     stopRecording()
     savePrivateUrls()
@@ -1650,7 +2085,7 @@ function showSection(id: string) {
 const matches = (el: Element, q: string) => `${el.textContent} ${(el as HTMLElement).dataset.keywords ?? ''}`.toLowerCase().includes(q)
 
 /**
- * Hides what doesn't match a query. Shortcut lists match row by row, keeping the extension and
+ * Hides what doesn't match a query. Shortcut and extension lists match row by row, keeping the extension and
  * profile names above any row that's left; the rest match a whole block at a time.
  */
 function filterItem(item: HTMLElement, q: string): boolean {
@@ -1732,11 +2167,31 @@ function renderSettings(all = false) {
   seg('appearance', S.prefs.appearance)
   seg('themes', S.prefs.theme)
   seg('profileStyle', S.prefs.profileStyle)
+  seg('profileSwitcher', S.prefs.profileSwitcher)
   seg('animStyle', animation.style)
   seg('animEase', animation.ease)
   seg('summarizeAfter', String(S.prefs.summarizeAfterDays))
   seg('archiveAfter', String(S.prefs.archiveAfterDays))
   seg('earlierAfter', String(S.prefs.earlierAfterHours))
+  seg('numberFrom', S.prefs.numberFrom)
+  seg('newTabsAt', S.prefs.newTabsAt)
+  const found = S.restyleAgents
+  const any = found.claude || found.codex
+  restyleEnabled.checked = S.prefs.restyleEnabled
+  // Can't be turned on without claude or codex, but can always be turned off.
+  restyleEnabled.disabled = !S.prefs.restyleEnabled && !any
+  $('restyleFound').textContent =
+    found.claude === null || found.codex === null
+      ? 'Looking for Claude Code and Codex…'
+      : !any
+        ? 'Install Claude Code (the claude command) or Codex (the codex command) and sign in to turn this on.'
+        : `Found ${[found.claude && 'Claude Code', found.codex && 'Codex'].filter(Boolean).join(' and ')}.`
+  $('restyleOptions').hidden = !S.prefs.restyleEnabled
+  $('restyleAgent').querySelectorAll<HTMLButtonElement>('[data-value]').forEach((b) => {
+    const there = found[b.dataset.value as Prefs['restyleAgent']] !== false
+    b.disabled = !there
+    b.title = there ? '' : 'Not installed'
+  })
   seg('restyleAgent', S.prefs.restyleAgent)
   seg('restyleModel', S.prefs.restyleModel)
   const codex = S.prefs.restyleAgent === 'codex'
@@ -1749,6 +2204,7 @@ function renderSettings(all = false) {
   renderZoomSites()
   renderArchived()
   renderProfiles()
+  renderProfileSites()
   if (all || document.activeElement !== animSpeed) animSpeed.value = String(animation.durationMs)
   $('animSpeedOut').textContent = `${animSpeed.value} ms`
   for (const id of ['animSpeed', 'animEase', 'animPreview']) $(id).closest('.field')!.classList.toggle('off', animation.style === 'off')
@@ -1783,9 +2239,12 @@ function renderSettings(all = false) {
   if (all || document.activeElement !== pipExceptSites) pipExceptSites.value = mp.exceptSites.join('\n')
   pinWindow.checked = S.pinned
   quietLinks.checked = S.prefs.quietLinks
+  whimsy.checked = S.prefs.whimsy
+  autoUpdate.checked = S.prefs.autoUpdate
   keepLoadedPinned.checked = S.prefs.keepLoaded.pinned
   keepLoadedKept.checked = S.prefs.keepLoaded.kept
   renderSearchEngine(all)
+  renderUrlBarStyle()
   $('showHotkey').textContent = keyLabel('show') || 'its hotkey'
   $('appHotkey').textContent = keyLabel('showApp') || 'The app hotkey'
   renderActionKeys()
@@ -1861,6 +2320,10 @@ $('themes').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ theme: b.dataset.value as Prefs['theme'] })
 })
+$('profileSwitcher').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b) sendPrefs({ profileSwitcher: b.dataset.value as Prefs['profileSwitcher'] })
+})
 $('profileStyle').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ profileStyle: b.dataset.value as Prefs['profileStyle'] })
@@ -1869,10 +2332,20 @@ $('appearance').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ appearance: b.dataset.value as Prefs['appearance'] })
 })
+$('numberFrom').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b) sendPrefs({ numberFrom: b.dataset.value as Prefs['numberFrom'] })
+})
+$('newTabsAt').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b) sendPrefs({ newTabsAt: b.dataset.value as Prefs['newTabsAt'] })
+})
 $('earlierAfter').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ earlierAfterHours: Number(b.dataset.value) })
 })
+const restyleEnabled = $<HTMLInputElement>('restyleEnabled')
+restyleEnabled.addEventListener('change', () => sendPrefs({ restyleEnabled: restyleEnabled.checked }))
 $('restyleAgent').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) sendPrefs({ restyleAgent: b.dataset.value as Prefs['restyleAgent'] })
@@ -2259,7 +2732,14 @@ $('dismissNotice').addEventListener('click', () => send('dismiss-archive-notice'
 hideCapture.addEventListener('change', () => sendPrefs({ hideFromScreenCapture: hideCapture.checked }))
 pinWindow.addEventListener('change', () => send('pin', { on: pinWindow.checked }))
 $('resetWindow').addEventListener('click', () => send('window-reset'))
+$('showWelcome').addEventListener('click', () => welcome.open(false))
 quietLinks.addEventListener('change', () => sendPrefs({ quietLinks: quietLinks.checked }))
+// Turning it on shows what it's like straight away.
+whimsy.addEventListener('change', () => {
+  setWhimsy(whimsy.checked)
+  sendPrefs({ whimsy: whimsy.checked })
+})
+autoUpdate.addEventListener('change', () => sendPrefs({ autoUpdate: autoUpdate.checked }))
 keepLoadedPinned.addEventListener('change', () => sendPrefs({ keepLoaded: { ...S!.prefs.keepLoaded, pinned: keepLoadedPinned.checked } }))
 keepLoadedKept.addEventListener('change', () => sendPrefs({ keepLoaded: { ...S!.prefs.keepLoaded, kept: keepLoadedKept.checked } }))
 dangerousSites.addEventListener('change', () => sendPrefs({ dangerousSites: dangerousSites.checked }))
@@ -2326,6 +2806,22 @@ searchCustom.addEventListener('change', () => {
   sendPrefs({ searchUrl: url })
 })
 searchSuggestionsBox.addEventListener('change', () => sendPrefs({ searchSuggestions: searchSuggestionsBox.checked }))
+
+/** The address bar's layouts as pictures to pick from. */
+function renderUrlBarStyle() {
+  if (!S) return
+  const html = URL_BAR_LAYOUTS.map(
+    (l) => `<button class="layout-pick" data-value="${l.id}" aria-pressed="${l.id === S!.prefs.urlBarStyle}">
+      <span class="art">${layoutPictureHtml(l.id)}</span>
+      <span class="t">${esc(l.name)}</span><span class="d">${esc(l.about)}</span>
+    </button>`,
+  ).join('')
+  if ($('urlBarStyle').innerHTML !== html) $('urlBarStyle').innerHTML = html
+}
+$('urlBarStyle').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (b) sendPrefs({ urlBarStyle: b.dataset.value as UrlBarStyle })
+})
 $('openSettingsFile').addEventListener('click', () => send('open-settings-file'))
 $('settingsButton').addEventListener('click', () => setSettings(!!settingsEl.hidden))
 $('closeSettings').addEventListener('click', () => setSettings(false))
@@ -2345,12 +2841,15 @@ function renderProfiles() {
     profileListEl.innerHTML = S.profiles
       .map(
         (p) => `<div class="profile-row" data-profile="${esc(p.id)}">
+          <span class="grip" title="Drag to reorder" aria-hidden="true">${icon('grip')}</span>
           <label class="swatch" title="Color"><input type="color" aria-label="Color of ${esc(p.name)}"></label>
+          <button class="emoji" aria-haspopup="dialog" aria-expanded="false" title="Icon, shown in the profile switcher in place of the dot" aria-label="Icon of ${esc(p.name)}"></button>
           <input class="name" spellcheck="false" aria-label="Name">
           <em></em>
         </div>`,
       )
       .join('')
+    if (emojiFor) setEmojiPop(S.profiles.some((p) => p.id === emojiFor) ? emojiFor : null)
   }
   for (const p of S.profiles) {
     const row = profileListEl.querySelector<HTMLElement>(`[data-profile="${CSS.escape(p.id)}"]`)!
@@ -2358,6 +2857,10 @@ function renderProfiles() {
     const color = row.querySelector<HTMLInputElement>('input[type=color]')!
     if (document.activeElement !== name) name.value = p.name
     if (document.activeElement !== color) color.value = p.color
+    const emoji = row.querySelector<HTMLElement>('.emoji')!
+    emoji.innerHTML = p.icon ? esc(p.icon) : icon('plus')
+    emoji.classList.toggle('set', !!p.icon)
+    emoji.setAttribute('aria-expanded', String(emojiFor === p.id))
     row.querySelector<HTMLElement>('.swatch')!.style.background = color.value
     const n = counts.get(p.id) ?? 0
     const notes = [n ? `${n} ${n === 1 ? 'tab' : 'tabs'}` : 'no tabs', p.id === S.prefs.defaultProfile ? 'default' : '']
@@ -2369,6 +2872,45 @@ function renderProfiles() {
     }
   }
 }
+
+const profileSitesEl = $('profileSites')
+function renderProfileSites() {
+  if (!S) return
+  const boxes = [...profileSitesEl.querySelectorAll<HTMLTextAreaElement>('textarea')]
+  if (boxes.map((b) => b.dataset.profile).join() !== S.profiles.map((p) => p.id).join()) {
+    profileSitesEl.innerHTML = S.profiles
+      .map(
+        (p) => `<div>
+          <label for="sites-${esc(p.id)}"><span class="swatch-dot"></span><span class="name"></span></label>
+          <textarea id="sites-${esc(p.id)}" data-profile="${esc(p.id)}" rows="3" spellcheck="false" placeholder="youtube.com&#10;*.corp.example"></textarea>
+        </div>`,
+      )
+      .join('')
+  }
+  for (const p of S.profiles) {
+    const box = profileSitesEl.querySelector<HTMLTextAreaElement>(`textarea[data-profile="${CSS.escape(p.id)}"]`)!
+    const label = box.previousElementSibling!
+    label.querySelector<HTMLElement>('.swatch-dot')!.style.background = p.color
+    label.querySelector('.name')!.textContent = p.name
+    if (document.activeElement !== box) box.value = (S.prefs.profileSites[p.id] ?? []).join('\n')
+  }
+}
+let sitesTimer: number | undefined
+function saveProfileSites() {
+  clearTimeout(sitesTimer)
+  if (!S) return
+  const sites: Record<string, string[]> = {}
+  for (const box of profileSitesEl.querySelectorAll<HTMLTextAreaElement>('textarea')) {
+    const list = box.value.split('\n').map((l) => l.trim()).filter(Boolean)
+    if (list.length) sites[box.dataset.profile!] = list
+  }
+  if (JSON.stringify(sites) !== JSON.stringify(S.prefs.profileSites)) sendPrefs({ profileSites: sites })
+}
+profileSitesEl.addEventListener('input', () => {
+  clearTimeout(sitesTimer)
+  sitesTimer = window.setTimeout(saveProfileSites, 400)
+})
+profileSitesEl.addEventListener('focusout', saveProfileSites)
 
 const profileOf = (el: EventTarget | null) => (el as HTMLElement | null)?.closest<HTMLElement>('[data-profile]')?.dataset.profile
 function saveProfileName(input: HTMLInputElement) {
@@ -2391,13 +2933,17 @@ profileListEl.addEventListener('input', (e) => {
 })
 profileListEl.addEventListener('keydown', (e) => {
   const input = e.target as HTMLInputElement
-  if (!input.classList.contains('name')) return
+  if (!input.classList.contains('name') || e.isComposing) return
   if (e.key === 'Enter') input.blur()
   else if (e.key === 'Escape') {
     e.stopPropagation()
     input.value = S?.profiles.find((p) => p.id === profileOf(input))?.name ?? input.value
     input.blur()
   }
+})
+profileListEl.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('.emoji')
+  if (b) setEmojiPop(emojiFor === profileOf(b) ? null : profileOf(b)!)
 })
 profileListEl.addEventListener('contextmenu', (e) => {
   const id = profileOf(e.target)
@@ -2406,6 +2952,133 @@ profileListEl.addEventListener('contextmenu', (e) => {
   send('profile-menu', { id })
 })
 $('addProfile').addEventListener('click', () => send('add-profile'))
+
+// Dragged by the grip, so dragging in a name still selects its text.
+let dragProfile: string | null = null
+const clearProfileDrop = () => profileListEl.querySelectorAll('.ins-before, .ins-after').forEach((x) => x.classList.remove('ins-before', 'ins-after'))
+profileListEl.addEventListener('pointerdown', (e) => {
+  const row = (e.target as HTMLElement).closest<HTMLElement>('.profile-row')
+  if (row) row.draggable = !!(e.target as HTMLElement).closest('.grip')
+})
+profileListEl.addEventListener('dragstart', (e) => {
+  // Text dragged out of a name field is text, not the profile.
+  dragProfile = e.target instanceof HTMLInputElement ? null : (profileOf(e.target) ?? null)
+  if (!dragProfile) return
+  e.dataTransfer!.effectAllowed = 'move'
+  e.dataTransfer!.setData('text/plain', dragProfile)
+  profileListEl.classList.add('dragging')
+})
+/** The row a dragged profile would land beside, and whether below it, by which half it's over. */
+function profileDrop(e: DragEvent): { row: HTMLElement; after: boolean } | null {
+  const row = (e.target as HTMLElement).closest<HTMLElement>('.profile-row')
+  if (!dragProfile || !row) return null
+  const box = row.getBoundingClientRect()
+  return { row, after: e.clientY > box.top + box.height / 2 }
+}
+profileListEl.addEventListener('dragover', (e) => {
+  const at = profileDrop(e)
+  if (!at) return
+  e.preventDefault()
+  // Beside the dragged row itself, nothing would move.
+  const rows = [...profileListEl.querySelectorAll<HTMLElement>('.profile-row')]
+  const to = rows.indexOf(at.row) + (at.after ? 1 : 0)
+  const from = rows.findIndex((r) => r.dataset.profile === dragProfile)
+  clearProfileDrop()
+  if (to !== from && to !== from + 1) at.row.classList.add(at.after ? 'ins-after' : 'ins-before')
+})
+profileListEl.addEventListener('drop', (e) => {
+  const at = profileDrop(e)
+  if (!at) return
+  e.preventDefault()
+  if (at.row.dataset.profile !== dragProfile) send('move-profile', { id: dragProfile, target: at.row.dataset.profile, after: at.after })
+})
+profileListEl.addEventListener('dragend', () => {
+  dragProfile = null
+  clearProfileDrop()
+  profileListEl.classList.remove('dragging')
+  for (const r of profileListEl.querySelectorAll<HTMLElement>('.profile-row')) r.draggable = false
+})
+
+// ---------- profile icon picker ----------
+
+const emojiPop = $('emojiPop')
+const emojiSearch = $<HTMLInputElement>('emojiSearch')
+const emojiGrid = $('emojiGrid')
+/** The profile the icon picker is open for. */
+let emojiFor: string | null = null
+
+/** What's typed, cut to what an icon can hold: one emoji, or two letters. */
+const typedIcon = (text: string) => [...new Intl.Segmenter().segment(text.trim())].slice(0, 2).map((s) => s.segment).join('')
+const hasEmoji = (text: string) => /\p{Extended_Pictographic}/u.test(text)
+
+function setEmojiPop(id: string | null) {
+  emojiFor = id && S?.profiles.some((p) => p.id === id) ? id : null
+  emojiPop.hidden = !emojiFor
+  for (const b of profileListEl.querySelectorAll('.emoji')) b.setAttribute('aria-expanded', String(profileOf(b) === emojiFor))
+  if (!emojiFor) return
+  // Hung under the profile's box, inside the settings item so it scrolls with it.
+  const b = profileListEl.querySelector<HTMLElement>(`[data-profile="${CSS.escape(emojiFor)}"] .emoji`)!.getBoundingClientRect()
+  const item = emojiPop.parentElement!.getBoundingClientRect()
+  emojiPop.style.top = `${b.bottom - item.top + 4}px`
+  emojiPop.style.left = `${b.left - item.left - 6}px`
+  emojiSearch.value = ''
+  renderEmojiGrid()
+  emojiSearch.focus()
+}
+
+/**
+ * Every emoji, or the ones whose words start with what's typed. What's typed is offered too, as
+ * the icon itself, when it's short enough to be one; Enter picks the first match, else that.
+ */
+function renderEmojiGrid() {
+  const q = emojiSearch.value.trim().toLowerCase()
+  const terms = q.split(/\s+/).filter(Boolean)
+  const cur = S?.profiles.find((p) => p.id === emojiFor)?.icon
+  const cell = (emoji: string, cls = '') =>
+    `<button class="${cls}" data-emoji="${esc(emoji)}" aria-pressed="${emoji === cur}" title="${esc(emoji)}">${esc(emoji)}</button>`
+  const typed = typedIcon(emojiSearch.value)
+  const offerTyped = !!typed && typed === emojiSearch.value.trim()
+  const groups = EMOJI_GROUPS.map((g) => ({
+    name: g.name,
+    items: g.items.map(splitEmoji).filter(({ words }) => terms.every((t) => words.split(' ').some((w) => w.startsWith(t)))),
+  })).filter((g) => g.items.length)
+  const html = groups.map((g) => `${q ? '' : `<h4>${esc(g.name)}</h4>`}<div class="emoji-row">${g.items.map((i) => cell(i.emoji)).join('')}</div>`)
+  if (q && html.length) html.splice(0, html.length, `<div class="emoji-row">${groups.flatMap((g) => g.items.map((i) => cell(i.emoji))).join('')}</div>`)
+  if (offerTyped) html.unshift(`<h4>Use what's typed</h4><div class="emoji-row">${cell(typed, 'typed')}</div>${html.length ? '<h4>Matches</h4>' : ''}`)
+  emojiGrid.innerHTML = html.join('') || '<p class="pop-empty">No emoji found. Try More emoji…</p>'
+  const first = (q && emojiGrid.querySelector('[data-emoji]:not(.typed)')) || emojiGrid.querySelector('.typed')
+  first?.classList.add('on')
+  emojiGrid.scrollTop = 0
+}
+
+function pickEmoji(value: string) {
+  if (emojiFor) send('profile', { id: emojiFor, icon: value })
+  setEmojiPop(null)
+}
+
+emojiSearch.addEventListener('input', () => {
+  // An emoji from the system's picker, or pasted, is the choice itself.
+  if (hasEmoji(emojiSearch.value)) return pickEmoji(typedIcon(emojiSearch.value))
+  renderEmojiGrid()
+})
+emojiSearch.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.isComposing) return
+  const b = emojiGrid.querySelector<HTMLElement>('.on')
+  if (b) pickEmoji(b.dataset.emoji!)
+})
+emojiGrid.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-emoji]')
+  if (b) pickEmoji(b.dataset.emoji!)
+})
+$('emojiNone').addEventListener('click', () => pickEmoji(''))
+$('emojiMore').addEventListener('click', () => {
+  // The system's picker types into the search, which picks what it types.
+  emojiSearch.focus()
+  send('emoji-panel')
+})
+document.addEventListener('mousedown', (e) => {
+  if (emojiFor && !(e.target as HTMLElement).closest('#emojiPop, .profile-row .emoji')) setEmojiPop(null)
+})
 window.jbrow.on('rename-profile', (id: string) => {
   renameProfile = id
   setSettings(true, 'profiles')
@@ -2422,6 +3095,31 @@ window.jbrow.on('default-browser', (status: 'yes' | 'no' | 'dev') => {
   $('makeDefault').hidden = status !== 'no'
 })
 $('makeDefault').addEventListener('click', () => send('make-default-browser'))
+
+// ---------- updates ----------
+
+let updateReady = false
+window.jbrow.on('updates', (u: UpdateView) => {
+  const checked = u.checkedAt ? ` Checked ${since(u.checkedAt)}.` : ''
+  const status: Record<UpdateView['state'], string> = {
+    source: `This is jbrow ${u.version} running from source, which doesn't update itself. Pull and run it again.`,
+    local: `This is jbrow ${u.version}, built on this Mac, which doesn't update itself: it would replace your build with the release. Releases from GitHub do.`,
+    idle: `This is jbrow ${u.version}.`,
+    checking: `This is jbrow ${u.version}. Checking for a newer one…`,
+    downloading: `Downloading jbrow ${u.newVersion}… ${u.percent}%`,
+    ready: `jbrow ${u.newVersion} is ready. It installs when you quit, or restart now.`,
+    latest: `jbrow ${u.version} is the latest.${checked}`,
+    error: `This is jbrow ${u.version}. The check failed: ${u.error}`,
+  }
+  $('updateStatus').textContent = status[u.state]
+  const button = $<HTMLButtonElement>('updateButton')
+  updateReady = u.state === 'ready'
+  button.hidden = u.state === 'source' || u.state === 'local' || u.state === 'downloading'
+  button.disabled = u.state === 'checking'
+  button.textContent = updateReady ? 'Restart to update' : 'Check now'
+  autoUpdate.disabled = u.state === 'source' || u.state === 'local'
+})
+$('updateButton').addEventListener('click', () => send(updateReady ? 'install-update' : 'check-updates'))
 
 // ---------- apps ----------
 
@@ -2471,6 +3169,47 @@ appListEl.addEventListener('contextmenu', (e) => {
   send('app-menu', { key: r.dataset.app })
 })
 $('addApp').addEventListener('click', () => send('add-app'))
+
+// ---------- extensions ----------
+
+const extListEl = $('extList')
+let extList: { profiles: Profile[]; extensions: ExtensionView[] } = { profiles: [], extensions: [] }
+
+function renderExtensionList() {
+  const { profiles, extensions } = extList
+  const used = profiles.filter((p) => extensions.some((x) => x.profile === p.id))
+  if (!used.length) {
+    extListEl.innerHTML = `<p class="help">No extensions yet. Add them from the Chrome Web Store.</p>`
+    return applySearch()
+  }
+  let html = ''
+  for (const p of used) {
+    if (used.length > 1) html += `<div class="ext-profile sc-profile"><span class="dot" style="background:${esc(p.color)}"></span>${esc(p.name)}</div>`
+    for (const x of extensions.filter((x) => x.profile === p.id)) {
+      const img = x.icon ? `<img src="${esc(x.icon)}" alt="">` : `<span class="no-icon">${esc(x.name.slice(0, 1))}</span>`
+      const meta = [x.version, x.unpacked ? 'from a folder' : ''].filter(Boolean).join(' · ')
+      html += `<div class="ext-row sc-row${x.enabled ? '' : ' off'}" data-ext="${esc(x.id)}" data-ext-profile="${esc(p.id)}" data-keywords="${esc(`${x.name} ${p.name}`)}">
+        <span class="ext-icon">${img}</span>
+        <span class="ext-name" title="${esc(x.description)}">${esc(x.name)}<small>${esc(meta)}</small></span>
+        <span class="ext-acts"><button class="icon sm" data-ext-remove title="Remove" aria-label="Remove ${esc(x.name)}">${icon('trash')}</button></span>
+        <input type="checkbox" data-ext-on ${x.enabled ? 'checked' : ''} title="${x.enabled ? 'Turn off' : 'Turn on'}" aria-label="${esc(x.name)} on">
+      </div>`
+    }
+  }
+  extListEl.innerHTML = html
+  applySearch()
+}
+
+extListEl.addEventListener('change', (e) => {
+  const box = (e.target as HTMLElement).closest<HTMLInputElement>('[data-ext-on]')
+  const r = box?.closest<HTMLElement>('[data-ext]')
+  if (box && r) send('extension-enabled', { profile: r.dataset.extProfile, id: r.dataset.ext, on: box.checked })
+})
+extListEl.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-ext-remove]')
+  const r = b?.closest<HTMLElement>('[data-ext]')
+  if (r) send('remove-extension', { profile: r.dataset.extProfile, id: r.dataset.ext })
+})
 
 // ---------- shortcuts ----------
 
@@ -2589,9 +3328,13 @@ document.addEventListener('keydown', (e) => {
     search.value = ''
     if (search === archSearch) searchArchived()
     else applySearch()
-  } else if (!rulesPop.hidden) closeRules()
+  } else if (emojiFor) setEmojiPop(null)
+  else if (!rulesPop.hidden) closeRules()
   else if (!devicePop.hidden) answerDevice(null)
+  else if (!profilePop.hidden) setProfilePop(false)
+  else if (!filterPop.hidden) setFilterPop(false)
   else if (!certPop.hidden) setCert(false)
+  else if (!soundPop.hidden) setSoundPop(false)
   else if (!restylePane.hidden) setRestyle(false)
   else if (!extPop.hidden) setExtensions(false)
   else if (dlOpen) setDownload(null)
@@ -2602,6 +3345,7 @@ document.addEventListener('keydown', (e) => {
 // ---------- find in page ----------
 
 const findBar = $('find')
+const omniEl = findBar.closest<HTMLElement>('.omni')!
 const findInput = $<HTMLInputElement>('findInput')
 const findCount = $('findCount')
 
@@ -2619,6 +3363,7 @@ function showFindCount(matches: number, active: number) {
 function openFind() {
   const reopen = findBar.hidden
   findBar.hidden = false
+  omniEl.classList.add('finding')
   focusUi()
   findInput.focus()
   findInput.select()
@@ -2629,6 +3374,7 @@ function openFind() {
 function closeFind(focusPage = true) {
   if (findBar.hidden) return
   findBar.hidden = true
+  omniEl.classList.remove('finding')
   findCount.textContent = ''
   findBar.classList.remove('none')
   send('find-stop')
@@ -2997,22 +3743,29 @@ window.jbrow.on('state', (state: UiState) => {
   if (S && S.activeId !== state.activeId) showSettings(false)
   // The find bar searches the page it opened on, so it goes when another tab comes up.
   if (S && S.activeId !== state.activeId) closeFind(false)
+  if (S && !S.pinned && state.pinned) flourish($('pin').querySelector('svg'), 'wiggle')
+  setWhimsy(state.prefs.whimsy)
   S = state
   document.documentElement.dataset.theme = state.prefs.theme
   document.documentElement.dataset.profileStyle = state.prefs.profileStyle
   render()
+  // Another layout picked in settings takes over the open suggestions right away.
+  if (!suggest.hidden && state.prefs.urlBarStyle !== layoutId) showSuggestions()
 })
 window.jbrow.on('suggestions', (r: SuggestReply) => {
-  if (r.seq !== suggestSeq || document.activeElement !== omnibox) return
+  if (r.seq !== suggestSeq || !editing()) return
   visitHits = r.visits
   // Only while the text is still what was typed (or what was typed plus the last completion).
   if (mayComplete && (omnibox.value === typed || completion())) applyCompletion(r.completion)
-  showSuggestions(true)
+  showSuggestions()
 })
 window.jbrow.on('search-suggestions', (r: SearchReply) => {
-  if (r.seq !== suggestSeq || document.activeElement !== omnibox) return
+  if (r.seq !== suggestSeq || !editing()) return
   searchHits = r
-  showSuggestions(true)
+  showSuggestions()
+})
+window.jbrow.on('site-info', (r: SiteInfoReply) => {
+  if (layout?.siteInfo?.(r) && model && !suggest.hidden) layout.render(suggest, model)
 })
 window.jbrow.on('focus-omnibox', () => {
   omnibox.focus()
@@ -3026,8 +3779,29 @@ function showToast(text: string) {
   toastTimer = window.setTimeout(() => (el.hidden = true), 5000)
 }
 window.jbrow.on('toast', showToast)
+let copiedTimer: number | undefined
+window.jbrow.on('url-copied', () => {
+  const el = $('copied')
+  const omni = el.closest('.omni')!
+  clearTimeout(copiedTimer)
+  // Shown again from the start, so copying twice in a row still pops.
+  el.hidden = true
+  el.classList.remove('out')
+  void el.offsetWidth
+  el.hidden = false
+  omni.classList.add('copied-flash')
+  copiedTimer = window.setTimeout(() => {
+    el.classList.add('out')
+    omni.classList.remove('copied-flash')
+    copiedTimer = window.setTimeout(() => (el.hidden = true), 250)
+  }, 1200)
+})
 window.jbrow.on('settings', ({ open, section }: { open?: boolean; section?: string }) => setSettings(open ?? !!settingsEl.hidden, section))
 window.jbrow.on('rename-tab', (id: string) => startRename(id))
+window.jbrow.on('extensions', (data: typeof extList) => {
+  extList = data
+  renderExtensionList()
+})
 window.jbrow.on('shortcuts', (data: typeof shortcuts) => {
   shortcuts = data
   renderShortcuts()
@@ -3047,6 +3821,7 @@ window.jbrow.on('folder-rules', (id: string) => openRules(id))
 window.jbrow.on('downloads', (list: DownloadInfo[]) => {
   downloads = list
   renderDownloads()
+  downloadsChanged(list, (id) => dlList.querySelector(`[data-dl="${CSS.escape(id)}"]`))
 })
 
 let playRun = 0
@@ -3084,6 +3859,9 @@ window.jbrow.on('anim', (m: AnimMessage) => {
   root.style.setProperty('--dur', `${m.durationMs}ms`)
   root.style.setProperty('--ease', 'cubic-bezier(.4,0,1,1)')
   root.classList.remove('shown')
+  // Left focused, the address bar would take focus again when the window does on the next show,
+  // revealing a private address and opening the suggestions.
+  omnibox.blur()
   hideSuggestions()
   setExtensions(false)
   setDownload(null)

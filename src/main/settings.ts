@@ -2,12 +2,15 @@ import { app, type Rectangle } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ActionId } from '../shared/shortcuts'
-import { THEMES, type Appearance, type KeepLoaded, type MiniPlayerPrefs, type Profile, type ProfileStyle, type RestyleAgent, type ThemeId } from '../shared/types'
+import { THEMES, URL_BAR_STYLES, type UrlBarStyle, type Appearance, type KeepLoaded, type MiniPlayerPrefs, type NewTabsAt, type NumberFrom, type Profile, type ProfileStyle, type ProfileSwitcher, type RestyleAgent, type ThemeId } from '../shared/types'
+import { setAside, writeAtomic } from './json-file'
 
 export type AnimationStyle = 'materialize' | 'slide' | 'scale' | 'fade' | 'off'
 export type AnimationEase = 'spring' | 'snappy' | 'smooth'
 
 export interface RestyleSettings {
+  /** Restyling is on: the wand shows and sites' stylesheets apply. Only turned on with claude or codex installed. */
+  enabled: boolean
   /** Which coding agent writes the stylesheets. */
   agent: RestyleAgent
   /** Claude model alias. */
@@ -26,6 +29,8 @@ export interface Settings {
   theme: ThemeId
   /** How the address bar shows the tab's profile. */
   profileStyle: ProfileStyle
+  /** How the profile switcher above the tabs shows the profiles. */
+  profileSwitcher: ProfileSwitcher
   /** Your keys for jbrow's own commands, as Electron accelerators, '' for none. Unlisted commands use their defaults (see ACTIONS). */
   shortcuts: Partial<Record<ActionId, string>>
   profiles: Profile[]
@@ -33,15 +38,23 @@ export interface Settings {
   defaultProfile: string
   /** Default profile per app, keyed by bundle ID. Used for links from and new tabs in that app's view. */
   appProfiles: Record<string, string>
+  /** Sites per profile ID that always open in that profile, whatever app, tab or profile the link comes from. See siteProfile. */
+  profileSites: Record<string, string[]>
   /** Groups of bundle IDs that share one set of tabs for the app hotkey. An app belongs to at most one group. */
   linkedApps: string[][]
   animation: { style: AnimationStyle; durationMs: number; ease: AnimationEase }
-  /** %s is replaced by the encoded query. Pick one under General in settings, or any address with %s. */
+  /** Playful animations in jbrow's own UI: tabs popping in and puffing away, pages sliding in as you switch tabs. */
+  whimsy: boolean
+  /** %s is replaced by the encoded query. Pick one under Address bar in settings, or any address with %s. */
   searchUrl: string
   /** Ask the search engine for suggestions as you type in the address bar. Never for addresses or private ones. */
   searchSuggestions: boolean
+  /** How the address bar lays out its suggestions. */
+  urlBarStyle: UrlBarStyle
   /** Unpacked extension folders to load, per profile ID. */
   unpackedExtensions: Record<string, string[]>
+  /** Extensions turned off, per profile ID: they stay installed but don't load. `path` is the folder to load when turned back on. */
+  disabledExtensions: Record<string, { id: string; path: string }[]>
   /**
    * Where the window goes. Until you move or resize it, it's this fraction of the display's work
    * area. `displays`: where you left the unpinned panel on each display, by display ID, relative to
@@ -72,6 +85,12 @@ export interface Settings {
   pinnedExtensions: string[]
   /** Rows the pinned tabs' icons share at the top of the sidebar. */
   pinnedRows: number
+  /** Where ⌘1 starts: pinned, Kept or Today. */
+  numberFrom: NumberFrom
+  /** New tabs at the top of Today and app sections, newest first, or at the bottom, oldest first. Closing the active tab focuses the tab beside it on that side. */
+  newTabsAt: NewTabsAt
+  /** App sections open at the bottom of the sidebar, by scope key. They start collapsed. */
+  openApps: string[]
   /** Your extension shortcuts, per profile, extension ID and command: Electron accelerators, '' for none. Unlisted commands use the extension's suggestion. */
   extensionShortcuts: Record<string, Record<string, Record<string, string>>>
   /** Restyling sites with Claude Code or Codex. */
@@ -82,29 +101,32 @@ export interface Settings {
   zoom: { defaultPercent: number; remember: boolean; sites: Record<string, number> }
   /** Width of the extension side panel (chrome.sidePanel), in pixels. Drag its edge to change it. */
   sidePanelWidth: number
+  /** The welcome has been through or skipped. Until then it shows at launch. */
+  welcomed: boolean
+  /** Check GitHub Releases for a newer jbrow, download it and install it once you won't notice (see updates.ts). */
+  autoUpdate: boolean
 }
 
 const DEFAULTS: Settings = {
   appearance: 'system',
   theme: 'teal',
   profileStyle: 'tint',
+  profileSwitcher: 'auto',
   shortcuts: {},
-  profiles: [
-    { id: 'work', name: 'Work', color: '#2f9aab' },
-    { id: 'personal', name: 'Personal', color: '#d0679a' },
-  ],
+  profiles: [{ id: 'personal', name: 'Personal', color: '#d0679a' }],
   defaultProfile: 'personal',
-  appProfiles: {
-    'com.tinyspeck.slackmacgap': 'work',
-    'com.microsoft.teams2': 'work',
-  },
-  linkedApps: [['com.microsoft.VSCode', 'com.apple.Terminal']],
+  appProfiles: {},
+  profileSites: {},
+  linkedApps: [],
   animation: { style: 'materialize', durationMs: 180, ease: 'spring' },
+  whimsy: false,
   searchUrl: 'https://www.google.com/search?q=%s',
   searchSuggestions: true,
+  urlBarStyle: 'columns',
   unpackedExtensions: {},
+  disabledExtensions: {},
   panel: { widthFraction: 0.72, heightFraction: 0.78, displays: {}, pinned: null },
-  hideFromScreenCapture: true,
+  hideFromScreenCapture: false,
   dangerousSites: true,
   blockThirdPartyCookies: true,
   pinned: true,
@@ -116,11 +138,16 @@ const DEFAULTS: Settings = {
   earlierAfterHours: 12,
   pinnedExtensions: [],
   pinnedRows: 1,
+  numberFrom: 'today',
+  newTabsAt: 'top',
+  openApps: [],
   extensionShortcuts: {},
-  restyle: { agent: 'claude', model: 'sonnet', codexModel: '', claudePath: '', codexPath: '' },
+  restyle: { enabled: false, agent: 'claude', model: 'sonnet', codexModel: '', claudePath: '', codexPath: '' },
   miniPlayer: { onHide: true, onTabSwitch: false, mutedToo: false, sites: 'all', onlySites: [], exceptSites: [] },
   zoom: { defaultPercent: 100, remember: true, sites: {} },
   sidePanelWidth: 360,
+  welcomed: false,
+  autoUpdate: true,
 }
 
 export const settingsPath = () => path.join(app.getPath('userData'), 'settings.json')
@@ -137,11 +164,15 @@ export function loadSettings(): Settings {
     // Older settings kept the two summon keys under "hotkeys".
     const { hotkeys, ...rest } = parsed
     const settings = { ...structuredClone(DEFAULTS), ...rest }
-    // Older settings have fewer restyle keys.
-    settings.restyle = { ...DEFAULTS.restyle, ...rest.restyle }
-    settings.miniPlayer = { ...DEFAULTS.miniPlayer, ...rest.miniPlayer }
-    settings.zoom = { ...DEFAULTS.zoom, ...rest.zoom }
-    settings.keepLoaded = { ...DEFAULTS.keepLoaded, ...rest.keepLoaded }
+    // Settings from before the welcome belong to someone who already knows jbrow.
+    if (typeof rest.welcomed !== 'boolean') settings.welcomed = true
+    // Older settings have fewer restyle keys. Cloned, so changing a site's zoom can't change the defaults.
+    settings.restyle = { ...structuredClone(DEFAULTS.restyle), ...rest.restyle }
+    // Restyling from before it could be turned off stays on for whoever restyled a site.
+    if (typeof rest.restyle?.enabled !== 'boolean') settings.restyle.enabled = hasStyledSites()
+    settings.miniPlayer = { ...structuredClone(DEFAULTS.miniPlayer), ...rest.miniPlayer }
+    settings.zoom = { ...structuredClone(DEFAULTS.zoom), ...rest.zoom }
+    settings.keepLoaded = { ...structuredClone(DEFAULTS.keepLoaded), ...rest.keepLoaded }
     // Older settings have only the fractions. A place that isn't a rectangle is dropped.
     const panel = { ...structuredClone(DEFAULTS.panel), ...rest.panel }
     const isRect = (r: unknown): r is Rectangle =>
@@ -150,22 +181,39 @@ export function loadSettings(): Settings {
     if (!isRect(panel.pinned)) panel.pinned = null
     settings.panel = panel
     if (!Number.isInteger(settings.pinnedRows) || settings.pinnedRows < 1) settings.pinnedRows = DEFAULTS.pinnedRows
+    if (!['pinned', 'kept', 'today'].includes(settings.numberFrom)) settings.numberFrom = DEFAULTS.numberFrom
+    if (!['top', 'bottom'].includes(settings.newTabsAt)) settings.newTabsAt = DEFAULTS.newTabsAt
+    if (!Array.isArray(settings.openApps)) settings.openApps = DEFAULTS.openApps
+    if (!settings.profileSites || typeof settings.profileSites !== 'object') settings.profileSites = {}
+    if (typeof settings.whimsy !== 'boolean') settings.whimsy = DEFAULTS.whimsy
     if (!Number.isFinite(settings.sidePanelWidth)) settings.sidePanelWidth = DEFAULTS.sidePanelWidth
     if (!['system', 'light', 'dark'].includes(settings.appearance)) settings.appearance = DEFAULTS.appearance
     if (!THEMES.some((t) => t.id === settings.theme)) settings.theme = DEFAULTS.theme
+    if (!URL_BAR_STYLES.includes(settings.urlBarStyle)) settings.urlBarStyle = DEFAULTS.urlBarStyle
     if (!['tint', 'edge', 'solid'].includes(settings.profileStyle)) settings.profileStyle = DEFAULTS.profileStyle
+    if (!['auto', 'menu'].includes(settings.profileSwitcher)) settings.profileSwitcher = DEFAULTS.profileSwitcher
     if (hotkeys?.all && settings.shortcuts.show === undefined) settings.shortcuts.show = hotkeys.all
     if (hotkeys?.app && settings.shortcuts.showApp === undefined) settings.shortcuts.showApp = hotkeys.app
     return settings
   } catch (error) {
     console.error(`[settings] ${file} is not valid JSON, using defaults:`, error)
+    setAside(file)
     return structuredClone(DEFAULTS)
+  }
+}
+
+function hasStyledSites(): boolean {
+  try {
+    const sites = JSON.parse(readFileSync(path.join(app.getPath('userData'), 'styles.json'), 'utf8')) as Record<string, { changes?: unknown[] }>
+    return Object.values(sites).some((s) => !!s.changes?.length)
+  } catch {
+    return false
   }
 }
 
 /** Writes settings back to settings.json, for changes made in the settings screen. */
 export function saveSettings(settings: Settings) {
-  writeFileSync(settingsPath(), JSON.stringify(settings, null, 2))
+  writeAtomic(settingsPath(), JSON.stringify(settings, null, 2))
 }
 
 /** The scope key for an app: its linked group if it has one, otherwise its own bundle ID. */

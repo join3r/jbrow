@@ -1,11 +1,13 @@
 import { app, BrowserWindow, Menu, WebContentsView, clipboard, shell, type Rectangle, type WebContents } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { bezier } from '../shared/ease'
+import { addressUrl, forcedSearch } from '../shared/engines'
 import { urlMatcher } from '../shared/patterns'
-import { MAX_PANES, PANE_HEAD, paneSpans, splitOf } from '../shared/split'
-import { byOrder, flatten, isAsleep, isInFolder, isRoot, parentFolder, samePage, subtree, threadsOf } from '../shared/threads'
+import { MAX_PANES, paneSpans, splitOf } from '../shared/split'
+import { byOrder, createdBeside, flatten, isAsleep, isInFolder, isRoot, parentFolder, samePage, subtree, threadsOf } from '../shared/threads'
 import type { CrashView, Folder, KeepLoaded, Profile, Split, TabRecord, UiTab } from '../shared/types'
 import type { Certificates } from './certs'
 import type { DangerousSites } from './dangerous'
@@ -14,6 +16,8 @@ import { faviconUrl } from './favicons'
 import type { Logins } from './logins'
 import type { SitePermissions } from './permissions'
 import type { ProfileRuntime } from './profiles'
+import { setAside, writeAtomic } from './json-file'
+import { SiteColors } from './site-color'
 
 interface LiveTab {
   view: WebContentsView
@@ -33,6 +37,10 @@ export interface TabsDeps {
   onChange: () => void
   /** Called after a tab becomes active, to move keyboard focus to it. */
   onActivated: () => void
+  /** Moves keyboard focus back to what's in front: the active page, or jbrow's UI. */
+  refocus: () => void
+  /** Whimsy is on and macOS doesn't ask for reduced motion: pages slide in as you switch tabs. */
+  whimsy: () => boolean
   /** Return true if jbrow handled the key, so the page doesn't see it. */
   onKey: (input: Electron.Input) => boolean
   searchUrl: () => string
@@ -53,14 +61,26 @@ export interface TabsDeps {
   download: (wc: WebContents, url: string) => void
   profiles: () => Profile[]
   /** Opens a link as a new thread in another profile, next to the tab's thread. */
-  openInProfile: (fromId: string, profile: string, url: string) => void
+  openInProfile: (fromId: string, profile: string, url: string, background?: boolean) => void
+  /** The profile an address always opens in, if its site has one (Sites under Profiles in settings). */
+  siteProfile: (url: string) => string | undefined
   /** The active page went fullscreen or left it. */
   onFullscreen: (on: boolean, url: string) => void
+  /** An extension is working in the page (its chrome.debugger is attached), so it doesn't sleep or archive. */
+  held: (wc: WebContents) => boolean
   /**
    * A page with unsaved changes (beforeunload) wants to stay. Return true to leave anyway. It has
    * to answer before returning: Electron only lets the page go from inside the event.
    */
   confirmUnload: (id: string, kind: UnloadKind) => boolean
+  /** The tab beside one in the sidebar that takes over when it closes, per settings. Asked before it goes. */
+  besideClosed: (id: string) => string | undefined
+  /** The tab's page closed itself with window.close(): a popup that's done, say. */
+  closedByPage: (id: string) => void
+  /** You're using an extension: one of its windows has focus, or you just pressed one of its shortcuts. */
+  extensionInUse: () => boolean
+  /** layout() put the pages where they now are; what floats over them follows. */
+  onLayout: () => void
 }
 
 /** What a page asking to stay would be left for: another page, the same one again, or nothing. */
@@ -70,8 +90,9 @@ export interface CreateOptions {
   profile: string
   url?: string
   /**
-   * The tab it was opened from. Like a link in Arc, it goes to the top of Today, or of the opener's
-   * app section, never into Kept: a kept or pinned tab stays what it was.
+   * The tab it was opened from. The new tab goes right beside it in Today, or in the opener's app
+   * section, on the side new tabs go. Never into Kept: a kept or pinned tab stays what it was, and
+   * what it opens goes where new tabs go.
    */
   opener?: string
   scope?: string
@@ -81,6 +102,8 @@ export interface CreateOptions {
   /** A guest WebContents Chromium already created for window.open. */
   webContents?: WebContents
   unread?: boolean
+  /** The extension that opened it (chrome.tabs.create). */
+  openedBy?: string
 }
 
 /**
@@ -111,8 +134,24 @@ const HISTORY_KEEP = 50
 /** Archived threads are forgotten after this long. */
 const ARCHIVE_KEEP_MS = 90 * 24 * 60 * 60 * 1000
 
+/** How far the page you switch to slides in from, how long it takes, and its curve (the sidebar's glide). */
+const SLIDE_PX = 14
+const SLIDE_MS = 320
+const SLIDE_EASE: [number, number, number, number] = [0.34, 1.25, 0.64, 1]
+
+/** How long an extension may bring back the tab that was in front before it, without you using the extension. */
+const EXTENSION_BACK_MS = 5000
+
 /** How many closed tabs ⇧⌘T can bring back. */
 const CLOSED_KEEP = 25
+
+/** Where the IDs of tabs without a page since launch start, far past any WebContents ID. */
+const PAGELESS_IDS = 1_000_000
+
+/** How long a typed host gets to answer over https before the tab tries http, as in Chrome. */
+const UPGRADE_WAIT_MS = 3000
+/** No answer over http either: not online, the name doesn't resolve, or the load was stopped. */
+const UPGRADE_KEEP_ERRORS = new Set([-3, -105, -106, -137])
 
 /** A closed tab, with what it takes to put it back where it was. */
 interface ClosedTab {
@@ -143,13 +182,19 @@ export class Tabs {
   archivedRev = 0
   activeId: string | null = null
   private live = new Map<string, LiveTab>()
+  /** The color each page's address bar takes. */
+  private colors = new SiteColors(() => this.deps.onChange())
   /** The tabs layout() last put on screen, so it only has to hide those. */
   private placed: string[] = []
+  /** Where each page layout() put on screen is, while it shows. */
+  private places = new Map<string, Rectangle>()
   private saveTimer: NodeJS.Timeout | null = null
   /** Most recently used first, for ⌃Tab. */
   private mru: string[] = []
   /** Set while jbrow hands a new view to the extensions library, which marks every new tab active. */
   private addingView = false
+  /** The tab that was in front before the active one, and when it stopped being. */
+  private leftFront: { id: string; at: number } | null = null
   /** Set while jbrow takes a view away from the extensions library, which reports that as the tab closing. */
   private droppingView = false
   /** Tabs whose page crashed or stopped responding, until it loads again. */
@@ -170,6 +215,33 @@ export class Tabs {
    */
   private histories = new Map<string, NavHistory>()
   private historyTimer: NodeJS.Timeout | null = null
+  /** Tabs whose back and forward list is being restored, with the address to end up on. */
+  private restoring = new Map<string, string>()
+  /**
+   * Tabs going to a host typed without a scheme, which got https:// (see addressUrl). If the site
+   * fails over https, shows a bad certificate or hasn't answered in UPGRADE_WAIT_MS, the tab goes
+   * to http:// instead, as Chrome's HTTPS-Upgrades does. The wait starts once that load does.
+   */
+  private upgrades = new Map<string, { https: string; http: string; timer?: NodeJS.Timeout }>()
+  /** When each tab last sent a link to its site's profile. See sendToSiteProfile. */
+  private sentAt = new Map<string, number>()
+  /** Tabs that fell back to http, with the https address whose error page is left in their history. */
+  private fellBack = new Map<string, string>()
+
+  /** How far above (less than 0) or below its place the shown page is while it slides in. */
+  private slideY = 0
+  private slideTimer: NodeJS.Timeout | null = null
+
+  /**
+   * The IDs extensions know tabs without a page by, to the tab. Chrome keeps a tab's ID when it
+   * discards it, but here each page load is a new WebContents with a new ID. A tab whose page
+   * unloaded keeps the ID its page had; one with no page since launch gets one from PAGELESS_IDS
+   * up. Every ID a tab had reaches it, page or not, until it closes.
+   */
+  private extensionIds = new Map<number, string>()
+  /** A tab without a page, to the ID extensions know it by now. */
+  private pagelessIds = new Map<string, number>()
+  private nextPagelessId = PAGELESS_IDS
 
   /** Kept and pinned threads whose pages never unload (see sweep). Main sets it from settings. */
   keepLoaded: KeepLoaded = { kept: false, pinned: true }
@@ -208,6 +280,7 @@ export class Tabs {
       this.renumber()
     } catch (error) {
       console.error('[tabs] could not read tabs.json, starting empty:', error)
+      setAside(storePath())
     }
     if (!existsSync(historyPath())) return
     try {
@@ -215,6 +288,7 @@ export class Tabs {
       for (const [id, h] of Object.entries(histories)) if (h.entries?.length) this.histories.set(id, h)
     } catch (error) {
       console.error('[tabs] could not read history.json, tabs start without back and forward:', error)
+      setAside(historyPath())
     }
   }
 
@@ -227,7 +301,7 @@ export class Tabs {
     if (this.saveTimer) clearTimeout(this.saveTimer)
     this.saveTimer = null
     const data = { tabs: this.records, activeId: this.activeId, folders: this.folders, splits: this.splits, archived: this.archived }
-    writeFileSync(storePath(), JSON.stringify(data, null, 2))
+    writeAtomic(storePath(), JSON.stringify(data, null, 2))
     this.flushHistory()
   }
 
@@ -243,7 +317,7 @@ export class Tabs {
     for (const id of this.live.keys()) this.captureHistory(id)
     const ids = new Set([...this.records, ...this.archived].map((t) => t.id))
     for (const id of this.histories.keys()) if (!ids.has(id)) this.histories.delete(id)
-    writeFileSync(historyPath(), JSON.stringify(Object.fromEntries(this.histories)))
+    writeAtomic(historyPath(), JSON.stringify(Object.fromEntries(this.histories)))
   }
 
   /** The back and forward list of a tab's page, or the saved one if it has no page. */
@@ -329,15 +403,36 @@ export class Tabs {
   shown(): string[] {
     return this.activeId ? this.panesOf(this.activeId) : []
   }
+  /** The color a tab's address bar takes from its page, null for jbrow's own. Only for tabs on screen: it may look at the page. */
+  barColor(id: string): string | null {
+    return this.crashed.has(id) ? null : this.colors.color(id)
+  }
   idForWebContents(wc: WebContents): string | undefined {
     for (const [id, live] of this.live) if (live.wc === wc) return id
     return undefined
   }
   uiTabs(): UiTab[] {
-    return this.records.map((t) => ({ ...t, loading: this.live.get(t.id)?.loading ?? false, loaded: this.live.has(t.id), crashed: this.crashed.get(t.id)?.reason ? true : undefined }))
+    return this.records.map((t) => {
+      const wc = this.webContentsFor(t.id)
+      return {
+        ...t,
+        loading: this.live.get(t.id)?.loading ?? false,
+        loaded: this.live.has(t.id),
+        crashed: this.crashed.get(t.id)?.reason ? true : undefined,
+        audible: wc?.isCurrentlyAudible() || undefined,
+        muted: wc?.isAudioMuted() || undefined,
+      }
+    })
   }
-  navState() {
-    const wc = this.activeWebContents()
+  /** Mutes a tab's page, or lets it be heard again. */
+  setMuted(id: string, muted: boolean) {
+    const wc = this.webContentsFor(id)
+    if (!wc || wc.isAudioMuted() === muted) return
+    wc.setAudioMuted(muted)
+    this.deps.onChange()
+  }
+  navState(id = this.activeId) {
+    const wc = id ? this.webContentsFor(id) : null
     return {
       canGoBack: wc?.navigationHistory.canGoBack() ?? false,
       canGoForward: wc?.navigationHistory.canGoForward() ?? false,
@@ -359,9 +454,10 @@ export class Tabs {
       app: from ? from.app : opts.app,
       url: opts.url ?? '',
       title: '',
-      createdAt: now,
+      createdAt: from ? createdBeside(this.records, from, now) : now,
       lastSeen: now,
       unread: opts.unread,
+      openedBy: opts.openedBy,
     }
     this.records.push(rec)
     if (opts.webContents || rec.url) this.ensureView(rec, opts.webContents)
@@ -396,6 +492,9 @@ export class Tabs {
       ? new WebContentsView({ webContents: guest })
       : new WebContentsView({ webPreferences: { session: rt.session, sandbox: true, contextIsolation: true } })
     view.setVisible(false)
+    // A tab opened in the background is laid out at the page area's size, as in Chrome, not at
+    // 0×0 until it's first shown: its page measures a real viewport, and a debugger can capture it.
+    view.setBounds(this.deps.contentBounds())
     view.setBorderRadius(9)
     const win = this.deps.window()
     win.contentView.addChildView(view)
@@ -403,6 +502,7 @@ export class Tabs {
     const live: LiveTab = { view, wc: view.webContents, loading: false }
     this.live.set(rec.id, live)
     this.wire(rec.id, view.webContents, rt)
+    this.colors.watch(rec.id, view.webContents)
     this.addingView = true
     try {
       rt.extensions.addTab(view.webContents, win)
@@ -416,13 +516,34 @@ export class Tabs {
     if (guest) return live
     // A tab that was asleep or archived comes back where it was, with back and forward. One you
     // just typed an address into goes there after, so that address is one step further.
-    const url = rec.url
-    const load = () => (url ? view.webContents.loadURL(url) : undefined)
-    if (!history) void load()?.catch(() => {})
+    const load = (url: string) => (url ? view.webContents.loadURL(url) : undefined)
+    if (!history) void load(rec.url)?.catch(() => {})
     else {
+      // An address typed while it's restoring (see navigate) replaces this one.
+      this.restoring.set(rec.id, rec.url)
+      const target = () => {
+        const url = this.restoring.get(rec.id) ?? rec.url
+        this.restoring.delete(rec.id)
+        return url
+      }
+      // Electron's restore leaves the tab without user agent client hints, for good: no Sec-CH-UA
+      // headers, and no navigator.userAgentData in workers. To Cloudflare that's a fake Chrome, and
+      // Turnstile never lets it through (bistro.sk's login). Setting the user agent again brings
+      // them back for everything after. Not before restore resolves: that stalls the restore.
+      const hints = () => view.webContents.setUserAgent(rt.session.getUserAgent())
       void view.webContents.navigationHistory
         .restore(history)
-        .then(() => (history.entries[history.index]?.url !== url ? load() : undefined), load)
+        .then(
+          () => {
+            hints()
+            const url = target()
+            return history.entries[history.index]?.url !== url ? load(url) : undefined
+          },
+          () => {
+            hints()
+            return load(target())
+          },
+        )
         .catch(() => {})
     }
     return live
@@ -458,6 +579,9 @@ export class Tabs {
       this.saveHistory()
     }
     wc.on('did-navigate', (e, url) => {
+      // The site answered, over https or after falling back: nothing left to wait for.
+      this.clearUpgrade(id)
+      this.dropFailedUpgrade(id, wc, url)
       onNav(e, url)
       this.deps.onVisit(rec()?.profile ?? rt.profile.id, url)
       this.deps.logins.loaded(id)
@@ -480,11 +604,14 @@ export class Tabs {
         this.deps.logins.clear(id)
         this.deps.devices.cancel(id)
         this.setCrashed(id, null)
+        this.upgradeStarted(id, wc, details.url)
         // A phishing or malware site: the page it's on stays, under jbrow's warning.
         if (this.deps.dangerous.check(id, rec()?.profile ?? rt.profile.id, details.url)) stopSoon()
       }
     })
     wc.on('did-redirect-navigation', (details) => {
+      // The site answered over https.
+      if (details.isMainFrame && this.upgrades.get(id)?.timer) this.clearUpgrade(id)
       if (details.isMainFrame && this.deps.dangerous.check(id, rec()?.profile ?? rt.profile.id, details.url)) stopSoon()
     })
     // HTTP auth for the page or a proxy. Logins answers once you sign in or cancel.
@@ -524,10 +651,18 @@ export class Tabs {
         closing.done(false)
       }
     })
+    wc.on('did-fail-load', (_e, code, _desc, url, isMainFrame) => {
+      if (isMainFrame && url === this.upgrades.get(id)?.https && !UPGRADE_KEEP_ERRORS.has(code)) this.fallBack(id, wc)
+    })
     wc.on('certificate-error', (event, url, error, certificate, callback, isMainFrame) => {
       event.preventDefault()
+      // jbrow added the https; a bad certificate there means trying http, not a warning.
+      const profileId = rec()?.profile ?? rt.profile.id
+      if (isMainFrame && url === this.upgrades.get(id)?.https && !this.deps.certs.trusted(profileId, url, certificate)) return callback(false)
       callback(this.deps.certs.onError(id, rec()?.profile ?? rt.profile.id, url, error, certificate, isMainFrame))
     })
+    // The sidebar shows which tabs make sound, so a page playing somewhere out of sight can be found.
+    wc.on('audio-state-changed', () => this.deps.onChange())
     wc.on('did-start-loading', () => this.setLoading(id, true))
     wc.on('did-stop-loading', () => this.setLoading(id, false))
     wc.on('before-input-event', (event, input) => {
@@ -539,9 +674,16 @@ export class Tabs {
       if (this.deps.onKey(input)) event.preventDefault()
     })
     wc.on('context-menu', (_e, params) => void this.contextMenu(id, wc, params, rt))
-    // Clicking into another pane of the split focuses it, toolbar and keys and all.
+    // A tab opened in the background (⌘-click) takes keyboard focus as it starts up. Hidden, it
+    // gets no keys, so ⌘W and the rest went nowhere until you clicked; hand focus back.
     wc.on('focus', () => {
-      if (id !== this.activeId && this.shown().includes(id)) this.activate(id)
+      if (!this.shown().includes(id)) this.deps.refocus()
+    })
+    // Clicking into another pane of the split focuses it, toolbar and keys and all. Taken from the
+    // click, not from the page getting focus: focus also passes through panes on its own, when one
+    // loads or while jbrow hands it elsewhere (on Linux, focusing jbrow's UI does).
+    wc.on('before-mouse-event', (_e, mouse) => {
+      if (mouse.type === 'mouseDown' && id !== this.activeId && this.shown().includes(id)) this.activate(id)
     })
     this.deps.devices.watch(wc, rt.profile.id)
     wc.on('enter-html-full-screen', () => {
@@ -553,13 +695,24 @@ export class Tabs {
       if (this.fullscreenId === id) this.setFullscreen(null)
     })
 
+    // A link to a site that has a profile of its own opens there, and this page stays. Redirects
+    // stay put: a sign-in that passes through the site would lose its way.
+    wc.on('will-navigate', (e) => {
+      if (!e.isMainFrame || e.isSameDocument) return
+      const from = rec()?.profile ?? rt.profile.id
+      const to = this.deps.siteProfile(e.url)
+      if (!to || to === from || !isWebUrl(wc.getURL()) || !this.sendToSiteProfile(id, to, e.url)) return
+      e.preventDefault()
+    })
+
     wc.setWindowOpenHandler((details) => {
-      // window.open with size features is usually a sign-in or payment popup. It needs a real
-      // window so it can close itself and talk to its opener.
-      if (details.disposition === 'new-window' && details.features) {
-        return { action: 'allow', overrideBrowserWindowOptions: { parent: this.deps.window(), width: 520, height: 680 } }
-      }
       const background = details.disposition === 'background-tab'
+      // So does a link opened in a new tab. A popup doesn't: it needs its opener.
+      const to = background || details.disposition === 'foreground-tab' ? this.deps.siteProfile(details.url) : undefined
+      if (to && to !== (rec()?.profile ?? rt.profile.id) && this.sendToSiteProfile(id, to, details.url, background)) return { action: 'deny' }
+      // A popup (window.open with a size: a sign-in, a payment, a Proxmox console) is a tab too.
+      // It keeps its opener and can close itself, as a window could, and it gets what tabs have
+      // and windows don't: the certificate you trusted, sign-in sheets, keys.
       return {
         action: 'allow',
         outlivesOpener: true,
@@ -581,7 +734,17 @@ export class Tabs {
       }
     })
 
+    // Electron emits this for window.close(), though its typings don't say so. Chromium only lets
+    // it through for a page a script opened, or one with nothing to go back to. jbrow closing the
+    // tab (closeAsking) emits it too; 'destroyed' handles that one.
+    ;(wc as unknown as NodeJS.EventEmitter).on('close', () => {
+      if (this.live.get(id)?.wc === wc && !this.closing.has(id)) this.deps.closedByPage(id)
+    })
+
     wc.on('destroyed', () => {
+      // A view that was replaced (moved to another profile, woken after sleeping, reopened) goes
+      // after its successor started: what's kept by tab is the new page's then, not this one's.
+      if (this.live.has(id) && this.live.get(id)?.wc !== wc) return
       // A page that agreed to close: now the tab goes.
       const closing = this.closing.get(id)
       if (closing) {
@@ -589,9 +752,12 @@ export class Tabs {
         if (this.live.get(id)?.wc === wc) this.close(id, closing.remember, closing.history, closing.remove)
         closing.done(true)
       }
+      this.sentAt.delete(id)
       if (this.fullscreenId === id) this.setFullscreen(null)
-      // A crashed page's view may have been replaced by now; only forget this one.
-      if (this.live.get(id)?.wc === wc) this.live.delete(id)
+      if (this.live.get(id)?.wc === wc) {
+        this.live.delete(id)
+        this.colors.forget(id)
+      }
       this.killing.delete(id)
       this.deps.certs.clear(id)
       this.deps.dangerous.clear(id)
@@ -627,10 +793,11 @@ export class Tabs {
     if (crash) this.crashed.set(id, crash)
     else if (!this.crashed.delete(id)) return
     this.deps.onChange()
-    if (id !== this.activeId) return
+    // A pane beside the active tab is on screen too.
+    if (!this.shown().includes(id)) return
     this.layout()
     // Keyboard focus moves to jbrow's crash screen, so ⌘R still works, and back to the page after.
-    this.deps.onActivated()
+    if (id === this.activeId) this.deps.onActivated()
   }
 
   /** Why the tab's page is gone or stuck, if it is. */
@@ -750,16 +917,32 @@ export class Tabs {
     menu.popup({ window: this.deps.window() })
   }
 
-  /** An extension (chrome.tabs.update) or the extensions library wants this tab in front. */
+  /**
+   * An extension (chrome.tabs.update) or the extensions library wants this tab in front. Only
+   * while you're using the extension, or to give back the tab that was in front a moment ago (Stem
+   * does, after a page it clicked opened a tab in front). Otherwise a page pulls you away from the
+   * one you're on: Bitwarden ends every passkey request by bringing its page to the front, even
+   * the quiet one a sign-in page makes each time it loads in the background.
+   */
   selectFromExtension(wc: WebContents) {
     if (this.addingView) return
     const id = this.idForWebContents(wc)
-    if (id) this.activate(id)
+    if (!id || id === this.activeId) return
+    const back = this.leftFront?.id === id && Date.now() - this.leftFront.at < EXTENSION_BACK_MS
+    if (back || this.deps.extensionInUse()) return this.activate(id)
+    // The library already counts it active; once it's done telling extensions so, put back the real one.
+    queueMicrotask(() => {
+      const active = this.active()
+      const live = active && this.live.get(active.id)
+      if (live && active.profile === this.get(id)?.profile) this.deps.runtime(active.profile)?.extensions.selectTab(live.wc)
+    })
   }
 
   activate(id: string) {
     if (!this.get(id)) return
     const panes = this.panesOf(id)
+    const wasShown = this.shown()
+    const from = this.records.findIndex((t) => t.id === this.activeId)
     // Drop empty new tabs you've moved away from, panes of a split you left included. An empty
     // pane of the split you stay in stays.
     for (const prev of this.shown().map((p) => this.get(p))) {
@@ -768,6 +951,7 @@ export class Tabs {
       this.mru = this.mru.filter((m) => m !== prev.id)
     }
     if (this.fullscreenId && this.fullscreenId !== id) this.leaveFullscreen()
+    if (this.activeId && this.activeId !== id) this.leftFront = { id: this.activeId, at: Date.now() }
     this.activeId = id
     // Every pane of a split is on screen, so each counts as seen and has its page.
     const now = Date.now()
@@ -782,9 +966,35 @@ export class Tabs {
     if (live) {
       this.deps.runtime(this.get(id)!.profile)?.extensions.selectTab(live.wc)
     }
+    // Another pane of the same split, or the tab again, keeps its page where it is (sliding or not).
+    const to = this.records.findIndex((t) => t.id === id)
+    if (from >= 0 && !panes.some((p) => wasShown.includes(p))) this.slideIn(to > from ? SLIDE_PX : -SLIDE_PX)
     this.layout()
     this.changed()
     this.deps.onActivated()
+  }
+
+  /**
+   * Whimsy: the page you switch to slides into place from a little below if its tab is further
+   * down the sidebar, from above if it's further up, overshooting a touch. Only its place changes,
+   * never its size, so the page doesn't lay out again on every frame.
+   */
+  private slideIn(from: number) {
+    if (this.slideTimer) clearInterval(this.slideTimer)
+    this.slideTimer = null
+    this.slideY = 0
+    if (!this.deps.whimsy() || !this.deps.contentVisible() || this.fullscreenId) return
+    const start = performance.now()
+    this.slideY = from
+    this.slideTimer = setInterval(() => {
+      const t = Math.min(1, (performance.now() - start) / SLIDE_MS)
+      this.slideY = Math.round(from * (1 - bezier(SLIDE_EASE, t)))
+      if (t >= 1) {
+        clearInterval(this.slideTimer!)
+        this.slideTimer = null
+      }
+      this.layout()
+    }, 1000 / 120)
   }
 
   /**
@@ -800,22 +1010,44 @@ export class Tabs {
     const area = this.deps.contentBounds()
     const split = this.fullscreenId ? undefined : this.splitOf(this.activeId)
     const spans = split ? paneSpans(area.width, split.sizes) : null
+    this.places.clear()
     shown.forEach((id, i) => {
       const live = this.live.get(id)
       if (!live) return
       const on = !this.fullscreenId || id === this.fullscreenId
+      let bounds: Rectangle | undefined
       if (on) {
-        live.view.setBounds(
-          spans ? { x: area.x + spans[i].x, y: area.y + PANE_HEAD, width: spans[i].width, height: Math.max(0, area.height - PANE_HEAD) } : area,
-        )
+        const y = area.y + (this.fullscreenId ? 0 : this.slideY)
+        bounds = spans ? { x: area.x + spans[i].x, y, width: spans[i].width, height: area.height } : { ...area, y }
+        live.view.setBounds(bounds)
       }
-      live.view.setVisible(on && this.deps.contentVisible() && !this.covered(id))
+      const visible = on && this.deps.contentVisible() && !this.covered(id)
+      live.view.setVisible(visible)
+      if (visible && bounds) this.places.set(id, bounds)
     })
+    this.deps.onLayout()
+  }
+
+  /** Where the tab's page is in the window, or null while it isn't on screen. */
+  placement(id: string): Rectangle | null {
+    return this.places.get(id) ?? null
   }
 
   /** jbrow shows its own screen in place of the tab's page. */
   covered(id: string) {
     return this.deps.certs.isBlocked(id) || this.deps.dangerous.isBlocked(id) || this.deps.logins.isAsking(id) || this.crashed.has(id)
+  }
+
+  /**
+   * Opens a link from tab `id` in its site's profile. Electron doesn't say whether you clicked it,
+   * so a page can't flood another profile with tabs: past one a second, links load where they are.
+   */
+  private sendToSiteProfile(id: string, profile: string, url: string, background?: boolean): boolean {
+    const now = Date.now()
+    if (now - (this.sentAt.get(id) ?? 0) < 1000) return false
+    this.sentAt.set(id, now)
+    this.deps.openInProfile(id, profile, url, background)
+    return true
   }
 
   /** `search` sends the text to the search engine even if it looks like an address. */
@@ -824,11 +1056,62 @@ export class Tabs {
     const rec = this.active()
     if (!rec) return
     rec.url = url
+    this.clearUpgrade(rec.id)
+    const text = input.trim()
+    if (!search && url.startsWith('https://') && url !== text && url === addressUrl(text)) {
+      const https = new URL(url)
+      const http = new URL(url)
+      http.protocol = 'http:'
+      this.upgrades.set(rec.id, { https: https.href, http: http.href })
+    }
     // A tab without a page goes to the address once its view is made.
     const live = this.live.get(rec.id)
     if (!live) this.ensureView(rec)
+    // Its back and forward list is still coming back, which would take over; it goes there after.
+    else if (this.restoring.has(rec.id)) this.restoring.set(rec.id, url)
     else if (live.wc.getURL() !== url) void live.wc.loadURL(url).catch(() => {})
+    // The same address again loads it again, as in Chrome: it may have failed (offline) the first time.
+    else live.wc.reload()
     this.activate(rec.id)
+  }
+
+  /** A tab's page started a load: the https one an upgrade waits on, or something else instead. */
+  private upgradeStarted(id: string, wc: WebContents, url: string) {
+    const u = this.upgrades.get(id)
+    if (!u) return
+    // Restoring a back and forward list loads its own page first; only that one is let past.
+    if (url === u.https) u.timer ??= setTimeout(() => this.fallBack(id, wc), UPGRADE_WAIT_MS)
+    else if (u.timer) this.clearUpgrade(id)
+  }
+
+  private clearUpgrade(id: string) {
+    clearTimeout(this.upgrades.get(id)?.timer)
+    this.upgrades.delete(id)
+  }
+
+  /** The https address didn't work out: the tab goes to http instead. */
+  private fallBack(id: string, wc: WebContents) {
+    // A timer from a page that's gone since (slept, moved) leaves its successor's upgrade alone.
+    if (wc.isDestroyed() || this.live.get(id)?.wc !== wc) return
+    const u = this.upgrades.get(id)
+    this.clearUpgrade(id)
+    if (!u) return
+    this.fellBack.set(id, u.https)
+    const rec = this.get(id)
+    if (rec) rec.url = u.http
+    // Still waiting on https.
+    if (wc.isLoading()) wc.stop()
+    void wc.loadURL(u.http).catch(() => {})
+  }
+
+  /** A failed https load leaves its error page in the history; Back shouldn't go there. */
+  private dropFailedUpgrade(id: string, wc: WebContents, url: string) {
+    const https = this.fellBack.get(id)
+    if (!https) return
+    this.fellBack.delete(id)
+    const nav = wc.navigationHistory
+    const prev = nav.getActiveIndex() - 1
+    if (url.startsWith('http:') && prev >= 0 && nav.getEntryAtIndex(prev)?.url === https) nav.removeEntryAtIndex(prev)
   }
 
   /**
@@ -860,7 +1143,10 @@ export class Tabs {
   close(id: string, remember = true, history?: NavHistory, remove = false) {
     const rec = this.get(id)
     if (!rec) return
+    this.clearUpgrade(id)
+    this.fellBack.delete(id)
     const panes = this.panesOf(id)
+    const beside = this.activeId === id && !rec.kept ? this.deps.besideClosed(id) : undefined
     if (rec.kept && rec.home && !remove) {
       this.dropView(rec)
       this.histories.delete(rec.id)
@@ -879,11 +1165,12 @@ export class Tabs {
     this.prune()
     if (this.activeId === id) {
       this.activeId = null
-      // In a split, the pane to its left (or right) takes over. Otherwise the next tab comes from
-      // outside Kept; a kept tab only comes up when asked for.
+      // In a split, the pane to its left (or right) takes over. Otherwise the tab beside it in the
+      // sidebar, on the side new tabs go, or else the last one used outside Kept; a kept tab only
+      // comes up when asked for.
       const i = panes.indexOf(id)
-      const beside = [panes[i - 1], panes[i + 1]].find((p) => p && p !== id && this.get(p))
-      const next = beside ?? this.mru.find((m) => {
+      const pane = [panes[i - 1], panes[i + 1]].find((p) => p && p !== id && this.get(p))
+      const next = pane ?? (beside && this.get(beside) ? beside : undefined) ?? this.mru.find((m) => {
         const t = this.get(m)
         return t && !t.kept
       })
@@ -952,6 +1239,8 @@ export class Tabs {
     this.live.delete(rec.id)
     // A page that agreed to close is gone already.
     const wc = live.wc
+    this.extensionIds.set(wc.id, rec.id)
+    this.pagelessIds.set(rec.id, wc.id)
     if (wc.isDestroyed()) return
     this.droppingView = true
     try {
@@ -962,10 +1251,80 @@ export class Tabs {
     wc.close()
   }
 
+  /**
+   * Moves a tab to another profile in place. A page can't change its session, so a loaded one
+   * closes and loads again in the other profile's, back and forward kept.
+   */
+  setProfile(id: string, profile: string) {
+    const rec = this.get(id)
+    if (!rec || rec.profile === profile) return
+    const loaded = this.live.has(id)
+    this.dropView(rec)
+    rec.profile = profile
+    const live = loaded ? this.ensureView(rec) : undefined
+    if (live && id === this.activeId) this.deps.runtime(profile)?.extensions.selectTab(live.wc)
+    this.layout()
+    this.changed()
+  }
+
   closeWebContents(wc: WebContents) {
     if (this.droppingView) return
     const id = this.idForWebContents(wc)
     if (id) this.close(id)
+  }
+
+  // ---------- tabs without a page, for extensions ----------
+
+  /** A profile's tabs without a page, with the ID extensions know each by (see extensionIds). */
+  pageless(profile: string): { id: number; rec: TabRecord }[] {
+    for (const [id, recId] of this.extensionIds) if (!this.get(recId)) this.extensionIds.delete(id)
+    for (const recId of this.pagelessIds.keys()) if (!this.get(recId)) this.pagelessIds.delete(recId)
+    const out: { id: number; rec: TabRecord }[] = []
+    for (const rec of this.records) {
+      // An empty new tab is nothing to an extension.
+      if (rec.profile !== profile || !rec.url || this.live.has(rec.id)) continue
+      let id = this.pagelessIds.get(rec.id)
+      if (id === undefined) {
+        id = this.nextPagelessId++
+        this.pagelessIds.set(rec.id, id)
+        this.extensionIds.set(id, rec.id)
+      }
+      out.push({ id, rec })
+    }
+    return out
+  }
+
+  /** The ID a tab without a page goes by now, for one an extension knows by any ID it had. */
+  pagelessId(profile: string, id: number): number | undefined {
+    const rec = this.get(this.extensionIds.get(id))
+    if (!rec || rec.profile !== profile || this.live.has(rec.id)) return undefined
+    return this.pageless(profile).find((p) => p.rec === rec)?.id
+  }
+
+  /**
+   * The page of the tab an extension knows by `id`, an ID its page had or the one it has without
+   * a page. With `wake`, a tab without a page gets it, in the background.
+   */
+  pageFor(profile: string, id: number, wake: boolean): WebContents | undefined {
+    const rec = this.get(this.extensionIds.get(id))
+    if (!rec || rec.profile !== profile) return undefined
+    const live = this.live.get(rec.id)
+    if (live) return live.wc.isDestroyed() ? undefined : live.wc
+    if (!wake || !rec.url) return undefined
+    const woke = this.ensureView(rec)
+    this.changed()
+    return woke?.wc
+  }
+
+  /** chrome.tabs.remove on a tab without a page. */
+  closePageless(profile: string, id: number) {
+    const rec = this.get(this.extensionIds.get(id))
+    if (rec && rec.profile === profile && !this.live.has(rec.id)) this.close(rec.id)
+  }
+
+  private held(rec: TabRecord) {
+    const wc = this.live.get(rec.id)?.wc
+    return !!wc && !wc.isDestroyed() && this.deps.held(wc)
   }
 
   rename(id: string, name: string) {
@@ -1246,7 +1605,7 @@ export class Tabs {
     const shown = this.shown()
     for (const root of this.records.filter((t) => isRoot(this.records, t) && !t.kept)) {
       const all = subtree(this.records, root)
-      if (all.some((t) => shown.includes(t.id))) continue
+      if (all.some((t) => shown.includes(t.id) || this.held(t))) continue
       if (afterMs <= 0 || now - Math.max(...all.map((t) => Math.max(t.lastSeen, t.restoredAt ?? 0))) < afterMs) {
         if (isAsleep(all, { now, afterMs: sleepAfterMs, activeId: this.activeId }) && this.unload(all)) changed = true
         continue
@@ -1275,7 +1634,7 @@ export class Tabs {
       for (const root of this.records.filter((t) => isRoot(this.records, t) && t.kept)) {
         if (root.pinned ? this.keepLoaded.pinned : this.keepLoaded.kept) continue
         const all = subtree(this.records, root)
-        if (all.some((t) => t.id === this.activeId || shown.includes(t.id))) continue
+        if (all.some((t) => t.id === this.activeId || shown.includes(t.id) || this.held(t))) continue
         if (now - Math.max(...all.map((t) => t.lastSeen)) >= sleepAfterMs && this.unload(all)) changed = true
       }
     }
@@ -1380,11 +1739,10 @@ function searchEngineName(searchUrl: string): string {
   }
 }
 
-/** `search` sends the text to the search engine even if it looks like an address. */
-function toUrl(input: string, searchUrl: string, search = false): string {
+/** `search` sends the text to the search engine even if it looks like an address, as a leading ? does. */
+export function toUrl(input: string, searchUrl: string, search = false): string {
   const text = input.trim()
-  if (search) return searchUrl.replace('%s', encodeURIComponent(text))
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text) || /^(about|chrome-extension|file):/i.test(text)) return text
-  if (/^(localhost|[\w-]+(\.[\w-]+)+)(:\d+)?(\/.*)?$/i.test(text) && !text.includes(' ')) return `https://${text}`
-  return searchUrl.replace('%s', encodeURIComponent(text))
+  const query = search ? text : forcedSearch(text)
+  const url = query === undefined ? addressUrl(text) : undefined
+  return url ?? searchUrl.replace('%s', encodeURIComponent(query ?? text))
 }

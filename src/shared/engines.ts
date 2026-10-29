@@ -54,10 +54,41 @@ export function looksLikeAddress(text: string): boolean {
       w.startsWith('/') ||
       w.startsWith('~') ||
       /^localhost\b/i.test(w) ||
-      /[\w-]\.[a-z\d-]*[a-z][a-z\d-]*(:\d+)?(\/|$)/i.test(w) ||
+      /[\p{L}\p{N}_-]\.[\p{L}\p{N}-]*\p{L}[\p{L}\p{N}-]*(:\d+)?(\/|$)/iu.test(w) ||
+      /^\[[\da-f:.]+\](:\d+)?(\/|$)/i.test(w) ||
       /:\d+/.test(w) ||
       w.includes('/') ||
       /^\d+\.\d+\.\d+/.test(w) ||
       /\S@\S/.test(w),
   )
+}
+
+/** "?node.js" in the address bar searches for "node.js", as in Chrome; undefined for anything else. */
+export function forcedSearch(text: string): string | undefined {
+  const m = /^\?\s*(\S.*)$/s.exec(text.trim())
+  return m?.[1]
+}
+
+/**
+ * The page to open for text typed in the address bar, or undefined when it's words to search for.
+ * Return does what the suggestions say it will, so both ask this. A dotted host whose last label
+ * has a letter (example.com, münchen.de, not v1.2.3) gets https://. Hosts that are usually on your
+ * own machine or network get http://, since they rarely have a certificate: localhost, IP
+ * addresses, and a bare name with a port or path (nas:5000, router/).
+ */
+export function addressUrl(input: string): string | undefined {
+  const t = input.trim()
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t) || /^(about|chrome-extension|file):/i.test(t)) return t
+  const m = /^(\[[\da-f:.]+\]|[\p{L}\p{N}_.-]+)(:\d+)?(\/\S*)?$/iu.exec(t)
+  if (!m) return undefined
+  const [, host, port, path] = m
+  const local =
+    host.startsWith('[') ||
+    /^\d{1,3}(\.\d{1,3}){3}$/.test(host) ||
+    /^(.+\.)?localhost$/i.test(host) ||
+    (!host.includes('.') && /\p{L}/u.test(host) && !!(port || path))
+  if (local) return `http://${t}`
+  const labels = host.split('.')
+  if (labels.length > 1 && labels.every(Boolean) && /\p{L}/u.test(labels.at(-1)!)) return `https://${t}`
+  return undefined
 }

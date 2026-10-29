@@ -1,0 +1,53 @@
+/* The columns layout (columns.ts): a card for what Return does, searches, then History and Your tabs. */
+.suggest[data-layout='columns'] .sx-columns { display: flex; flex-direction: column; gap: 8px; }
+.sx-columns .hi { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Shown on each section once you're in the menu: Tab moves to the next. */
+.sx-switch { display: none; align-items: center; gap: 4px; margin-left: auto; font-size: 10.5px; font-weight: 400; color: var(--muted); opacity: 0.7; white-space: nowrap; }
+.sx-columns.in-menu .sx-switch { display: inline-flex; }
+.sx-switch kbd { color: inherit; }
+.sx-switch.on { color: var(--ink); opacity: 1; }
+
+.sx-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0 14px; align-items: center; padding: 12px 14px; border-radius: 10px; background: var(--hover); cursor: default; }
+.sx-card:hover { background: color-mix(in srgb, var(--accent-soft) 60%, transparent); }
+.sx-card.hi { background: var(--accent-soft); }
+.sx-card-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.sx-card .sg-t { font-size: 18px; font-weight: 650; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sx-card .sx-s { font-size: 12px; }
+/* The card's Tab hint sits beside Go, so the card keeps its size as you go into the menu. */
+.sx-card-end { display: flex; align-items: center; gap: 12px; }
+.sx-go { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--accent); font-size: 12px; font-weight: 600; }
+.sx-go svg.i { width: 13px; height: 13px; }
+.sx-card.hi .sx-go { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+.sx-search { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 2px 4px; }
+.sx-label { color: var(--muted); font-size: 12px; margin-right: 2px; }
+.sx-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 12px; }
+.sx-chip:hover { background: var(--hover); }
+.sx-chip .sg-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sx-chip svg.i { flex: none; width: 12px; height: 12px; color: var(--muted); }
+.sx-chip.hi { background: var(--accent); border-color: var(--accent); color: var(--on-accent); outline: none; }
+.sx-chip.hi svg.i { color: inherit; }
+
+.sx-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-items: start; }
+.sx-cols.one { grid-template-columns: minmax(0, 1fr); }
+@container (max-width: 520px) {
+  .sx-cols { grid-template-columns: minmax(0, 1fr); }
+}
+.sx-col { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 6px; border-radius: 10px; background: var(--hover); }
+.sx-head { display: flex; align-items: center; gap: 6px; padding: 3px 6px 6px; color: var(--muted); font-size: 12px; font-weight: 650; }
+.sx-head svg.i { width: 13px; height: 13px; }
+.sx-col.cur .sx-head { color: var(--ink); }
+.sx-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 0 9px; align-items: center; width: 100%; border: 0; background: none; text-align: left; padding: 6px 8px; border-radius: 7px; color: var(--ink); }
+.sx-row:hover { background: var(--hover); }
+.sx-row.hi { background: var(--accent-soft); }
+.sx-row .sx-tile { grid-row: 1 / 3; }
+.sx-row .sg-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sx-row[data-kind='tab'] .sg-t { font-weight: 600; }
+.sx-s { grid-column: 2; display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sx-end, .sx-x { grid-column: 3; grid-row: 1 / 3; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; color: var(--muted); }
+.sx-end svg.i, .sx-x svg.i { width: 13px; height: 13px; }
+/* A history page's remove button shows on hover and while it's selected. */
+.sx-x { visibility: hidden; }
+.sx-row:is(:hover, .hi) .sx-x { visibility: visible; }
+.sx-x:hover { background: var(--hover); color: var(--ink); }

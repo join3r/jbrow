@@ -14,7 +14,9 @@ await Promise.all([
     outfile: 'dist/main.js',
     platform: 'node',
     format: 'cjs',
-    external: ['electron', 'electron-chrome-extensions', 'electron-chrome-web-store'],
+    external: ['electron', 'electron-chrome-extensions', 'electron-chrome-web-store', 'electron-updater'],
+    // Only releases update themselves (src/main/updates.ts); scripts/release.sh sets this.
+    define: { JBROW_RELEASE: JSON.stringify(process.env.JBROW_RELEASE === '1') },
   }),
   // Preload for jbrow's own UI. Sandboxed preloads can't require npm modules,
   // so everything (including the browser-action element) is bundled in.
@@ -53,6 +55,24 @@ await Promise.all([
     format: 'cjs',
     external: ['electron'],
   }),
+  // The permission prompt under a tab's address bar (src/main/permission-prompt.ts).
+  build({
+    ...common,
+    entryPoints: ['src/preload/permission-prompt.ts'],
+    outfile: 'dist/preload-permission-prompt.js',
+    platform: 'node',
+    format: 'cjs',
+    external: ['electron'],
+  }),
+  // Runs in web pages so they see "prompt" for permissions you haven't decided on.
+  build({
+    ...common,
+    entryPoints: ['src/preload/permissions.ts'],
+    outfile: 'dist/preload-permissions.js',
+    platform: 'node',
+    format: 'cjs',
+    external: ['electron'],
+  }),
   // Runs in web pages to inject extensions' user scripts (chrome.userScripts).
   build({
     ...common,
@@ -71,6 +91,13 @@ await Promise.all([
   }),
   build({
     ...common,
+    entryPoints: ['src/ui/permission-prompt.ts'],
+    outfile: 'dist/ui/permission-prompt.js',
+    platform: 'browser',
+    format: 'iife',
+  }),
+  build({
+    ...common,
     entryPoints: ['src/ui/signin.ts'],
     outfile: 'dist/ui/signin.js',
     platform: 'browser',
@@ -80,5 +107,12 @@ await Promise.all([
 
 await cp('src/ui/index.html', 'dist/ui/index.html')
 await cp('src/ui/signin.html', 'dist/ui/signin.html')
+await cp('src/ui/permission-prompt.html', 'dist/ui/permission-prompt.html')
 await cp('src/ui/ui.css', 'dist/ui/ui.css')
+await cp('src/ui/welcome.css', 'dist/ui/welcome.css')
+// The address bar layouts' stylesheets, and the pictures of them settings and the welcome show.
+await cp('src/ui/suggest', 'dist/ui/suggest', { recursive: true, filter: (src) => !src.endsWith('.ts') })
+await cp('src/ui/img', 'dist/ui/img', { recursive: true })
+// The menu bar glyph (build/trayTemplate.svg is its source).
+await cp('src/main/img', 'dist/img', { recursive: true })
 

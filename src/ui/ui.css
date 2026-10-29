@@ -1,11 +1,11 @@
-/* Sizes here must match SIDEBAR_WIDTH, TOOLBAR_HEIGHT, GUTTER, SIDE_GAP and SIDE_HEADER in src/main/panel.ts, and PANE_GAP and PANE_HEAD in src/shared/split.ts. */
+/* Sizes here must match SIDEBAR_WIDTH, BAR_HEIGHT, TOOLBAR_HEIGHT, GUTTER, SIDE_GAP and SIDE_HEADER in src/main/panel.ts, and PANE_GAP in src/shared/split.ts. */
 /* Theme colors are set on [data-theme] rather than :root alone, so a theme swatch in settings can show its own. */
 :root {
   --sidebar: 256px;
-  --toolbar: 50px;
+  --toolbar: 40px;
+  --bar: 32px;
   --gutter: 8px;
   --pane-gap: 8px;
-  --pane-head: 24px;
   --font: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
   --mono: ui-monospace, 'SF Mono', Menlo, monospace;
   --dur: 180ms;
@@ -148,17 +148,62 @@ button:focus-visible, input:focus-visible, [role='button']:focus-visible { outli
 }
 
 /* ---------- toolbar ---------- */
-#toolbar { position: absolute; z-index: 1; top: 0; left: 0; right: 0; height: var(--toolbar); display: flex; align-items: center; -webkit-app-region: drag; }
-#toolbar > *, .tools > * { -webkit-app-region: no-drag; }
-.side-tools { width: calc(var(--sidebar) - 16px); margin: 0 8px; display: flex; align-items: center; gap: 4px; }
+/* The window moves by the strip along its top edge and the row above the sidebar. */
+.drag-strip { position: absolute; top: 0; left: 0; right: 0; height: var(--gutter); -webkit-app-region: drag; }
+.side-tools { position: absolute; z-index: 1; top: var(--gutter); left: 8px; width: calc(var(--sidebar) - 16px); height: var(--bar); display: flex; align-items: center; justify-content: flex-end; gap: 4px; -webkit-app-region: drag; }
+.side-tools > * { -webkit-app-region: no-drag; }
+/* The address bars sit above the pages, one per pane; main lays each page right under its bar. */
+#toolbar { position: absolute; z-index: 1; top: var(--gutter); left: var(--sidebar); right: calc(var(--gutter) + var(--side, 0px)); height: var(--bar); }
+.panel.settings-open #toolbar { display: none; }
 #filter { flex: 1; min-width: 0; }
 /* Sized by label and never bold when selected, so picking one doesn't push "Personal" into an ellipsis. */
 #filter button { flex: 1 1 auto; padding: 4px 6px; }
 #filter button[aria-pressed='true'] { font-weight: inherit; }
-.tools { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding-right: var(--gutter); -webkit-app-region: drag; }
+/* Short of room, profiles shrink to their mark (emoji, else color dot) with the name on hover; see renderFilter. */
+#filter .mark { flex: none; display: inline-grid; place-items: center; vertical-align: middle; }
+#filter .mark .dot { margin: 0; width: 8px; height: 8px; vertical-align: 0; }
+#filter .mark svg.i { width: 13px; height: 13px; }
+#filter .emoji { font-size: 13px; line-height: 1; }
+#filter[data-fit='full'] .mark, #filter[data-fit='selected'] [aria-pressed='true'] .mark { margin-right: 5px; }
+#filter[data-fit='selected'] button:not([aria-pressed='true']) { flex: 0 0 26px; }
+#filter[data-fit='icons'] button { flex: 1 1 0; min-width: 24px; }
+#filter .filter-menu { display: flex; align-items: center; gap: 5px; padding: 4px 6px; text-align: left; color: var(--ink); }
+#filter .filter-menu .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#filter .filter-menu > svg.i { flex: none; width: 13px; height: 13px; color: var(--muted); }
+#filter .filter-menu:hover, #filter .filter-menu[aria-expanded='true'] { background: var(--hover); }
+/* Outside the toolbar, which the sidebar would paint over. */
+.pop.filter-pop { top: calc(var(--toolbar) - 4px); left: 8px; right: auto; width: auto; min-width: 180px; max-width: calc(var(--sidebar) - 16px); }
+.filter-pop .pop-item .mark { flex: none; width: 15px; display: inline-grid; place-items: center; }
+.filter-pop .pop-item .dot { width: 8px; height: 8px; border-radius: 50%; }
+.filter-pop .pop-item .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-pop .pop-item[aria-checked='true'] { font-weight: 600; }
+/*
+ * A pane's address bar is the top of its page's card. It takes the page's color (--site, with
+ * .tone-dark or .tone-light for what reads on it), or jbrow's surface when the page has none.
+ * The live bar (#bar) is the active tab's; .pane-bar draws the other panes of a split.
+ */
+.bar { --bar-bg: var(--site, var(--surface)); position: absolute; top: 0; height: var(--bar); min-width: 0; display: flex; align-items: center; gap: 2px; padding-right: 4px; border-radius: 9px 9px 0 0; background: var(--bar-bg); box-shadow: inset 0 -1px 0 var(--bar-line, var(--line)); container: bar / inline-size; }
+#bar { left: var(--fx, 0px); width: var(--fw, 100%); }
+/* The color carries on under the page's rounded top corners, so bar and page meet without a notch. Not while the UI is above the page. */
+.bar::after { content: ''; position: absolute; z-index: -1; left: 0; right: 0; top: 100%; height: 10px; background: inherit; }
+.covering .bar::after { display: none; }
+.bar.tone-dark { --bar-line: rgba(255, 255, 255, 0.08); }
+.bar.tone-light { --bar-line: rgba(20, 30, 50, 0.09); }
+/* The bar's own text and buttons take the tone; its popovers and suggestions keep jbrow's. */
+.bar.tone-dark:not(:has(#omnibox:focus)) :is(.profile-band, .cert-button, .omni-field, .find, .pinned-actions, #restyleButton, #extButton, #paneClose, .pane-url, .bar-btn) {
+  --ink: #eef1f6; --muted: rgba(238, 241, 246, 0.66); --line: rgba(255, 255, 255, 0.14); --hover: rgba(255, 255, 255, 0.1);
+}
+.bar.tone-light:not(:has(#omnibox:focus)) :is(.profile-band, .cert-button, .omni-field, .find, .pinned-actions, #restyleButton, #extButton, #paneClose, .pane-url, .bar-btn) {
+  --ink: #1b1f27; --muted: rgba(27, 31, 39, 0.62); --line: rgba(20, 30, 50, 0.14); --hover: rgba(20, 30, 50, 0.07);
+}
+/* Typing, the bar is jbrow's again, so what you type never looks like part of the page. */
+#bar:has(#omnibox:focus) { --bar-bg: var(--solid); --bar-line: var(--line); outline: 2px solid var(--accent); outline-offset: -2px; }
+.bar .icon { width: 26px; height: 26px; border-radius: 6px; }
+.bar .icon svg.i { width: 15px; height: 15px; }
 .seg { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; }
 .seg button { flex: 1; min-width: 0; border: 0; background: none; border-radius: 6px; padding: 4px 2px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seg button[aria-pressed='true'] { background: var(--selected); color: var(--ink); font-weight: 600; }
+.seg button:disabled { opacity: 0.4; }
 /* More choices than fit in one row: buttons keep their full names and wrap. */
 .seg-wrap { flex-wrap: wrap; }
 .seg-wrap button { flex: 1 0 auto; padding: 4px 8px; }
@@ -173,31 +218,52 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 #pin[aria-pressed='true'] svg.i { fill: currentColor; }
 .icon.sm { width: 24px; height: 26px; border-radius: 6px; }
 .icon.sm svg.i { width: 15px; height: 15px; }
-/* The box is drawn here, not on the input, so back, forward, reload and the profile's color sit inside it. */
-.omni { position: relative; flex: 1; min-width: 0; height: 30px; display: flex; align-items: center; gap: 4px; padding: 0 4px 0 2px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); }
-.omni:has(#omnibox:focus) { outline: 2px solid var(--accent); outline-offset: 1px; }
-.nav { flex: none; display: flex; align-items: center; gap: 0; padding-right: 4px; margin-right: 2px; border-right: 1px solid var(--line); }
-.nav .icon.sm { width: 24px; height: 24px; }
+/* Back, reload, the profile, the lock and the address. Its popovers and the suggestions hang from the whole bar. */
+.omni { flex: 1; min-width: 0; align-self: stretch; display: flex; align-items: center; gap: 2px; }
+.nav { flex: none; display: flex; align-items: center; gap: 0; }
+.bar .pop, .bar .suggest { top: calc(100% + 4px); }
+/* A narrow pane's suggestions spread over its neighbors; the last pane's grow leftward. */
+.bar .suggest { min-width: min(560px, 100vw - var(--sidebar) - 2 * var(--gutter)); }
+.bar.last .suggest { left: auto; right: 0; }
 .omni-field { position: relative; flex: 1; min-width: 0; height: 100%; }
 #omnibox { width: 100%; height: 100%; border: 0; background: none; outline: none; color: var(--ink); padding: 0 6px; font: 13px var(--font); user-select: text; }
+/* Not being edited, the address shows as its site with the rest dimmed (.url-show over the input's own text). */
+#omnibox.dressed:not(:focus) { color: transparent; }
+.omni-field:focus-within .url-show { display: none; }
+.url-show { position: absolute; inset: 0; display: flex; align-items: center; padding: 0 6px; pointer-events: none; white-space: nowrap; overflow: hidden; font-size: 13px; }
+.url-show .host { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+.url-show .rest { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 #omnibox::placeholder { color: var(--muted); }
 /* The profile's color fills the box from its left edge through back, reload and the profile's name, top to bottom.
    It recolors the tokens the buttons use rather than the buttons themselves. Stripes mean Tab picked another profile for what's typed. */
-.profile-band { flex: none; align-self: stretch; display: flex; align-items: center; margin-left: -2px; padding-left: 2px; border-radius: 7px 0 0 7px; }
+.profile-band { flex: none; align-self: stretch; display: flex; align-items: center; padding-left: 4px; border-radius: 9px 0 0 0; }
 .profile-band.on { padding-right: 10px; --muted: color-mix(in srgb, var(--pc) 45%, var(--ink)); --line: color-mix(in srgb, var(--pc) 35%, transparent); --hover: color-mix(in srgb, var(--pc) 22%, transparent); background: color-mix(in srgb, var(--pc) 22%, transparent); }
 .profile-band.on.typed { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--pc) 28%, transparent) 0 6px, color-mix(in srgb, var(--pc) 12%, transparent) 6px 12px); }
 :root[data-profile-style='edge'] .profile-band.on { box-shadow: inset -2px 0 0 var(--pc); }
 :root[data-profile-style='solid'] .profile-band.on { --ink: #fff; --muted: rgba(255, 255, 255, 0.85); --line: rgba(255, 255, 255, 0.35); --hover: rgba(255, 255, 255, 0.18); background: var(--pc); }
 :root[data-profile-style='solid'] .profile-band.on.typed { background: repeating-linear-gradient(135deg, var(--pc) 0 6px, color-mix(in srgb, var(--pc) 80%, transparent) 6px 12px); }
-.profile-name { padding-left: 4px; font-size: 11px; font-weight: 600; white-space: nowrap; color: color-mix(in srgb, var(--pc) 55%, var(--ink)); }
+.profile-name { border: 0; background: none; border-radius: 5px; padding: 3px 4px; margin-right: -4px; font-size: 11px; font-weight: 600; white-space: nowrap; color: color-mix(in srgb, var(--pc) 55%, var(--ink)); }
+.profile-name:hover, .profile-name[aria-expanded='true'] { background: var(--hover); }
+.pop.profile-pop { left: 0; right: auto; width: auto; min-width: 160px; }
+.profile-pop .pop-item .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pc); }
+.profile-pop .pop-item[aria-checked='true'] { font-weight: 600; }
 :root[data-profile-style='solid'] .profile-name { color: var(--ink); }
 #reload { color: var(--muted); }
 .private-mask { position: absolute; inset: 0; display: flex; align-items: center; gap: 6px; padding: 0 6px; color: var(--muted); font-size: 13px; pointer-events: none; }
 .private-mask svg.i { width: 14px; height: 14px; }
+/* ⇧⌘C says so in the address bar, where your eyes are, rather than at the foot of the sidebar. */
+.copied { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px 0 6px; border-radius: 6px; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 600; pointer-events: none; animation: copied-in 0.22s cubic-bezier(0.34, 1.4, 0.64, 1); }
+.copied svg.i { width: 13px; height: 13px; stroke-width: 2.6; }
+.copied.out { opacity: 0; transition: opacity 0.25s; }
+.omni.copied-flash { border-color: var(--accent); }
+@keyframes copied-in { from { opacity: 0; transform: translateY(-50%) scale(0.8); } }
+@media (prefers-reduced-motion: reduce) {
+  .copied { animation: none; }
+}
 
-/* Find in page: a box like the address bar's, beside it, since nothing can draw over the page. */
-.find { flex: 0 1 272px; min-width: 180px; height: 30px; display: flex; align-items: center; gap: 0; padding: 0 2px 0 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); }
-.find:has(#findInput:focus) { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Find in page takes the address's place in the bar, underlined so it doesn't pass for an address. */
+.omni.finding :is(.omni-field, .cert-button) { display: none; }
+.find { flex: 1; min-width: 0; align-self: stretch; display: flex; align-items: center; gap: 0; padding: 0 2px 0 8px; margin-left: 4px; box-shadow: inset 0 -2px 0 var(--accent); }
 .find-icon { display: inline-grid; color: var(--muted); }
 .find-icon svg.i { width: 14px; height: 14px; }
 #findInput { flex: 1; min-width: 0; height: 100%; border: 0; background: none; outline: none; color: var(--ink); padding: 0 6px; font: 13px var(--font); user-select: text; }
@@ -205,6 +271,15 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .find-count { flex: none; font: 11.5px var(--mono); color: var(--muted); padding-right: 4px; white-space: nowrap; }
 .find.none .find-count { color: var(--danger); }
 .find .icon.sm { width: 22px; height: 24px; }
+
+/* A narrow pane's bar folds: reload, forward, the profile's name and all but the site go, then the extensions but one. */
+@container bar (max-width: 460px) {
+  #reload, #forward, .bar .reload, .bar .profile-name, .url-show .rest, .pane-url .rest, #restyleButton { display: none; }
+  .bar .profile-band.on { padding-right: 6px; }
+}
+@container bar (max-width: 380px) {
+  .bar .pinned-actions > :nth-child(n + 2) { display: none; }
+}
 
 /* ---------- extensions popover ---------- */
 .ext { position: relative; }
@@ -223,6 +298,17 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .pop-item:hover { background: var(--accent-soft); }
 .pop-item svg.i { width: 15px; height: 15px; color: var(--muted); }
 .pop-item > span, .private-mask > span { display: inline-grid; }
+
+/* ---------- sound: which tabs are playing, from the toolbar ---------- */
+.sound { position: relative; }
+.sound-pop { width: 280px; }
+.sound-item { display: flex; align-items: center; gap: 2px; }
+.sound-item .pop-item { flex: 1; min-width: 0; }
+.sound-item .fav { flex: none; width: 16px; height: 16px; border-radius: 3px; object-fit: contain; }
+.sound-item .fav.none { background: var(--line); }
+.sound-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sound-item .prof { flex: none; font-size: 11px; color: var(--pc, var(--muted)); }
+.sound-item:is(.muted, .quiet) .name { color: var(--muted); }
 
 /* ---------- downloads: one pie per download, details in a popover ---------- */
 @property --p { syntax: '<number>'; inherits: true; initial-value: 0; }
@@ -255,29 +341,14 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 #restyleButton.styled { color: var(--accent); }
 #restyleButton.busy svg.i { animation: pulse 1s ease-in-out infinite; }
 
-.suggest { position: absolute; top: 36px; left: 0; right: 0; z-index: 20; background: var(--surface); backdrop-filter: blur(20px); border: 1px solid var(--line); border-radius: 10px; padding: 4px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25); }
-.sg { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 0 10px; align-items: center; width: 100%; border: 0; background: none; text-align: left; padding: 6px 8px; border-radius: 7px; }
-.sg.hi { background: var(--accent-soft); }
-.sg img, .sg .fav { width: 16px; height: 16px; border-radius: 3px; grid-row: 1 / 3; }
-.sg-t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sg-s { grid-column: 2; color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sg-tag { grid-column: 3; grid-row: 1 / 3; font: 11px var(--mono); color: var(--muted); }
-.sg .fav { display: inline-grid; place-items: center; color: var(--muted); }
-.sg .fav svg.i { width: 14px; height: 14px; }
-/* Search suggestions are one line of plain text, like Chrome's. */
-.sg-search .sg-t { font-weight: inherit; }
-/* A history row's tag turns into its remove button on hover. */
-.sg-x { grid-column: 3; grid-row: 1 / 3; display: none; place-items: center; width: 20px; height: 20px; justify-self: end; border-radius: 5px; color: var(--muted); }
-.sg-x:hover { background: var(--hover); color: var(--ink); }
-.sg-x svg.i { width: 13px; height: 13px; }
-.sg-visit:is(:hover, .hi) .sg-x { display: inline-grid; }
-.sg-visit:is(:hover, .hi) .sg-tag { visibility: hidden; }
-.sg-hint { display: flex; align-items: center; gap: 5px; margin-top: 4px; padding: 5px 8px 3px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
-.sg-hint kbd { font: 10.5px var(--mono); padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; }
-.sg-hint .dot { width: 7px; height: 7px; border-radius: 50%; }
+/* The address bar's suggestions are styled in suggest/suggest.css and each layout's own file next to it. */
 
 /* ---------- sidebar ---------- */
 #sidebar { position: absolute; z-index: 1; top: var(--toolbar); left: 0; bottom: 0; width: var(--sidebar); display: flex; flex-direction: column; padding: 0 8px var(--gutter); }
+/* Window-wide controls sit at the foot of the sidebar, out of the pages' way; their popovers open upward. */
+.side-foot { flex: none; display: flex; align-items: center; gap: 2px; padding-top: 6px; }
+.side-foot .grow { flex: 1; }
+.side-foot .pop { top: auto; bottom: calc(100% + 4px); left: 0; right: auto; }
 #threads { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; padding-bottom: 8px; }
 .scope { display: flex; justify-content: space-between; align-items: center; gap: 6px; background: var(--accent-soft); color: var(--accent); border-radius: 7px; padding: 6px 9px; margin-bottom: 4px; font-size: 12px; font-weight: 600; }
 .scope button { border: 0; background: none; color: inherit; text-decoration: underline; padding: 0; font-size: 12px; }
@@ -297,6 +368,9 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .pin-tile.unread::after { content: ''; position: absolute; top: 4px; right: 4px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 .pin-tile.loading .fav { animation: pulse 1s ease-in-out infinite; }
 .pin-tile.crashed .fav { filter: grayscale(1); opacity: 0.45; }
+.pin-tile .snd-badge { position: absolute; top: 2px; left: 2px; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 4px; color: var(--ink); background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.pin-tile .snd-badge.muted { color: var(--muted); }
+.pin-tile .snd-badge svg.i { width: 10px; height: 10px; stroke-width: 2.4; }
 .pin-tile.ins-left, .pin-tile.ins-right { overflow: visible; }
 .pin-tile.ins-left::after, .pin-tile.ins-right::after { content: ''; position: absolute; top: 2px; bottom: 2px; width: 2px; height: auto; border-radius: 1px; background: var(--accent); pointer-events: none; }
 .pin-tile.ins-left::after { left: -3px; right: auto; }
@@ -338,6 +412,11 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .row .fav-home:hover { color: var(--ink); background: var(--hover); }
 .row .fav-home:hover .fav { visibility: hidden; }
 .row .fav-home:hover svg.i { display: block; }
+/* An extension's badge on the favicon: faint on a tab it opened, solid while it works in the page. */
+.row .fav-ext { position: relative; display: grid; width: 16px; height: 16px; }
+.row .fav-ext .ext-badge { position: absolute; right: -4px; bottom: -4px; display: grid; place-items: center; width: 10px; height: 10px; border-radius: 3px; object-fit: contain; color: var(--muted); background: var(--surface); box-shadow: 0 0 0 1px var(--line); opacity: 0.5; pointer-events: none; }
+.row .fav-ext .ext-badge svg.i { width: 8px; height: 8px; }
+.row .fav-ext .ext-badge.live { opacity: 1; box-shadow: 0 0 0 1.5px var(--pc, var(--muted)); }
 .row .t .away { margin-right: 5px; color: var(--muted); }
 .row.loading .fav { animation: pulse 1s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.35; } }
@@ -349,6 +428,12 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .row:hover .act, .row:focus-visible .act { display: inline-grid; }
 .row:hover .meta, .row:focus-visible .meta { display: none; }
 .row .act:hover { color: var(--ink); background: var(--hover); }
+/* A tab playing sound shows a speaker that mutes it, hover or not; a muted one a struck-out one. */
+.row .snd { display: inline-grid; width: 18px; height: 18px; padding: 0; border: 0; background: none; color: var(--ink); border-radius: 4px; place-items: center; }
+.row .snd.muted { color: var(--muted); }
+.row .snd svg.i, .row .snd-mark svg.i { width: 13px; height: 13px; stroke-width: 2.2; }
+.row .snd:hover { background: var(--hover); }
+.snd-mark { display: inline-grid; color: var(--muted); }
 .row.unread .t::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
 .row input.ren { width: 100%; min-width: 0; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--accent); border-radius: 5px; padding: 1px 5px; user-select: text; }
 .frow::before, .set-row::before { display: none; }
@@ -356,7 +441,9 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .frow .fav svg.i, .set-row .fav svg.i { width: 15px; height: 15px; }
 .frow .t { font-weight: 600; }
 .folder-body { display: flex; flex-direction: column; gap: 1px; padding-left: 14px; }
-.earlier-sec { margin-top: auto; display: flex; flex-direction: column; gap: 1px; }
+/* Earlier, the way to Archived and the apps' sections, at the bottom of the sidebar. */
+.bottom-sec { margin-top: auto; display: flex; flex-direction: column; gap: 1px; }
+.earlier-sec { display: flex; flex-direction: column; gap: 1px; }
 .earlier .row { opacity: 0.55; }
 .earlier .row:hover, .earlier .row.cur { opacity: 1; }
 /* An asleep thread's pages are unloaded; the line under its name says what it held. */
@@ -385,7 +472,14 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 
 /* App sections: the heading shows the apps' icons, overlapping for linked apps. */
 .app-head { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
-.app-head > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.app-head { cursor: default; border-radius: 6px; padding-left: 4px; padding-right: 8px; }
+.app-head:hover { color: var(--ink); }
+.app-head .app-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.app-head .meta { font-weight: 400; }
+.app-head[aria-expanded="true"] .meta { visibility: hidden; }
+.app-head .chev { flex: none; display: inline-grid; place-items: center; transition: transform 0.12s; }
+.app-head .chev svg.i { width: 10px; height: 10px; }
+.app-head[aria-expanded="true"] .chev { transform: rotate(90deg); }
 .app-icons { flex: none; display: inline-flex; }
 .app-icons img, .app-icons .no-icon { width: 14px; height: 14px; }
 .app-icons > * + * { margin-left: -4px; }
@@ -416,36 +510,43 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .rules-pop textarea { display: block; width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 7px; background: var(--selected); color: var(--ink); padding: 6px 8px; font: 12px var(--mono); }
 
 /* ---------- content (the native page view sits on top of this) ---------- */
-#content { position: absolute; z-index: 0; left: var(--sidebar); top: var(--toolbar); right: calc(var(--gutter) + var(--side, 0px)); bottom: var(--gutter); border-radius: 9px; overflow: hidden; background: var(--surface); box-shadow: 0 0 0 100vmax var(--tint); }
+#content { position: absolute; z-index: 0; left: var(--sidebar); top: var(--toolbar); right: calc(var(--gutter) + var(--side, 0px)); bottom: var(--gutter); border-radius: 0 0 9px 9px; overflow: hidden; background: var(--surface); box-shadow: 0 0 0 100vmax var(--tint); }
 /*
  * While a popover or the suggestions cover the page, jbrow's UI sits above the live page (see
  * Panel.setOverlay), so the page area turns clear. Blur can't reach a page in another view, so
  * popovers turn nearly solid instead.
  */
 .covering #content { background: none; }
+/* Settings has no address; it takes the whole card. */
+.panel.settings-open #content { top: var(--gutter); border-radius: 9px; }
 .covering #content.split, .covering .pane { background: none; }
 
 /*
  * Split view: main lays the pages side by side over .pane, with --pane-gap between them. The
- * active tab's own screens fill its pane (--fx, --fw); the ring, the dividers and the ×s sit in .panes
- * above, which doesn't clip, so the ring can show around the focused page.
+ * active tab's own screens fill its pane (--fx, --fw); the ring and the dividers sit in .panes
+ * above, which doesn't clip, so the ring can show around the focused pane, its address bar too.
  */
 #content.split { background: var(--tint); }
 .pane-bgs { display: contents; }
-.pane { position: absolute; top: 0; bottom: 0; border-radius: 9px; background: var(--surface); display: grid; place-items: center; color: var(--muted); font-size: 12px; }
-.split > :is(.blank, .cert-warn) { position: absolute; top: var(--pane-head); bottom: 0; left: var(--fx); width: var(--fw); overflow-y: auto; border-radius: 9px; background: var(--surface); }
+.pane { position: absolute; top: 0; bottom: 0; border-radius: 0 0 9px 9px; background: var(--surface); display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+.split > :is(.blank, .cert-warn) { position: absolute; top: 0; bottom: 0; left: var(--fx); width: var(--fw); overflow-y: auto; border-radius: 0 0 9px 9px; background: var(--surface); }
 .panes { position: absolute; z-index: 0; left: var(--sidebar); top: var(--toolbar); right: calc(var(--gutter) + var(--side, 0px)); bottom: var(--gutter); pointer-events: none; }
-.pane-ring { position: absolute; top: 0; bottom: 0; border-radius: 9px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); }
+.pane-ring { position: absolute; top: calc(-1 * var(--bar)); bottom: 0; border-radius: 9px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); }
 .pane-split { position: absolute; top: 0; bottom: 0; width: var(--pane-gap); cursor: col-resize; pointer-events: auto; }
-/* Each pane's page starts below --pane-head, and its × sits in that strip's right corner. */
-.pane-x { position: absolute; top: 3px; width: 18px; height: 18px; margin-left: -21px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--muted); display: grid; place-items: center; pointer-events: auto; }
-.pane-x:hover { background: var(--hover); color: var(--ink); }
-.pane-x svg.i { width: 12px; height: 12px; }
+/* The other panes' bars: what they show, and a click on the address makes the pane active with the keyboard in its bar. */
+.pane-bars { display: contents; }
+.pane-url { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; padding: 0 6px; border: 0; background: none; color: var(--ink); font-size: 13px; white-space: nowrap; overflow: hidden; text-align: left; }
+.pane-url .host { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.pane-url .rest { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.pane-url .none { color: var(--muted); }
+.pane-bar .lock { flex: none; width: 26px; height: 26px; display: inline-grid; place-items: center; color: var(--muted); }
+.pane-bar .lock.warn { color: var(--danger); }
+.pane-bar .lock svg.i { width: 14px; height: 14px; }
 .pane-split:hover, .pane-split.drag { background: linear-gradient(var(--accent), var(--accent)) center / 2px 40% no-repeat; }
 .covering :is(.pop, .suggest) { background: color-mix(in srgb, var(--solid) 96%, transparent); }
 
 /* An extension's side panel (chrome.sidePanel). Its page is a native view over .side-body. */
-.side-panel { position: absolute; z-index: 1; top: var(--toolbar); right: var(--gutter); bottom: var(--gutter); width: var(--side-w, 0px); display: flex; flex-direction: column; }
+.side-panel { position: absolute; z-index: 1; top: var(--gutter); right: var(--gutter); bottom: var(--gutter); width: var(--side-w, 0px); display: flex; flex-direction: column; }
 .side-split { position: absolute; left: -8px; top: 0; bottom: 0; width: 8px; cursor: col-resize; }
 .side-split:hover, .side-split.drag { background: linear-gradient(var(--accent), var(--accent)) center / 2px 40% no-repeat; }
 .side-head { flex: none; height: 32px; display: flex; align-items: center; gap: 7px; padding-left: 6px; min-width: 0; font-size: 12px; font-weight: 600; }
@@ -567,6 +668,16 @@ body.resizing, body.resizing * { cursor: col-resize !important; }
 .theme:hover .theme-preview { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .theme[aria-pressed='true'] { color: var(--ink); font-weight: 600; }
 .theme[aria-pressed='true'] .theme-preview { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The address bar's layouts, each a picture with its name and a line about it. */
+.layout-picks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.layout-pick { display: flex; flex-direction: column; gap: 4px; padding: 0 0 2px; border: 0; background: none; text-align: left; color: var(--ink); }
+.layout-pick .art { display: block; aspect-ratio: 8 / 5; margin-bottom: 4px; border: 1px solid var(--line); border-radius: 9px; background: var(--hover); overflow: hidden; }
+.layout-pick .art img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.layout-pick .t { font-size: 12.5px; }
+.layout-pick .d { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.layout-pick:hover .art { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.layout-pick[aria-pressed='true'] .t { font-weight: 600; }
+.layout-pick[aria-pressed='true'] .art { outline: 2px solid var(--accent); outline-offset: 1px; }
 .help { color: var(--muted); font-size: 12.5px; line-height: 1.5; margin: 0 0 10px; }
 .help b { color: var(--ink); font-weight: 600; }
 .help code, .settings textarea { font: 12px var(--mono); }
@@ -639,8 +750,51 @@ body.resizing, body.resizing * { cursor: col-resize !important; }
 .app-name em { font-style: normal; font-size: 11px; color: var(--muted); margin-left: 6px; }
 .app-row .seg button { flex: none; padding: 4px 10px; }
 
+.ext-profile { display: flex; align-items: center; gap: 6px; margin: 18px 0 6px; font-weight: 600; }
+.ext-profile:first-child { margin-top: 0; }
+.ext-profile .dot { width: 8px; height: 8px; border-radius: 50%; }
+.ext-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 4px 0; }
+.ext-icon img, .ext-icon .no-icon { width: 22px; height: 22px; display: block; }
+.ext-icon .no-icon { display: grid; place-items: center; border-radius: 5px; background: var(--muted); color: #fff; font-size: 11px; text-transform: uppercase; }
+.ext-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ext-name small { font-size: 11px; color: var(--muted); margin-left: 6px; }
+.ext-row.off .ext-icon, .ext-row.off .ext-name { opacity: 0.5; }
+.ext-row input { margin: 0; accent-color: var(--accent); }
+/* Remove shows on hover, like Restore and Forget on archived rows. */
+.ext-acts { display: flex; visibility: hidden; }
+.ext-row:hover .ext-acts, .ext-acts:focus-within { visibility: visible; }
+
 .profile-list { margin-bottom: 10px; }
-.profile-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 3px 0; }
+.profile-sites { display: grid; gap: 10px; }
+.profile-sites label { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; color: var(--muted); }
+.profile-sites .swatch-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.profile-row { position: relative; display: grid; grid-template-columns: auto auto auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 3px 0; }
+.profile-row .grip { display: grid; place-items: center; width: 14px; height: 24px; margin-right: -6px; color: var(--muted); opacity: 0; cursor: grab; }
+.profile-row .grip svg.i { width: 14px; height: 14px; stroke-width: 2.6; }
+.profile-row:hover .grip, .profile-list.dragging .grip { opacity: 0.7; }
+.profile-list:has(> .profile-row:only-child) .grip { display: none; }
+.profile-row.ins-before::after, .profile-row.ins-after::after { content: ''; position: absolute; left: 0; right: 0; height: 2px; border-radius: 1px; background: var(--accent); pointer-events: none; }
+.profile-row.ins-before::after { top: -1px; }
+.profile-row.ins-after::after { bottom: -1px; }
+.profile-row .emoji { display: grid; place-items: center; width: 28px; height: 24px; padding: 0; font-size: 14px; line-height: 1; color: var(--ink); background: none; border: 1px dashed var(--line); border-radius: 6px; }
+.profile-row .emoji.set { border-style: solid; border-color: transparent; }
+.profile-row .emoji:hover, .profile-row .emoji[aria-expanded='true'] { border-color: var(--line); background: var(--hover); }
+.profile-row .emoji svg.i { width: 13px; height: 13px; color: var(--muted); opacity: 0.7; }
+.set-item:has(> #emojiPop) { position: relative; }
+.pop.emoji-pop { right: auto; width: 296px; display: flex; flex-direction: column; gap: 6px; user-select: none; }
+.emoji-pop input { height: 28px; border: 1px solid var(--line); border-radius: 7px; background: var(--selected); color: var(--ink); padding: 0 8px; font: 12.5px var(--font); outline: none; }
+.emoji-pop input:focus { border-color: var(--accent); }
+.emoji-grid { max-height: 232px; overflow-y: auto; margin: 0 -2px; padding: 0 2px; }
+.emoji-grid h4 { font: 600 10px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 8px 4px 4px; }
+.emoji-grid .emoji-row { display: grid; grid-template-columns: repeat(8, 1fr); }
+.emoji-grid button { height: 32px; border: 0; border-radius: 6px; background: none; font-size: 18px; line-height: 1; padding: 0; }
+.emoji-grid button:hover, .emoji-grid button.on { background: var(--accent-soft); }
+.emoji-grid button[aria-pressed='true'] { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.emoji-grid .typed { font: 600 15px var(--font); color: var(--ink); }
+.emoji-grid .pop-empty { padding: 10px 4px 6px; }
+.emoji-foot { display: flex; justify-content: space-between; padding: 4px 4px 2px; font-size: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
+.emoji-foot .link { text-decoration: none; }
+.emoji-foot .link:hover { text-decoration: underline; }
 .swatch { position: relative; width: 22px; height: 22px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--line); cursor: pointer; }
 .swatch input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
 .profile-row .name { font: inherit; color: var(--ink); background: none; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; margin-left: -6px; min-width: 0; }
@@ -650,3 +804,9 @@ body.resizing, body.resizing * { cursor: col-resize !important; }
 
 /* ---------- privacy ---------- */
 #clearData { margin: 4px 0 8px; }
+
+/* ---------- whimsy (see whimsy.ts) ---------- */
+.whimsy-layer { position: fixed; inset: 0; z-index: 1000; pointer-events: none; overflow: hidden; }
+.whimsy-cloud { position: absolute; width: 40px; height: 40px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--c) 45%, transparent) 0 35%, transparent 70%); }
+/* A row's pop overshoots its width for a moment; that shouldn't flash a scrollbar. */
+.whimsy #threads { overflow-x: hidden; }

@@ -1,10 +1,11 @@
 import { app, ipcMain, webFrameMain, type Session } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { UserScriptInjection } from '../shared/types'
 import { libraryOf, permissionsOf } from './library'
 import type { ProfileRuntime } from './profiles'
+import { setAside, writeAtomic } from './json-file'
 
 type RunAt = UserScriptInjection['runAt']
 type World = UserScriptInjection['world']
@@ -62,6 +63,7 @@ export class UserScripts {
       if (existsSync(storePath())) this.registered = JSON.parse(readFileSync(storePath(), 'utf8'))
     } catch (error) {
       console.error('[user-scripts] could not read user-scripts.json:', error)
+      setAside(storePath())
     }
 
     // A top-level page's preload asks for its scripts before the page's own scripts run.
@@ -94,7 +96,7 @@ export class UserScripts {
   }
 
   private save() {
-    writeFileSync(storePath(), JSON.stringify(this.registered, null, 2))
+    writeAtomic(storePath(), JSON.stringify(this.registered, null, 2))
   }
 
   /** A deleted profile's registrations go with it. */
@@ -102,6 +104,13 @@ export class UserScripts {
     this.runtimes = this.runtimes.filter((rt) => rt.profile.id !== profile)
     if (!this.registered[profile]) return
     delete this.registered[profile]
+    this.save()
+  }
+
+  /** A removed extension's registrations go with it. */
+  forgetExtension(profile: string, extId: string) {
+    if (!this.registered[profile]?.[extId]) return
+    delete this.registered[profile][extId]
     this.save()
   }
 
@@ -352,6 +361,8 @@ function originOf(url: string): string {
 // ---------- match patterns and globs ----------
 
 const glob = (g: string) => new RegExp(`^${g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 's')
+/** A match pattern's path: only `*` is a wildcard there, and `?` starts the query. */
+const pathGlob = (g: string) => new RegExp(`^${g.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`, 's')
 
 /** Chrome's match pattern syntax: `<all_urls>` or scheme://host/path, with `*` wildcards. */
 function parsePattern(pattern: string): ((url: URL) => boolean) | null {
@@ -363,7 +374,7 @@ function parsePattern(pattern: string): ((url: URL) => boolean) | null {
   const hp = /^(\*|\*\.[^:*]+|[^:*]*)(?::(\d+|\*))?$/.exec(hostPort)
   if (!hp) return null
   const [, host, port] = hp
-  const pathRe = glob(pathPattern)
+  const pathRe = pathGlob(pathPattern)
   return (u) => {
     const s = u.protocol.slice(0, -1)
     if (scheme === '*' ? s !== 'http' && s !== 'https' : s !== scheme) return false

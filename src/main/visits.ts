@@ -1,7 +1,8 @@
 import { app, net } from 'electron'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { CompletionView, VisitView } from '../shared/types'
+import { setAside, writeAtomic } from './json-file'
 
 /** One page in the browsing history. */
 interface Visit {
@@ -63,6 +64,7 @@ export class BrowsingHistory {
       this.prune()
     } catch (error) {
       console.error('[visits] could not read visits.json, starting without history:', error)
+      setAside(visitsPath())
     }
   }
 
@@ -77,7 +79,7 @@ export class BrowsingHistory {
     this.timer = null
     this.prune()
     const data = Object.fromEntries([...this.profiles].map(([profile, map]) => [profile, [...map.values()]]))
-    writeFileSync(visitsPath(), JSON.stringify(data))
+    writeAtomic(visitsPath(), JSON.stringify(data))
   }
 
   /** Drops pages older than 90 days, then the lowest-ranked ones over the cap. */
@@ -193,7 +195,10 @@ export class BrowsingHistory {
   }
 }
 
-/** Asks the search engine what people search for starting with `query`. Empty on any failure. */
+/**
+ * Asks the search engine what people search for starting with `query`. Empty when it answers with
+ * something else; rejects when the request fails or is aborted.
+ */
 export async function fetchSearchSuggestions(suggestUrl: string, query: string, signal: AbortSignal): Promise<string[]> {
   const res = await net.fetch(suggestUrl.replace('%s', encodeURIComponent(query)), {
     signal,

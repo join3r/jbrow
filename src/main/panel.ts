@@ -9,8 +9,11 @@ const debug = (...args: unknown[]) => process.env.JBROW_DEBUG && console.log('[p
 
 /** Sidebar and toolbar sizes; must match src/ui/ui.css. */
 export const SIDEBAR_WIDTH = 256
-export const TOOLBAR_HEIGHT = 50
 export const GUTTER = 8
+/** Each page's address bar, the top of its card. */
+export const BAR_HEIGHT = 32
+/** Where pages start: below the gap at the top of the window and their address bars. */
+export const TOOLBAR_HEIGHT = GUTTER + BAR_HEIGHT
 /** The extension side panel: the gap you drag to resize it, and its header above its page. */
 export const SIDE_GAP = 8
 export const SIDE_HEADER = 32
@@ -117,6 +120,8 @@ export class Panel {
   private beforeFullscreen: Rectangle | null = null
   /** "<site> is full screen. Press Esc to exit." on top of a fullscreen page for its first seconds. */
   private notice: { view: WebContentsView; timer: NodeJS.Timeout } | null = null
+  /** Views that float over the pages, under jbrow's own popups: a site's permission prompt. */
+  private floating = new Set<WebContentsView>()
 
   constructor(private settings: () => Settings, private hooks: PanelHooks) {
     this.win = new BrowserWindow({
@@ -148,13 +153,16 @@ export class Panel {
         preload: path.join(__dirname, 'preload-ui.js'),
         sandbox: true,
         contextIsolation: true,
-        // The show animation is timed by the page; a hidden page mustn't lag when it wakes.
-        backgroundThrottling: false,
+        // Asleep while the window is hidden, as it starts out; see wakeUi.
       },
     })
     this.uiView.setBackgroundColor('#00000000')
     this.ui = this.uiView.webContents
+    // The UI holds the privileged bridge: a link or file dropped on it must never replace it.
+    this.ui.on('will-navigate', (e) => e.preventDefault())
+    this.ui.setWindowOpenHandler(() => ({ action: 'deny' }))
     this.win.contentView.addChildView(this.uiView)
+    this.wakeUi(false)
     this.fitUi()
     this.win.setAlwaysOnTop(true, 'floating')
     this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
@@ -263,15 +271,15 @@ export class Panel {
     }
   }
 
-  /** Where the extension side panel's page goes, under its header. */
+  /** Where the extension side panel's page goes, under its header. It reaches up beside the address bars. */
   sideBounds(): Rectangle {
     const { x, y, width, height } = this.contentBox()
     const side = this.hooks.sideWidth()
     return {
       x: x + width - GUTTER - side,
-      y: y + TOOLBAR_HEIGHT + SIDE_HEADER,
+      y: y + GUTTER + SIDE_HEADER,
       width: side,
-      height: Math.max(0, height - TOOLBAR_HEIGHT - SIDE_HEADER - GUTTER),
+      height: Math.max(0, height - GUTTER - SIDE_HEADER - GUTTER),
     }
   }
 
@@ -315,9 +323,19 @@ export class Panel {
   /** Puts the UI back where it belongs after a page view was added, which lands on top. */
   keepOrder() {
     if (this.win.isDestroyed()) return
+    for (const view of this.floating) this.win.contentView.addChildView(view)
     if (this.overlay) this.win.contentView.addChildView(this.uiView)
     else this.win.contentView.addChildView(this.uiView, 0)
     this.raiseNotice()
+  }
+
+  /** Puts a view over the pages, or takes it off the window. */
+  floatView(view: WebContentsView, on: boolean) {
+    if (this.win.isDestroyed()) return
+    if (on) {
+      this.floating.add(view)
+      this.keepOrder()
+    } else if (this.floating.delete(view)) this.win.contentView.removeChildView(view)
   }
 
   /** Sets the window's frame. jbrow's own moves don't count as yours (see remember). */
@@ -355,7 +373,8 @@ export class Panel {
     let place: Rectangle
     if (this.pinned && panel.pinned) {
       this.display = screen.getDisplayMatching(panel.pinned)
-      place = fit(panel.pinned, this.display.workArea)
+      // Off screen in the background, the window keeps its size even where the screen is smaller.
+      place = BACKGROUND ? panel.pinned : fit(panel.pinned, this.display.workArea)
     } else {
       this.display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
       place = this.floatingPlace(this.display)
@@ -566,6 +585,18 @@ export class Panel {
     for (const { wc } of this.woken) wc.setBackgroundThrottling(false)
   }
 
+  /**
+   * The UI times the show animation, so it's awake and unthrottled while the window is up. While
+   * the window is hidden it sleeps, as the pages do: Chromium doesn't count a hidden window's view
+   * as hidden, and a looping animation in it (a loading tab's pulsing favicon, a running restyle,
+   * a download of unknown size) kept it and the GPU drawing frames for as long as jbrow stayed away.
+   */
+  private wakeUi(on: boolean) {
+    if (this.ui.isDestroyed()) return
+    this.ui.setBackgroundThrottling(!on)
+    this.uiView.setVisible(on)
+  }
+
   private letPageSleep() {
     if (this.sleepTimer) clearTimeout(this.sleepTimer)
     this.sleepTimer = null
@@ -618,8 +649,20 @@ export class Panel {
     this.unblurPage()
   }
 
+  /**
+   * Puts the unpinned panel back on the floating level. Something can drop it to the normal level
+   * while jbrow runs (the installed app's was found there; the cause isn't known yet), and then it
+   * opens under the window you're in instead of on top of it.
+   */
+  private float() {
+    if (this.pinned || this.pageFullscreen) return
+    if (!this.win.isAlwaysOnTop()) console.log('[panel] the window had dropped to the normal level; floating it again')
+    this.win.setAlwaysOnTop(true, 'floating')
+  }
+
   async show() {
     if (this.win.isDestroyed()) return
+    this.float()
     if (this.visible && !this.animating) {
       if (!BACKGROUND) this.win.focus()
       return
@@ -629,6 +672,7 @@ export class Panel {
     this.visible = true
     this.animating = true
     this.target = this.place()
+    this.wakeUi(true)
     // The live page is in the window from the start, while the window is still transparent.
     this.wakePage()
     const anim = this.beginIn()
@@ -673,6 +717,7 @@ export class Panel {
     await this.animate(ms, (t) => this.frameAt(progress * (1 - bezier(EASE_IN, t)), alpha * (1 - t * t), from))
     if (run !== this.run || this.win.isDestroyed()) return
     this.win.hide()
+    this.wakeUi(false)
     this.animating = false
     this.hooks.setPageVisible(false)
     this.settle()

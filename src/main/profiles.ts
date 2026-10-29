@@ -1,9 +1,10 @@
-import { app, dialog, session, type Session } from 'electron'
+import { app, dialog, session, type BaseWindow, type Session, type WebContents } from 'electron'
 import { ElectronChromeExtensions, type ChromeExtensionOptions } from 'electron-chrome-extensions'
 import { installChromeWebStore, installExtension } from 'electron-chrome-web-store'
 import path from 'node:path'
 import type { Profile } from '../shared/types'
 import { shimContentScripts } from './content-shim'
+import { installedFolders } from './extension-files'
 import { trackInstalls } from './installed'
 import type { DeviceChooser } from './devices'
 import { writeJbrowExtension } from './jbrow-extension'
@@ -18,23 +19,36 @@ export interface ProfileRuntime {
   extensionsPath: string
 }
 
-/** How the extension library reaches back into jbrow's tabs. Shared by every profile. */
-export type TabHooks = (profileId: string) => Pick<
-  ChromeExtensionOptions,
-  'createTab' | 'selectTab' | 'removeTab' | 'createWindow' | 'removeWindow'
->
+/**
+ * How the extension library reaches back into jbrow's tabs. Shared by every profile. Past the
+ * library's own hooks are jbrow's, added by scripts/patch-deps.mjs: tabs without a page (asleep, or
+ * not opened since launch) have no WebContents, so jbrow lists them and loads one when asked.
+ */
+export type TabHooks = (profileId: string) => Pick<ChromeExtensionOptions, 'selectTab' | 'removeTab' | 'createWindow' | 'removeWindow'> & {
+  /** `extension` is the one that called chrome.tabs.create, if one did. */
+  createTab: (details: chrome.tabs.CreateProperties, extension?: Electron.Extension) => Promise<[WebContents, BaseWindow]>
+  /** jbrow's window, which holds every profile's tabs. */
+  mainWindow: () => BaseWindow
+  /** The profile's tabs without a page, as chrome.tabs.Tab. */
+  pagelessTabs: () => chrome.tabs.Tab[]
+  /** The tab without a page an extension knows by `id`, as chrome.tabs.Tab. */
+  pagelessTab: (id: number) => chrome.tabs.Tab | undefined
+  /** The page of the tab an extension knows by `id`; with `wake`, a tab without one gets it. */
+  tabFor: (id: number, wake: boolean) => WebContents | undefined
+  removePagelessTab: (id: number) => void
+}
 
 export const partitionFor = (profileId: string) => `persist:profile-${profileId}`
+
+/** Electron's own user agent, read before jbrow replaces it. */
+let electronUserAgent: string | undefined
 
 /**
  * Chrome Web Store only offers "Add to Chrome" to user agents that look like Chrome.
  * Google sign-in is the exception: see setupProfiles.
  */
-function chromeLikeUserAgent(s: Session): string {
-  return s
-    .getUserAgent()
-    .replace(/\sElectron\/\S+/, '')
-    .replace(new RegExp(`\\s${app.getName()}/\\S+`, 'i'), '')
+function chromeLikeUserAgent(ua: string): string {
+  return ua.replace(/\sElectron\/\S+/, '').replace(new RegExp(`\\s${app.getName()}/\\S+`, 'i'), '')
 }
 
 export interface ProfileDeps {
@@ -58,8 +72,13 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
   const sess = session.fromPartition(partition)
   // Google sign-in gets the real user agent from jbrow's own extension (see jbrow-extension.ts):
   // a session.webRequest listener here would switch off every extension's declarativeNetRequest.
-  const ownExtension = writeJbrowExtension(sess.getUserAgent())
-  sess.setUserAgent(chromeLikeUserAgent(sess))
+  electronUserAgent ??= app.userAgentFallback
+  const ownExtension = writeJbrowExtension(electronUserAgent)
+  sess.setUserAgent(chromeLikeUserAgent(electronUserAgent))
+  // A cross-site frame in its own process (Cloudflare's Turnstile on bistro.sk's login) reads
+  // navigator.userAgent from the app's user agent, not the session's. Left as Electron's, it
+  // disagrees with the Chrome one in the request headers, and Turnstile fails the check.
+  app.userAgentFallback = chromeLikeUserAgent(electronUserAgent)
 
   // Without a handler Electron rejects getDisplayMedia, so Meet and friends can't share the
   // screen. The macOS system picker (useSystemPicker) closes and reopens on the first click,
@@ -80,6 +99,8 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
 
   // Two-finger swipe back and forward in tab pages; see src/preload/swipe.ts.
   sess.registerPreloadScript({ id: 'jbrow-swipe', type: 'frame', filePath: path.join(__dirname, 'preload-swipe.js') })
+  // Tells pages they may still ask for what you haven't decided; see src/preload/permissions.ts.
+  sess.registerPreloadScript({ id: 'jbrow-permissions', type: 'frame', filePath: path.join(__dirname, 'preload-permissions.js') })
   // Extensions' user scripts (chrome.userScripts) in tab pages; see src/preload/user-scripts.ts.
   sess.registerPreloadScript({ id: 'jbrow-user-scripts', type: 'frame', filePath: path.join(__dirname, 'preload-user-scripts.js') })
 
@@ -96,6 +117,8 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
   await installChromeWebStore({
     session: sess,
     extensionsPath,
+    // jbrow loads them itself below, leaving out the ones you turned off.
+    loadExtensions: false,
     async beforeInstall(details) {
       const permissions = [...(details.manifest.permissions ?? []), ...(details.manifest.host_permissions ?? [])]
       const options = {
@@ -120,7 +143,18 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
     console.error(`[profiles] ${profile.id}: could not load jbrow's own extension:`, error)
   }
 
+  const disabled = settings.disabledExtensions[profile.id] ?? []
+  for (const [id, ext] of installedFolders(extensionsPath)) {
+    if (disabled.some((d) => d.id === id)) continue
+    try {
+      await sess.extensions.loadExtension(ext.path)
+    } catch (error) {
+      console.error(`[profiles] ${profile.id}: could not load ${ext.path}:`, error)
+    }
+  }
+
   for (const dir of settings.unpackedExtensions[profile.id] ?? []) {
+    if (disabled.some((d) => d.path === dir)) continue
     try {
       const ext = await sess.extensions.loadExtension(dir, { allowFileAccess: true })
       console.log(`[profiles] ${profile.id}: loaded unpacked ${ext.name} from ${dir}`)
@@ -136,7 +170,7 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
 }
 
 /** MV3 service workers don't start on their own until something wakes them. */
-async function startWorker(sess: Session, ext: Electron.Extension, profileId: string) {
+export async function startWorker(sess: Session, ext: Electron.Extension, profileId: string) {
   const manifest = ext.manifest as { manifest_version?: number; background?: { service_worker?: string } }
   if (manifest.manifest_version === 3 && manifest.background?.service_worker) {
     await sess.serviceWorkers.startWorkerForScope(ext.url).catch((error) => {
