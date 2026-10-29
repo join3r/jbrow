@@ -147,6 +147,32 @@ function describe(permission: string): string | undefined {
   return ASK[permission]
 }
 
+/** What a permission prompt asks. */
+export interface PermissionQuestion {
+  /** A site's host, "This page", or the extension asking (see requester()). */
+  who: string
+  /** What it wants to do, as one phrase: "use your camera and use your microphone". */
+  what: string
+  /** The permissions asked for, after expand(): camera, microphone, openExternal:zoommtg… */
+  permissions: string[]
+  profile: string
+  /** Whether the answer can be remembered for the site. */
+  remembers: boolean
+}
+
+export interface PermissionAnswer {
+  allow: boolean
+  remember: boolean
+  /** Closed without an answer: refused this once, and the site may ask again. */
+  dismissed?: boolean
+}
+
+/**
+ * Asks in jbrow's own window, under the address bar of the tab the page is in. Undefined for a
+ * page outside tabs, which is asked with a dialog instead.
+ */
+export type PermissionAsker = (wc: WebContents, question: PermissionQuestion) => Promise<PermissionAnswer> | undefined
+
 export class SitePermissions {
   private store: Store = {}
   /** Open prompts, so a site asking twice gets one dialog. */
@@ -158,7 +184,10 @@ export class SitePermissions {
   /** The profile each attached session belongs to. */
   private profiles = new WeakMap<Session, string>()
 
-  constructor(private window: () => BrowserWindow | null) {
+  constructor(
+    private window: () => BrowserWindow | null,
+    private asker?: PermissionAsker,
+  ) {
     if (!existsSync(storePath())) return
     try {
       this.store = JSON.parse(readFileSync(storePath(), 'utf8')) as Store
@@ -300,7 +329,8 @@ export class SitePermissions {
     const key = `${profileId} ${remembers ? origin : `page ${wc.id}`} ${open.join(',')}`
     let prompt = this.pending.get(key)
     if (!prompt) {
-      prompt = this.prompt(profileName, requester(origin, name), open, remembers).then(({ allow, remember }) => {
+      prompt = this.prompt(wc, profileName, requester(origin, name), open, remembers).then(({ allow, remember, dismissed }) => {
+        if (dismissed) return false
         if (remember) {
           const site = ((this.store[profileId] ??= {})[origin] ??= {})
           for (const p of open) site[p] = allow
@@ -319,10 +349,16 @@ export class SitePermissions {
   }
 
   /** `who` is what requester() makes of the origin. */
-  private async prompt(profileName: string, who: string, permissions: string[], remembers: boolean) {
-    const what = permissions.map(describe)
-    const list = what.length > 1 ? `${what.slice(0, -1).join(', ')} and ${what.at(-1)}` : what[0]
+  private async prompt(wc: WebContents, profileName: string, who: string, permissions: string[], remembers: boolean): Promise<PermissionAnswer> {
+    // "use your microphone and camera", not "use your microphone and use your camera".
+    const what = permissions.map(describe).map((w, i, all) => (i && all[i - 1]!.startsWith('use your ') && w!.startsWith('use your ') ? w!.slice(9) : w))
+    const list = what.length > 1 ? `${what.slice(0, -1).join(', ')} and ${what.at(-1)}` : what[0]!
     const host = remembers ? who : 'This page'
+    const inWindow = this.asker?.(wc, { who: host, what: list, permissions, profile: profileName, remembers })
+    if (inWindow) {
+      const answer = await inWindow
+      return { ...answer, remember: remembers && answer.remember }
+    }
     const options: Electron.MessageBoxOptions = {
       type: 'question',
       message: `${host} wants to ${list}`,

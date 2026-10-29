@@ -338,6 +338,21 @@ export interface DeviceChooserView {
   devices: DeviceChoice[]
 }
 
+/** A site's permission question, as the card under the address bar shows it (src/main/permission-prompt.ts). */
+export interface PromptView {
+  /** Changes with each question. */
+  id: number
+  /** A site's host, "This page", or the extension asking. */
+  who: string
+  /** "use your camera and use your microphone". */
+  what: string
+  /** camera, microphone, geolocation, openExternal:zoommtg… */
+  permissions: string[]
+  profile: string
+  /** Whether the answer can be remembered for the site. */
+  remembers: boolean
+}
+
 export interface DeviceChoice {
   id: string
   name: string

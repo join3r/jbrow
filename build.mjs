@@ -55,6 +55,15 @@ await Promise.all([
     format: 'cjs',
     external: ['electron'],
   }),
+  // The permission prompt under a tab's address bar (src/main/permission-prompt.ts).
+  build({
+    ...common,
+    entryPoints: ['src/preload/permission-prompt.ts'],
+    outfile: 'dist/preload-permission-prompt.js',
+    platform: 'node',
+    format: 'cjs',
+    external: ['electron'],
+  }),
   // Runs in web pages so they see "prompt" for permissions you haven't decided on.
   build({
     ...common,
@@ -82,6 +91,13 @@ await Promise.all([
   }),
   build({
     ...common,
+    entryPoints: ['src/ui/permission-prompt.ts'],
+    outfile: 'dist/ui/permission-prompt.js',
+    platform: 'browser',
+    format: 'iife',
+  }),
+  build({
+    ...common,
     entryPoints: ['src/ui/signin.ts'],
     outfile: 'dist/ui/signin.js',
     platform: 'browser',
@@ -91,6 +107,7 @@ await Promise.all([
 
 await cp('src/ui/index.html', 'dist/ui/index.html')
 await cp('src/ui/signin.html', 'dist/ui/signin.html')
+await cp('src/ui/permission-prompt.html', 'dist/ui/permission-prompt.html')
 await cp('src/ui/ui.css', 'dist/ui/ui.css')
 await cp('src/ui/welcome.css', 'dist/ui/welcome.css')
 // The address bar layouts' stylesheets, and the pictures of them settings and the welcome show.

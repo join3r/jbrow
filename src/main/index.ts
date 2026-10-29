@@ -10,6 +10,7 @@ import { BACKGROUND } from './background'
 import { Certificates } from './certs'
 import { DangerousSites } from './dangerous'
 import { DeviceChooser } from './devices'
+import { PermissionPrompts } from './permission-prompt'
 import { Logins } from './logins'
 import { SignInSheets } from './signin'
 import { isSearchPage, SiteInfo } from './site-info'
@@ -72,6 +73,7 @@ let dangerous: DangerousSites
 let logins: Logins
 let signIns: SignInSheets
 let devices: DeviceChooser
+let prompts: PermissionPrompts
 let permissions: SitePermissions
 let profileDeps: ProfileDeps
 let sidePanels: SidePanels
@@ -2611,7 +2613,19 @@ app.whenReady().then(async () => {
     })
   })
 
-  permissions = new SitePermissions(() => panel.win)
+  prompts = new PermissionPrompts({
+    tabFor: (wc) => tabs?.idForWebContents(wc),
+    placement: (tabId) => tabs.placement(tabId),
+    float: (view, on) => panel.floatView(view, on),
+    theme: () => settings.theme,
+    onKey: (input) => onKey(input),
+    refocus: () => focusActive(),
+  })
+  // The profile is named only when there's more than one, as in the address bar.
+  permissions = new SitePermissions(
+    () => panel.win,
+    (wc, question) => prompts.ask(wc, settings.profiles.length > 1 ? question : { ...question, profile: '' }),
+  )
   permissions.listen()
   restyler = new Restyler({
     settings: () => settings.restyle,
@@ -2723,6 +2737,7 @@ app.whenReady().then(async () => {
       const page = focused && !focused.isDestroyed() ? focused.webContents.getURL() : ''
       return page.startsWith('chrome-extension://') || Date.now() - commands.lastRunAt < 2000
     },
+    onLayout: () => prompts.layout(),
   })
 
   downloads = new Downloads({

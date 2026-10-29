@@ -79,6 +79,8 @@ export interface TabsDeps {
   closedByPage: (id: string) => void
   /** You're using an extension: one of its windows has focus, or you just pressed one of its shortcuts. */
   extensionInUse: () => boolean
+  /** layout() put the pages where they now are; what floats over them follows. */
+  onLayout: () => void
 }
 
 /** What a page asking to stay would be left for: another page, the same one again, or nothing. */
@@ -184,6 +186,8 @@ export class Tabs {
   private colors = new SiteColors(() => this.deps.onChange())
   /** The tabs layout() last put on screen, so it only has to hide those. */
   private placed: string[] = []
+  /** Where each page layout() put on screen is, while it shows. */
+  private places = new Map<string, Rectangle>()
   private saveTimer: NodeJS.Timeout | null = null
   /** Most recently used first, for ⌃Tab. */
   private mru: string[] = []
@@ -1006,20 +1010,27 @@ export class Tabs {
     const area = this.deps.contentBounds()
     const split = this.fullscreenId ? undefined : this.splitOf(this.activeId)
     const spans = split ? paneSpans(area.width, split.sizes) : null
+    this.places.clear()
     shown.forEach((id, i) => {
       const live = this.live.get(id)
       if (!live) return
       const on = !this.fullscreenId || id === this.fullscreenId
+      let bounds: Rectangle | undefined
       if (on) {
         const y = area.y + (this.fullscreenId ? 0 : this.slideY)
-        live.view.setBounds(
-          spans
-            ? { x: area.x + spans[i].x, y, width: spans[i].width, height: area.height }
-            : { ...area, y },
-        )
+        bounds = spans ? { x: area.x + spans[i].x, y, width: spans[i].width, height: area.height } : { ...area, y }
+        live.view.setBounds(bounds)
       }
-      live.view.setVisible(on && this.deps.contentVisible() && !this.covered(id))
+      const visible = on && this.deps.contentVisible() && !this.covered(id)
+      live.view.setVisible(visible)
+      if (visible && bounds) this.places.set(id, bounds)
     })
+    this.deps.onLayout()
+  }
+
+  /** Where the tab's page is in the window, or null while it isn't on screen. */
+  placement(id: string): Rectangle | null {
+    return this.places.get(id) ?? null
   }
 
   /** jbrow shows its own screen in place of the tab's page. */

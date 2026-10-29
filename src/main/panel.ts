@@ -120,6 +120,8 @@ export class Panel {
   private beforeFullscreen: Rectangle | null = null
   /** "<site> is full screen. Press Esc to exit." on top of a fullscreen page for its first seconds. */
   private notice: { view: WebContentsView; timer: NodeJS.Timeout } | null = null
+  /** Views that float over the pages, under jbrow's own popups: a site's permission prompt. */
+  private floating = new Set<WebContentsView>()
 
   constructor(private settings: () => Settings, private hooks: PanelHooks) {
     this.win = new BrowserWindow({
@@ -321,9 +323,19 @@ export class Panel {
   /** Puts the UI back where it belongs after a page view was added, which lands on top. */
   keepOrder() {
     if (this.win.isDestroyed()) return
+    for (const view of this.floating) this.win.contentView.addChildView(view)
     if (this.overlay) this.win.contentView.addChildView(this.uiView)
     else this.win.contentView.addChildView(this.uiView, 0)
     this.raiseNotice()
+  }
+
+  /** Puts a view over the pages, or takes it off the window. */
+  floatView(view: WebContentsView, on: boolean) {
+    if (this.win.isDestroyed()) return
+    if (on) {
+      this.floating.add(view)
+      this.keepOrder()
+    } else if (this.floating.delete(view)) this.win.contentView.removeChildView(view)
   }
 
   /** Sets the window's frame. jbrow's own moves don't count as yours (see remember). */

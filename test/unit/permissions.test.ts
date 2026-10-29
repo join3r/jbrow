@@ -190,7 +190,7 @@ test('media with no types asks for both', async (t) => {
   const asked = answer(t, true)
   const { request } = setup()
   await request('media', { requestingUrl: 'https://meet.example/' })
-  assert.equal(asked[0].message, 'meet.example wants to use your microphone and use your camera')
+  assert.equal(asked[0].message, 'meet.example wants to use your microphone and camera')
 })
 
 test('a blocked half of a media request refuses the whole', async (t) => {
@@ -362,4 +362,47 @@ test('the prompt names the profile as it is called when asking', async (t) => {
   await request('midi', { requestingUrl: 'https://[::1]:8080/' })
   assert.equal(asked[0].detail, 'In the Office profile.')
   assert.equal(asked[0].message, '[::1]:8080 wants to use your MIDI devices')
+})
+
+test('pages in tabs are asked in the window, and dismissing refuses once without remembering', async (t) => {
+  const dialogs = answer(t, true)
+  const handlers = {} as { request: RequestHandler }
+  const sess = {
+    setPermissionRequestHandler: (h: RequestHandler) => void (handlers.request = h),
+    setPermissionCheckHandler: () => {},
+    setDevicePermissionHandler: () => {},
+    extensions: { getExtension: () => null },
+  }
+  const questions: { wc: WebContents; q: Record<string, unknown> }[] = []
+  let reply: Record<string, boolean> = { allow: true, remember: true }
+  const inTab = { id: 1, session: sess } as unknown as WebContents
+  const outside = { id: 2, session: sess } as unknown as WebContents
+  const perms = new SitePermissions(
+    () => null,
+    (wc, q) => {
+      if (wc !== inTab) return undefined
+      questions.push({ wc, q: q as unknown as Record<string, unknown> })
+      return Promise.resolve(reply as { allow: boolean; remember: boolean; dismissed?: boolean })
+    },
+  )
+  perms.attach(sess as unknown as Session, { id: 'p', name: 'Work', color: '#000' })
+  const request = (wc: WebContents, permission: string, details: Record<string, unknown>) =>
+    new Promise<boolean>((resolve) => handlers.request(wc, permission, resolve, details))
+
+  reply = { allow: false, remember: true, dismissed: true }
+  assert.equal(await request(inTab, 'media', { requestingUrl: 'https://meet.example/', mediaTypes: ['video'] }), false)
+  assert.deepEqual(questions[0].q, { who: 'meet.example', what: 'use your camera', permissions: ['camera'], profile: 'Work', remembers: true })
+  assert.throws(() => saved())
+  // Dismissed, so it asks again; a page without an origin isn't blocked for its lifetime either.
+  reply = { allow: true, remember: true }
+  assert.equal(await request(inTab, 'media', { requestingUrl: 'https://meet.example/', mediaTypes: ['video'] }), true)
+  assert.deepEqual(saved(), { p: { 'https://meet.example': { camera: true } } })
+  reply = { allow: false, remember: false, dismissed: true }
+  await request(inTab, 'geolocation', { requestingUrl: 'file:///x.html' })
+  assert.equal(perms.undecided(inTab, 'file:///x.html', 'geolocation'), true)
+  assert.equal(questions.at(-1)!.q.remembers, false)
+  assert.equal(dialogs.length, 0)
+  // A page outside tabs gets the dialog.
+  assert.equal(await request(outside, 'geolocation', { requestingUrl: 'https://maps.example/' }), true)
+  assert.equal(dialogs.length, 1)
 })
