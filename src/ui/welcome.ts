@@ -37,6 +37,11 @@ const FRAMES: Record<string, Keyframe[]> = {
   scale: [{ opacity: 0, transform: 'scale(0.86)' }, { opacity: 1, transform: 'scale(1)' }],
   fade: [{ opacity: 0 }, { opacity: 1 }],
 }
+const PROFILE_STYLES: [Prefs['profileStyle'], string, string][] = [
+  ['tint', 'Tint', "A light wash of the profile's color."],
+  ['edge', 'Tint and edge', 'The wash, plus a solid line where it ends.'],
+  ['solid', 'Solid', 'The full color, with white text.'],
+]
 const ENGINE_COLORS: Record<string, string> = { google: '#4285f4', duckduckgo: '#de5833', bing: '#0f7b6c', brave: '#fb542b', kagi: '#f5a623', ecosia: '#2d9b4c' }
 const GLYPHS: Record<string, string> = { Command: '⌘', Control: '⌃', Alt: '⌥', Shift: '⇧', Up: '↑', Down: '↓', Left: '←', Right: '→' }
 const MAC_ORDER = ['Control', 'Alt', 'Shift', 'Command']
@@ -53,6 +58,35 @@ function caps(shortcut: string) {
 }
 const days = (n: number) => (n === 1 ? '1 day' : `${n} days`)
 
+/**
+ * Brings `from` in line with `to` where it stands, so a setting changing doesn't build the step anew: the
+ * step doesn't play its entrance again, pictures don't reload, and focus and scroll stay put. `skip` keeps
+ * an element as it is, for the little Mac, which keeps its own state.
+ */
+function morph(from: Node, to: Node, skip: (el: Element) => boolean) {
+  if (from.nodeType !== to.nodeType || from.nodeName !== to.nodeName) return from.parentNode!.replaceChild(to, from)
+  if (!(from instanceof Element)) {
+    if (from.nodeValue !== to.nodeValue) from.nodeValue = to.nodeValue
+    return
+  }
+  const t = to as Element
+  if (skip(from)) return
+  for (const a of [...from.attributes]) if (!t.hasAttribute(a.name)) from.removeAttribute(a.name)
+  for (const a of [...t.attributes]) if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value)
+  if (from instanceof HTMLInputElement) {
+    const ti = t as HTMLInputElement
+    if (from.checked !== ti.checked) from.checked = ti.checked
+    if (from.value !== ti.value && from !== document.activeElement) from.value = ti.value
+  }
+  morphChildren(from, t, skip)
+}
+function morphChildren(from: Node, to: Node, skip: (el: Element) => boolean) {
+  const next = [...to.childNodes]
+  const now = [...from.childNodes]
+  next.forEach((n, i) => (now[i] ? morph(now[i], n, skip) : from.appendChild(n)))
+  now.slice(next.length).forEach((n) => n.remove())
+}
+
 export interface Welcome {
   open(first: boolean): void
   readonly isOpen: boolean
@@ -65,6 +99,8 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
   let isOpen = false
   let first = false
   let step = 0
+  // The step on screen, or -1 when the next render builds it from scratch.
+  let built = -1
   let seen = 0
   let pinned = true
   let recording: ActionId | null = null
@@ -84,6 +120,7 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
     seen = isFirst ? 0 : STEPS.length - 1
     pinned = S?.pinned ?? true
     message = ''
+    built = -1
     isOpen = true
     el.hidden = false
     send('focus-ui')
@@ -145,7 +182,7 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
     const focused = (document.activeElement as HTMLElement | null)?.id
     const id = STEPS[step].id
     const last = step === STEPS.length - 1
-    el.innerHTML = `
+    const html = `
       <div class="wl-drag"></div>
       <aside class="wl-rail">
         <div class="wl-brand"><span class="wl-mark">jb</span><b>Welcome</b></div>
@@ -163,7 +200,18 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
           <button id="wl-next" class="wl-btn primary${step === 0 || last ? ' big' : ''}" data-act="next">${step === 0 ? 'Set up jbrow' : last ? 'Start browsing' : 'Continue'}</button>
         </footer>
       </div>`
-    if (id === 'hello' || id === 'mode' || id === 'keys') initScene(id === 'hello' ? 'ethereal' : pinned ? 'pinned' : 'ethereal')
+    const mode = id === 'hello' ? 'ethereal' : pinned ? 'pinned' : 'ethereal'
+    const hasScene = id === 'hello' || id === 'mode' || id === 'keys'
+    if (built !== step) {
+      built = step
+      el.innerHTML = html
+      if (hasScene) initScene(mode)
+    } else {
+      const fresh = document.createElement('div')
+      fresh.innerHTML = html
+      morphChildren(el, fresh, (e) => e.id === 'wl-scene')
+      if (hasScene && mode !== sceneMode) initScene(mode)
+    }
     const again = focused && document.getElementById(focused)
     if (again && el.contains(again)) again.focus()
     else if (!el.contains(document.activeElement)) el.focus()
@@ -206,13 +254,13 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
     hello: () => `
       <div class="wl-hello">
         <div class="wl-head">
-          <span class="wl-eyebrow">Welcome to jbrow</span>
-          <h1>A browser that can be there <em>only when you call it.</em></h1>
-          <p class="wl-lede">jbrow starts as a regular window, like any browser. Unpin it and it has no window at all: a key brings it up over whatever you're doing, and clicking back into your work sends it away. You choose which in the next step.</p>
+          <span class="wl-eyebrow">Hello</span>
+          <h1>Welcome to jbrow</h1>
+          <p class="wl-lede">jbrow opens as a normal window. You can also unpin it, and then it only shows when you press ${caps(S!.keys.show)} and hides when you click another app. The next step lets you pick.</p>
           <ul class="wl-facts">
-            <li><b>Chrome extensions</b> from the Chrome Web Store, Bitwarden and uBlock included.</li>
-            <li><b>Profiles side by side</b>: Work and Personal tabs in one list, each signed in separately.</li>
-            <li><b>Tabs that tidy themselves</b>: unused ones fall asleep, then archive.</li>
+            <li><b>Chrome extensions.</b> Install them from the Chrome Web Store, Bitwarden and uBlock included.</li>
+            <li><b>Profiles.</b> Work and personal tabs in one list, each profile with its own logins.</li>
+            <li><b>Auto archive tabs.</b> ${S!.prefs.archiveAfterDays ? `Tabs you don't use archive after ${days(S!.prefs.archiveAfterDays)}.` : 'Tabs you don\'t use can archive after a few days.'} You set how many in Tabs and links.</li>
           </ul>
         </div>
         ${sceneHtml()}
@@ -243,7 +291,7 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
       return `
       <div class="wl-head">
         <span class="wl-eyebrow">Keys and motion</span>
-        <h2>Pick your key and how jbrow arrives</h2>
+        <h2>Shortcut and animation</h2>
       </div>
       <div class="wl-recorder">
         <span class="txt"><span class="label">Show jbrow</span><span class="sub">Brings it up with every tab, from any app.</span></span>
@@ -273,8 +321,8 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
       return `
       <div class="wl-head">
         <span class="wl-eyebrow">Look</span>
-        <h2>Make it yours</h2>
-        <p class="wl-lede">Websites get your light or dark choice too, so sites with a dark mode follow along.</p>
+        <h2>Color, light and dark</h2>
+        <p class="wl-lede">Light or dark also goes to websites, so sites that have a dark mode switch with jbrow.</p>
       </div>
       <div class="wl-group">
         <span class="label">Appearance</span>
@@ -285,11 +333,6 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
         <div class="wl-swatches">${THEMES.map(
           (t) => `<button id="wl-theme-${t.id}" class="wl-swatch" data-act="theme" data-v="${t.id}" aria-pressed="${t.id === p.theme}"><i data-theme="${t.id}"></i>${t.name}</button>`,
         ).join('')}</div>
-      </div>
-      <div class="wl-group">
-        <span class="label">Profile in the address bar</span>
-        ${seg('profile-style', [['tint', 'Tint'], ['edge', 'Tint and edge'], ['solid', 'Solid']], p.profileStyle)}
-        <span class="sub">How strongly the address bar shows which profile the tab is in.</span>
       </div>`
     },
 
@@ -299,7 +342,7 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
       return `
       <div class="wl-head">
         <span class="wl-eyebrow">Profiles</span>
-        <h2>Work and life, one sidebar</h2>
+        <h2>Separate logins for work and personal</h2>
         <p class="wl-lede">Each profile has its own logins, cookies and extensions. Their tabs mix in one list, marked by color. In the address bar, Tab switches which profile a page opens in.</p>
       </div>
       <div class="wl-grid2 top">
@@ -339,6 +382,20 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
           }
           <span class="sub">Add more apps, or link apps like VS Code and Terminal to share tabs, under Apps in settings.</span>
         </div>
+      </div>
+      <div class="wl-group">
+        <span class="label">Profile color in the address bar</span>
+        <div class="wl-grid3">${PROFILE_STYLES.map(
+          ([v, name, about]) => `<button id="wl-profile-style-${v}" class="wl-choice wl-pstyle" data-act="profile-style" data-v="${v}" aria-pressed="${v === S!.prefs.profileStyle}">
+            <span class="art">${S!.profiles
+              .slice(0, 2)
+              .map((p) => `<span class="wl-bar ${v}" style="--pc:${esc(p.color)}"><span class="band"><i>‹</i><i>›</i><i>↻</i><b>${esc(p.name)}</b></span><span class="url">github.com</span></span>`)
+              .join('')}</span>
+            <span class="t">${name}</span>
+            <span class="d">${about}</span>
+          </button>`,
+        ).join('')}</div>
+        <span class="sub">The left end of the address bar shows which profile the tab is in. Only with two or more profiles.</span>
       </div>`
     },
 
@@ -356,8 +413,8 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
       return `
       <div class="wl-head">
         <span class="wl-eyebrow">Tabs and links</span>
-        <h2>A sidebar that keeps itself tidy</h2>
-        <p class="wl-lede">Pin the sites you live in, keep the ones you'll come back to, and let the rest fade away on their own. Archived tabs are one search away for 90 days.</p>
+        <h2>Where new tabs go, and when old ones archive</h2>
+        <p class="wl-lede">Pinned sites sit at the top and Kept tabs stay until you close them. Every other tab unloads and then archives after the days below. Archived tabs still turn up in search for 90 days.</p>
       </div>
       <div class="wl-tabs">
         <div class="wl-sidebar" aria-hidden="true">
@@ -370,7 +427,7 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
           ${p.archiveAfterDays ? '<div class="arch"><span>Archived 3 tabs</span><b>Undo</b></div>' : ''}
         </div>
         <div class="wl-group flush">
-          <div class="wl-row"><span class="txt"><span class="label">New tabs open at</span><span class="sub">Top is better: the tab you just opened sits right under Kept, where you look first, and a long Today never pushes it out of sight. Older tabs sink to the bottom on their way to the archive.</span></span>
+          <div class="wl-row"><span class="txt"><span class="label">New tabs open at</span><span class="sub">Top is the better choice. The new tab sits right under Kept and a long Today list can't push it out of sight. Older tabs end up at the bottom, next in line for the archive.</span></span>
             ${seg('new-tabs-at', [['top', 'Top'], ['bottom', 'Bottom']], p.newTabsAt)}</div>
           ${stepper('summarizeAfterDays', 'Sleep after', 'The page unloads and the row says which site it was. Kept tabs never sleep.')}
           ${stepper('archiveAfterDays', 'Archive after', 'The tab leaves the sidebar. Undo puts it back where it was.')}
@@ -400,7 +457,7 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
       return `
       <div class="wl-head">
         <span class="wl-eyebrow">Search and privacy</span>
-        <h2>Where you search, and what stays yours</h2>
+        <h2>Search engine and privacy</h2>
       </div>
       <div class="wl-group">
         <span class="label">Search with</span>
@@ -471,6 +528,7 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
     const scene = q('#wl-scene')
     if (!scene) return
     sceneMode = mode
+    scene.classList.remove('pinned', 'ethereal', 'appFront')
     scene.classList.add(mode)
     shown = mode === 'pinned'
     q('.wl-scene .mini')!.hidden = !shown

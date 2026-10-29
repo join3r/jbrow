@@ -44,7 +44,6 @@
 .wl-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
 .welcome h1, .welcome h2 { margin: 0; letter-spacing: -0.025em; text-wrap: balance; }
 .welcome h1 { font-size: 38px; line-height: 1.06; font-weight: 700; }
-.welcome h1 em { font-style: normal; color: var(--accent); }
 .welcome h2 { font-size: 25px; line-height: 1.15; font-weight: 650; }
 .wl-lede { margin: 0; max-width: 56ch; font-size: 14.5px; color: var(--muted); }
 .wl-foot { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 12px max(40px, calc((100% - 900px) / 2 + 40px)); border-top: 1px solid var(--line); background: var(--solid); }
@@ -146,6 +145,17 @@
 /* The address bar layouts: a picture of each. */
 .wl-layout .art { height: auto; aspect-ratio: 8 / 5; }
 .wl-layout .art img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* Profile color: the left end of a little address bar per profile, drawn as ui.css draws .profile-band for each style. */
+.wl-grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.wl-pstyle .art { height: auto; display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.wl-bar { display: flex; height: 26px; border: 1px solid var(--line); border-radius: 8px; background: var(--solid); overflow: hidden; font-size: 11px; }
+.wl-bar .band { display: flex; align-items: center; gap: 7px; padding: 0 10px 0 8px; color: color-mix(in srgb, var(--pc) 45%, var(--ink)); background: color-mix(in srgb, var(--pc) 22%, transparent); }
+.wl-bar .band i { font-style: normal; }
+.wl-bar .band b { font-weight: 600; white-space: nowrap; color: color-mix(in srgb, var(--pc) 55%, var(--ink)); }
+.wl-bar.edge .band { box-shadow: inset -2px 0 0 var(--pc); }
+.wl-bar.solid .band, .wl-bar.solid .band b { color: #fff; }
+.wl-bar.solid .band { background: var(--pc); }
+.wl-bar .url { display: flex; align-items: center; min-width: 0; padding: 0 8px; color: var(--ink); white-space: nowrap; overflow: hidden; }
 
 /* Keys */
 .wl-recorder { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }
@@ -217,7 +227,7 @@
   .welcome { grid-template-columns: 170px minmax(0, 1fr); }
   .wl-step { padding: 40px 24px 18px; }
   .wl-foot { padding: 12px 24px; }
-  .wl-hello, .wl-grid2, .wl-tabs { grid-template-columns: minmax(0, 1fr); }
+  .wl-hello, .wl-grid2, .wl-grid3, .wl-tabs { grid-template-columns: minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) {
   .wl-step { animation: none; }
