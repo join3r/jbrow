@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0
+## 0.1.0
 
 The first public release. jbrow is a Chromium browser for macOS that stays out of the way until you
 call it.
