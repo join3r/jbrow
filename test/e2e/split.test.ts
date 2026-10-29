@@ -125,6 +125,24 @@ test('close-pane takes a tab out of the split; the one beside it takes over', as
   assert.equal(await ui.eval('document.querySelectorAll("#threads .split-row").length'), 0)
 })
 
+test('the tab left when a pane closes shows its address, though the address bar had the keyboard', async () => {
+  const left = await openTab(jb, `${web.url}/left`)
+  const pane = await splitNew(left.id)
+  const ui = await jb.ui()
+  // ⌘D left the keyboard in the new pane's address bar.
+  await waitFor(() => ui.eval<boolean>('document.activeElement === omnibox'), 'the address bar to have the keyboard')
+  // Closing the pane hands the keyboard to the page left over. The UI loses it, and the address bar
+  // stays its focused element all the same; the tests' focus emulation would hide that.
+  await ui.send('Emulation.setFocusEmulationEnabled', { enabled: false })
+  try {
+    await jb.send('close', { id: pane.id })
+    await jb.waitForState((s) => !s.splits.length && s.activeId === left.id, 'the split to end')
+    await waitFor(() => ui.eval<boolean>(`omnibox.value === ${JSON.stringify(`${web.url}/left`)} && !urlShow.hidden`), "the left tab's address")
+  } finally {
+    await ui.send('Emulation.setFocusEmulationEnabled', { enabled: true })
+  }
+})
+
 test('a split holds four tabs at most', async () => {
   const first = await openTab(jb, `${web.url}/left`)
   const panes = [first.id]

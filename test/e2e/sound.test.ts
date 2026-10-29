@@ -61,3 +61,28 @@ test('a tab playing sound shows a speaker, in its row and the toolbar, that mute
   await waitFor(() => ui.eval<boolean>(`!document.getElementById('sound').hidden`), 'the toolbar speaker back')
   await jb.send('mute', { id: tone.id, muted: true })
 })
+
+test('the toolbar speaker stays a while after the sound stops, to go to what played', async () => {
+  // Another tone than the first test's, which plays on muted.
+  const tone = await openTab(jb, `${web.url}/tone?again`)
+  await jb.waitForState((s) => tabById(s, tone.id)?.audible, 'the tab to be audible')
+  const quiet = await openTab(jb, `${web.url}/quiet`)
+  await activate(jb, quiet.id)
+  const ui = await jb.ui()
+  await waitFor(() => ui.eval<boolean>(`!document.getElementById('sound').hidden`), 'the toolbar speaker')
+
+  const page = await jb.page(`${web.url}/tone?again`)
+  await page.eval('osc.stop()')
+  page.close()
+  await jb.waitForState((s) => !tabById(s, tone.id)?.audible, 'the tab to go quiet')
+  // Still there, saying what played, and its list still takes you there.
+  assert.equal(await ui.eval(`document.getElementById('sound').hidden`), false)
+  assert.equal(await ui.eval(`document.getElementById('soundButton').title`), 'Played sound: Tone')
+  await ui.clickOn('#soundButton')
+  await waitFor(() => ui.eval<boolean>(`!document.getElementById('soundPop').hidden`), 'the sound list')
+  assert.equal(await ui.eval(`document.querySelector('#soundList .sound-item.quiet [data-go]')?.dataset.go`), tone.id)
+  await ui.clickOn('#soundList .quiet [data-go]')
+  await jb.waitForState((s) => s.activeId === tone.id, 'the tab that played to be active')
+  // And goes a little later.
+  await waitFor(() => ui.eval<boolean>(`document.getElementById('sound').hidden`), 'the toolbar speaker to go')
+})

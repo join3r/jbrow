@@ -171,7 +171,7 @@ function render() {
   $('settingsButton').title = `Settings${keyHint('settings')}`
   $('pin').setAttribute('aria-pressed', String(S.pinned))
   $('pin').title = `${S.pinned ? 'Pinned: a regular window' : 'Pin: keep as a regular window'} with a Dock icon${keyHint('pin')}`
-  if (!barFocused()) showAddress()
+  if (!editing()) showAddress()
   $('extHead').textContent = `Extensions · ${p?.name ?? ''}`
   $('newTab').title = `New tab${S.filter !== 'all' ? ` in ${profile(S.filter)?.name ?? S.filter}` : ''}${keyHint('newTab')}, right-click for a profile`
   renderSettings()
@@ -1185,6 +1185,12 @@ const layoutHost: LayoutHost = {
 }
 /** The keyboard is in the address bar: its text, or a field of the layout's own in the suggestions. */
 const barFocused = () => document.activeElement === omnibox || suggest.contains(document.activeElement)
+/**
+ * The address bar is being edited: it has the keyboard and jbrow's UI has it. A page that takes the
+ * keyboard (clicked, or made active when a pane closes) leaves the address bar the UI's focused
+ * element all the same, though nothing is typed there until the UI has the keyboard back.
+ */
+const editing = () => document.hasFocus() && barFocused()
 /** Focus moving between the text and the suggestions' own fields, which keeps the address bar open. */
 const withinBar = (to: EventTarget | null) => to instanceof Node && (to === omnibox || suggest.contains(to))
 
@@ -1652,21 +1658,50 @@ function toggleMute(id: string) {
   if (t) send('mute', { id, muted: !t.muted })
 }
 
+/**
+ * How long the speaker at the foot of the sidebar stays after a tab goes quiet, so a sound that
+ * just ended can still be clicked through to its tab. Muting one doesn't linger: that's dealt with.
+ */
+const SOUND_LINGER_MS = 10_000
+/** Tabs heard as of the last render, and when the ones that went quiet since did. */
+let heardIds = new Set<string>()
+const quietAt = new Map<string, number>()
+let quietTimer: ReturnType<typeof setTimeout> | undefined
+
 function renderSound() {
   if (!S) return
+  const now = Date.now()
+  const open = !soundPop.hidden
+  // Kept while the list is open or the pointer is on the speaker, not to take it from under the click.
+  const held = open || $('sound').matches(':hover')
+  for (const t of S.tabs) {
+    if (heard(t) || t.muted) quietAt.delete(t.id)
+    else if (heardIds.has(t.id)) quietAt.set(t.id, now)
+  }
+  heardIds = new Set(S.tabs.filter(heard).map((t) => t.id))
+  const ids = new Set(S.tabs.map((t) => t.id))
+  for (const [id, at] of quietAt) if (!ids.has(id) || (!held && now - at >= SOUND_LINGER_MS)) quietAt.delete(id)
+  clearTimeout(quietTimer)
+  if (quietAt.size && !held) quietTimer = setTimeout(renderSound, Math.min(...quietAt.values()) + SOUND_LINGER_MS - now)
+
   const playing = S.tabs.filter((t) => t.audible)
+  const quiet = S.tabs.filter((t) => !t.audible && quietAt.has(t.id))
   const loud = playing.filter(heard)
   // Muting the last one from the list leaves the list up, to take it back.
-  const shown = loud.length > 0 || (!soundPop.hidden && playing.length > 0)
+  const shown = loud.length > 0 || quiet.length > 0 || (open && playing.length > 0)
   $('sound').hidden = !shown
   if (!shown) return setSoundPop(false)
+  // Nothing heard now: it names what played a moment ago.
+  const past = !loud.length && quiet.length > 0
+  const named = past ? quiet : loud
   const button = $('soundButton')
-  button.title = loud.length === 1 ? `Playing sound: ${displayName(loud[0])}` : `${loud.length || 'No'} tabs playing sound`
-  $('soundList').innerHTML = playing
+  button.title = named.length === 1 ? `${past ? 'Played' : 'Playing'} sound: ${displayName(named[0])}` : `${named.length || 'No'} tabs ${past ? 'played' : 'playing'} sound`
+  $('soundHead').textContent = past ? 'Played sound' : 'Playing sound'
+  $('soundList').innerHTML = [...playing, ...quiet]
     .map((t) => {
       const img = t.favicon ? `<img class="fav" src="${esc(t.favicon)}" alt="">` : `<span class="fav none"></span>`
       const p = profile(t.profile)
-      return `<div class="sound-item${t.muted ? ' muted' : ''}" style="--pc:${esc(p?.color ?? '')}">
+      return `<div class="sound-item${t.muted ? ' muted' : ''}${t.audible ? '' : ' quiet'}" style="--pc:${esc(p?.color ?? '')}">
         <button class="pop-item" data-go="${t.id}" title="${esc(isPrivate(t.url) ? displayName(t) : t.url)}">${img}<span class="name">${esc(displayName(t))}</span>${S!.profiles.length > 1 && p ? `<span class="prof">${esc(p.name)}</span>` : ''}</button>
         <button class="icon sm" data-mute="${t.id}" title="${t.muted ? 'Unmute' : 'Mute'}" aria-label="${t.muted ? 'Unmute' : 'Mute'}">${icon(t.muted ? 'volumeX' : 'volume')}</button>
       </div>`
@@ -1684,6 +1719,8 @@ function setSoundPop(open: boolean) {
   if (!open) renderSound()
 }
 $('soundButton').addEventListener('click', () => setSoundPop(!!soundPop.hidden))
+// A sound that ended while the pointer was on the speaker goes once the pointer does.
+$('sound').addEventListener('mouseleave', () => renderSound())
 soundPop.addEventListener('click', (e) => {
   const el = e.target as HTMLElement
   const mute = el.closest<HTMLElement>('[data-mute]')
@@ -3716,14 +3753,14 @@ window.jbrow.on('state', (state: UiState) => {
   if (!suggest.hidden && state.prefs.urlBarStyle !== layoutId) showSuggestions()
 })
 window.jbrow.on('suggestions', (r: SuggestReply) => {
-  if (r.seq !== suggestSeq || !barFocused()) return
+  if (r.seq !== suggestSeq || !editing()) return
   visitHits = r.visits
   // Only while the text is still what was typed (or what was typed plus the last completion).
   if (mayComplete && (omnibox.value === typed || completion())) applyCompletion(r.completion)
   showSuggestions()
 })
 window.jbrow.on('search-suggestions', (r: SearchReply) => {
-  if (r.seq !== suggestSeq || !barFocused()) return
+  if (r.seq !== suggestSeq || !editing()) return
   searchHits = r
   showSuggestions()
 })

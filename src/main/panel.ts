@@ -11,7 +11,7 @@ const debug = (...args: unknown[]) => process.env.JBROW_DEBUG && console.log('[p
 export const SIDEBAR_WIDTH = 256
 export const GUTTER = 8
 /** Each page's address bar, the top of its card. */
-export const BAR_HEIGHT = 40
+export const BAR_HEIGHT = 32
 /** Where pages start: below the gap at the top of the window and their address bars. */
 export const TOOLBAR_HEIGHT = GUTTER + BAR_HEIGHT
 /** The extension side panel: the gap you drag to resize it, and its header above its page. */

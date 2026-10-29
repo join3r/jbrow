@@ -2,8 +2,8 @@
 /* Theme colors are set on [data-theme] rather than :root alone, so a theme swatch in settings can show its own. */
 :root {
   --sidebar: 256px;
-  --toolbar: 48px;
-  --bar: 40px;
+  --toolbar: 40px;
+  --bar: 32px;
   --gutter: 8px;
   --pane-gap: 8px;
   --font: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
@@ -308,7 +308,7 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .sound-item .fav.none { background: var(--line); }
 .sound-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sound-item .prof { flex: none; font-size: 11px; color: var(--pc, var(--muted)); }
-.sound-item.muted .name { color: var(--muted); }
+.sound-item:is(.muted, .quiet) .name { color: var(--muted); }
 
 /* ---------- downloads: one pie per download, details in a popover ---------- */
 @property --p { syntax: '<number>'; inherits: true; initial-value: 0; }
