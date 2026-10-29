@@ -113,4 +113,6 @@ await cp('src/ui/welcome.css', 'dist/ui/welcome.css')
 // The address bar layouts' stylesheets, and the pictures of them settings and the welcome show.
 await cp('src/ui/suggest', 'dist/ui/suggest', { recursive: true, filter: (src) => !src.endsWith('.ts') })
 await cp('src/ui/img', 'dist/ui/img', { recursive: true })
+// The menu bar glyph (build/trayTemplate.svg is its source).
+await cp('src/main/img', 'dist/img', { recursive: true })
 

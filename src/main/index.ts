@@ -1722,7 +1722,7 @@ function showQuietLink() {
 /** The menu bar item counts quiet threads you haven't seen. */
 function updateTray() {
   const n = tray ? unseenQuietLinks().length : 0
-  tray?.setTitle(n ? `jb •${n}` : 'jb')
+  tray?.setTitle(n ? ` ${n}` : '')
 }
 
 /** Whether jbrow opens web links: 'dev' when it runs from source, which macOS won't offer. */
@@ -2365,8 +2365,8 @@ function quietMenuItems(): Electron.MenuItemConstructorOptions[] {
 }
 
 function buildTray() {
-  tray = new Tray(nativeImage.createEmpty())
-  tray.setTitle('jb')
+  // A template image: macOS tints it for light and dark menu bars. The @2x file is picked up by name.
+  tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'img', 'trayTemplate.png')))
   tray.setToolTip('jbrow')
   const menu = () =>
     Menu.buildFromTemplate([
