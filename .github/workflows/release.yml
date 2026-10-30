@@ -1,0 +1,53 @@
+name: release
+
+# Builds the Windows and Linux packages of a release when scripts/release.sh pushes its tag, and
+# uploads them to the draft release that script made. The Mac build is signed and notarized on the
+# Mac running release.sh; it publishes the release once these jobs and its own upload are done.
+# Run by hand, it builds the same packages as artifacts of the run and publishes nothing.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: --win
+          - os: ubuntu-latest
+            platform: --linux
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # npm can skip install scripts, and then Electron's binary isn't there.
+      - run: node -e "require('fs').existsSync('node_modules/electron/path.txt') || process.exit(1)" || node node_modules/electron/install.js
+      # JBROW_RELEASE makes the build update itself from GitHub Releases.
+      - run: npm run build
+        env:
+          JBROW_RELEASE: '1'
+      - run: node test/run.mjs unit
+      # Unsigned on Windows: there's no code-signing certificate, so SmartScreen warns on first run.
+      - run: npx electron-builder ${{ matrix.platform }} --publish ${{ github.event_name == 'push' && 'always' || 'never' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v5
+        if: github.event_name != 'push'
+        with:
+          name: jbrow-${{ matrix.os }}
+          path: |
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+            release/latest*.yml

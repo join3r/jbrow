@@ -78,11 +78,45 @@
         "NSBluetoothAlwaysUsageDescription": "A site you visit wants to use a Bluetooth device."
       }
     },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "artifactName": "${productName}-${version}-${arch}-setup.${ext}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "Network",
+      "maintainer": "Vladimir Schmotzer <join3r@gmail.com>",
+      "synopsis": "A browser that isn't there until you call it."
+    },
     "publish": {
       "provider": "github",
       "owner": "join3r",
       "repo": "jbrow",
-      "releaseType": "release"
+      "releaseType": "draft"
     },
     "protocols": [
       {
