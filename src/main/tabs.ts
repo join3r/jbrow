@@ -854,8 +854,8 @@ export class Tabs {
     if (params.linkURL) {
       const web = isWebUrl(params.linkURL)
       section(
-        { label: 'Open link in new tab', enabled: web, click: () => openHere(params.linkURL) },
-        { label: 'Open link in background', enabled: web, click: () => openHere(params.linkURL, true) },
+        { label: 'Open link in background tab', enabled: web, click: () => openHere(params.linkURL, true) },
+        { label: 'Open link in split view', enabled: web && this.panesOf(id).length < MAX_PANES, click: () => this.splitOpen(id, params.linkURL) },
         ...(others.length
           ? [{
               label: 'Open link in profile',
@@ -1443,6 +1443,20 @@ export class Tabs {
     this.join(cur.id, rec.id)
     this.activate(rec.id)
     return null
+  }
+
+  /** Opens `url` in a new pane right of tab `id`, focused, as ⌘D does for an empty one. */
+  splitOpen(id: string, url: string) {
+    const cur = this.get(id)
+    if (!cur?.url || this.panesOf(id).length >= MAX_PANES) return
+    const rec = this.create({ profile: cur.profile, opener: id, url, activate: false })
+    if (cur.kept && !cur.pinned) {
+      rec.kept = true
+      rec.folder = cur.folder
+      rec.order = (cur.order ?? 0) + 0.5
+    }
+    this.join(id, rec.id)
+    this.activate(rec.id)
   }
 
   /** Shows a tab next to the active one, focused, wherever it sits in the sidebar. Returns why it can't, if it can't. */
