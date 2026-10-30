@@ -40,13 +40,13 @@ jobs:
         if: runner.os == 'Linux'
         # Ubuntu's AppArmor keeps unprivileged user namespaces from apps it has no profile for,
         # and Chromium's sandbox needs them. Without the sandbox, extension workers get no APIs.
+        # No core dumps: systemd-coredump holds a crashed sandboxed renderer until jbrow quits, so
+        # the crash tests' pages never go.
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          ulimit -c 0
           sudo apt-get install -y xdotool
-          date; xvfb-run -a -s "-screen 0 1440x900x24" node test/run.mjs e2e crash || true
-          date; coredumpctl list --no-pager || true; sudo journalctl --no-pager -n 40 -t systemd-coredump || true
-          date; (ulimit -c 0; xvfb-run -a -s "-screen 0 1440x900x24" node test/run.mjs e2e crash) || true
-          date; xvfb-run -a -s "-screen 0 1440x900x24" node test/run.mjs e2e --repeat ${{ env.REPEAT }}
+          xvfb-run -a -s "-screen 0 1440x900x24" node test/run.mjs e2e --repeat ${{ env.REPEAT }}
       - uses: actions/upload-artifact@v5
         if: failure()
         with:
