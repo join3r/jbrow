@@ -230,3 +230,30 @@ test('a click into the other pane makes it the active tab; a pane loading does n
   await realClick(await shownPage(jb, `${web.url}/right`), 'body')
   await jb.waitForState((s) => s.activeId === right.id, 'the other pane to be active again')
 })
+
+test("a pane's suggestions hang from its whole bar and stay in the window", async () => {
+  const left = await openTab(jb, `${web.url}/left`)
+  const ui = await jb.ui()
+  // Two panes, wider than the suggestions' least width, and four, narrower than it.
+  for (let i = 0; i < 3; i++) {
+    const pane = await splitNew(left.id)
+    await jb.send('navigate', { input: `${web.url}/third?${i}` })
+    await waitLoaded(jb, pane.id, `${web.url}/third?${i}`)
+    if (i === 1) continue
+    for (const id of splitOf(await jb.state(), left.id)!.tabs) {
+      await jb.send('activate', { id })
+      await jb.waitForState((s) => s.activeId === id, 'the pane to be active')
+      await jb.send('focus-ui')
+      await ui.eval('omnibox.focus(), omnibox.select()')
+      await ui.type('zq')
+      await waitFor(() => ui.eval<boolean>('!document.getElementById("suggest").hidden'), 'the suggestions')
+      const r = await ui.eval<Record<'bar' | 'box' | 'content', { left: number; right: number }>>(
+        `(() => { const r = (id) => document.getElementById(id).getBoundingClientRect().toJSON(); return { bar: r('bar'), box: r('suggest'), content: r('content') } })()`,
+      )
+      assert.ok(r.box.left <= r.bar.left + 0.5 && r.box.right >= r.bar.right - 0.5, `suggestions ${r.box.left}–${r.box.right} cover the bar ${r.bar.left}–${r.bar.right}`)
+      assert.ok(r.box.left >= r.content.left - 0.5 && r.box.right <= r.content.right + 0.5, `suggestions ${r.box.left}–${r.box.right} inside ${r.content.left}–${r.content.right}`)
+      await ui.press('Escape')
+      await ui.press('Escape')
+    }
+  }
+})

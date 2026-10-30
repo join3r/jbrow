@@ -222,9 +222,10 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .omni { flex: 1; min-width: 0; align-self: stretch; display: flex; align-items: center; gap: 2px; }
 .nav { flex: none; display: flex; align-items: center; gap: 0; }
 .bar .pop, .bar .suggest { top: calc(100% + 4px); }
-/* A narrow pane's suggestions spread over its neighbors; the last pane's grow leftward. */
-.bar .suggest { min-width: min(560px, 100vw - var(--sidebar) - 2 * var(--gutter)); }
-.bar.last .suggest { left: auto; right: 0; }
+/* The suggestions are as wide as the bar. A narrow pane's spread over its neighbors (SUGGEST_WIDTH in ui.ts),
+   rightward, or leftward when the pane is too near the right edge for that. */
+.bar .suggest { right: auto; width: 100%; min-width: min(560px, 100vw - var(--sidebar) - 2 * var(--gutter)); }
+.bar.grow-left .suggest { left: auto; right: 0; }
 .omni-field { position: relative; flex: 1; min-width: 0; height: 100%; }
 #omnibox { width: 100%; height: 100%; border: 0; background: none; outline: none; color: var(--ink); padding: 0 6px; font: 13px var(--font); user-select: text; }
 /* Not being edited, the address shows as its site with the rest dimmed (.url-show over the input's own text). */

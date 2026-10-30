@@ -320,7 +320,8 @@ function renderPanes() {
   const f = spans[focused]
   root.style.setProperty('--fx', `${f.x}px`)
   root.style.setProperty('--fw', `${f.width}px`)
-  barEl.classList.toggle('last', focused > 0 && focused === split.tabs.length - 1)
+  // The suggestions are at least SUGGEST_WIDTH wide; with no room for that right of the pane they grow leftward.
+  barEl.classList.toggle('grow-left', f.x + Math.max(f.width, SUGGEST_WIDTH) > contentEl.clientWidth)
   paneBgs.innerHTML = split.tabs
     .map((id, i) => {
       const empty = i !== focused && !S!.tabs.find((t) => t.id === id)?.url
@@ -337,6 +338,9 @@ function renderPanes() {
 }
 
 // ---------- address bars ----------
+
+/** The narrowest a pane's suggestions get, spreading over the panes beside it; .bar .suggest in ui.css. */
+const SUGGEST_WIDTH = 560
 
 const barEl = $('bar')
 const paneBarsEl = $('paneBars')
@@ -361,7 +365,7 @@ function paintBar(el: HTMLElement, color: string | null) {
 function renderBar(split = activeSplit()) {
   paintBar(barEl, (S?.activeId && paneBar(S.activeId)?.color) || null)
   $('paneClose').hidden = !split
-  if (!split) barEl.classList.remove('last')
+  if (!split) barEl.classList.remove('grow-left')
 }
 
 /**
