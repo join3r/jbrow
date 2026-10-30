@@ -20,8 +20,13 @@ jobs:
         include:
           - os: windows-latest
             platform: --win
+            unpacked: release/win-unpacked
+            exe: release/win-unpacked/jbrow.exe
           - os: ubuntu-latest
             platform: --linux
+            unpacked: release/linux-unpacked
+            exe: release/linux-unpacked/jbrow
+            display: xvfb-run -a -s "-screen 0 1440x900x24"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
@@ -38,8 +43,12 @@ jobs:
         env:
           JBROW_RELEASE: '1'
       - run: node test/run.mjs unit
+      # The app is packaged once and started before anything is published; the installers are
+      # made from that same copy.
+      - run: npx electron-builder ${{ matrix.platform }} --dir --publish never
+      - run: ${{ matrix.display }} node scripts/smoke.mjs ${{ matrix.exe }}
       # Unsigned on Windows: there's no code-signing certificate, so SmartScreen warns on first run.
-      - run: npx electron-builder ${{ matrix.platform }} --publish ${{ github.event_name == 'push' && 'always' || 'never' }}
+      - run: npx electron-builder ${{ matrix.platform }} --prepackaged ${{ matrix.unpacked }} --publish ${{ github.event_name == 'push' && 'always' || 'never' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v5

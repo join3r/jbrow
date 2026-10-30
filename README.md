@@ -7,10 +7,24 @@ Chromium (through Electron), with profiles, Chrome Web Store extensions and a si
 
 ## Download and install
 
-Download the DMG from [the latest release](https://github.com/join3r/jbrow/releases/latest), open it
-and drag `jbrow.app` into Applications. Then open jbrow from Applications.
+Download it from [the latest release](https://github.com/join3r/jbrow/releases/latest):
 
-jbrow updates itself. It checks GitHub Releases 30 seconds after launch and every 4 hours, and
+- **Mac:** the DMG (`jbrow-<version>-arm64.dmg`). Open it and drag `jbrow.app` into Applications,
+  then open jbrow from Applications.
+- **Windows:** `jbrow-<version>-x64-setup.exe`. It installs for your account, no administrator
+  needed. The installer isn't code-signed yet, so SmartScreen warns the first time: **More info**,
+  then **Run anyway**.
+- **Linux:** the AppImage (`jbrow-<version>.AppImage`), or the `.deb` for Debian and Ubuntu
+  (`sudo apt install ./jbrow_<version>_amd64.deb`). Make the AppImage executable
+  (`chmod +x`) and run it. On Ubuntu 22.04 and later it needs FUSE 2: `sudo apt install libfuse2`
+  (`libfuse2t64` on 24.04).
+
+The rest of this README describes the Mac, where keys say ⌘; on Windows and Linux it's Ctrl. These
+need macOS and aren't there on Windows and Linux yet: ⌥⇧Space's tabs of the app you were in, opening
+links from each app in a profile of their own, and trackpad swipes to go back and forward.
+
+jbrow updates itself: the Mac app, the Windows install and the AppImage do it on their own, and
+the `.deb` asks for your password to install the update. It checks GitHub Releases 30 seconds after launch and every 4 hours, and
 downloads a newer release in the background. A downloaded update installs when you quit jbrow.
 Without a quit, it installs on its own once nobody would notice: jbrow has been hidden for 10
 minutes and the Mac untouched for 2, or jbrow is showing and the Mac has been untouched for 30, with
@@ -24,8 +38,10 @@ menu has **Check for Updates…**.
 
 ## Requirements
 
-- A Mac with Apple Silicon (M1 or later). Releases are built for arm64 only.
-- macOS 13 Ventura or later.
+- Mac: Apple Silicon (M1 or later; Mac releases are arm64 only) and macOS 13 Ventura or later.
+- Windows: Windows 10 or 11, x64.
+- Linux: x64, with a desktop that lets apps register global keys (most X11 desktops; on Wayland it
+  depends on the compositor).
 
 ## First run
 

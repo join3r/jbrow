@@ -145,12 +145,22 @@ jbrow can't read other files on your Mac. That's also why the UI lives outside `
 npm run release
 ```
 
-`scripts/release.sh` checks the tree is clean and pushed, that the version has no release yet and
-that CHANGELOG.md has its section. It builds with `JBROW_RELEASE=1` (what makes a build update
-itself), tags `v<version>`, then signs, notarizes and publishes the DMG, the zip and
-`latest-mac.yml` to GitHub Releases, and sets the release notes from CHANGELOG.md. It needs the
-Apple credentials above and the `gh` CLI signed in (or `GH_TOKEN`). Every release has to be signed
-with the same Developer ID, or installed copies refuse the update.
+`scripts/release.sh` checks that the tree is clean and pushed, that the test workflow passed on it,
+that the version has no release yet and that CHANGELOG.md has its section. It makes a draft release
+with those notes and pushes the tag `v<version>`, which starts `.github/workflows/release.yml`: that
+builds the Windows installer and `latest.yml`, and the AppImage, `.deb` and `latest-linux.yml`, on
+GitHub's runners, and uploads them to the draft. Meanwhile the script builds with `JBROW_RELEASE=1`
+(what makes a build update itself), then signs, notarizes and uploads the DMG, the zip and
+`latest-mac.yml`. Once the workflow is done and all three `latest*.yml` are on the draft, it
+publishes the release. If a step fails, fix it (or rerun the workflow) and run the script again: it
+picks up the same draft.
+
+It needs the Apple credentials above and the `gh` CLI signed in (or `GH_TOKEN`). Every Mac release
+has to be signed with the same Developer ID, or installed copies refuse the update. Windows builds
+aren't code-signed.
+
+To try the Windows and Linux builds without releasing, run the workflow by hand (`gh workflow run
+release.yml`). It keeps the packages as artifacts of the run and publishes nothing.
 
 ## License
 

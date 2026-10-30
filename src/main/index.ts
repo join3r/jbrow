@@ -2597,6 +2597,8 @@ app.whenReady().then(async () => {
   // Nor is it recording a shortcut, showing settings or covering the page any more, whatever the
   // old one said last.
   panel.ui.on('did-finish-load', () => {
+    // scripts/smoke.mjs waits for this line to know a release build starts.
+    console.log('[jbrow] UI loaded')
     archivedSent = -1
     setRecording(false)
     settingsShown = false

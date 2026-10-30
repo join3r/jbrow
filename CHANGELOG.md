@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- jbrow for Windows (x64 installer) and Linux (x64 AppImage and .deb). Keys that say ⌘ on the Mac
+  are Ctrl there. ⌥⇧Space's tabs of the app you were in, opening links from each app in a profile of
+  their own, and trackpad swipes need macOS and aren't on Windows and Linux yet.
+
 ## 0.1.0
 
 The first public release. jbrow is a Chromium browser for macOS that stays out of the way until you
