@@ -1469,6 +1469,18 @@ export class Tabs {
     return null
   }
 
+  /**
+   * A tab dragged onto another in the sidebar: it goes right of that one in its split (out of any
+   * other), and the split comes up with it focused. Returns why it can't, if it can't.
+   */
+  splitDrop(id: string, to: string): string | null {
+    if (id === to || !this.get(id) || !this.get(to) || this.panesOf(to).includes(id)) return null
+    if (this.panesOf(to).length >= MAX_PANES) return `Split view holds up to ${MAX_PANES} tabs.`
+    this.join(to, id)
+    this.activate(id)
+    return null
+  }
+
   /** Puts tab `id` right of `to` in its split, out of any other. The panes share the width evenly. */
   private join(to: string, id: string) {
     const from = this.splitOf(id)

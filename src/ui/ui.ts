@@ -3,7 +3,7 @@ import { engineOf, isSearchUrl, SEARCH_ENGINES, suggestUrlFor } from '../shared/
 import { urlMatcher } from '../shared/patterns'
 import { awayFromHome, displayName, folderThreads, isAsleep, isFolder, isPinned, keptThreads, numberedThreads, sections, threadsOf, type AppView, type FolderView, type KeptItem, type ThreadView } from '../shared/threads'
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
-import { dragDivider, PANE_GAP, paneSpans, splitOf } from '../shared/split'
+import { dragDivider, MAX_PANES, PANE_GAP, paneSpans, splitOf } from '../shared/split'
 import { EMOJI_GROUPS, splitEmoji } from './emoji'
 import { DAY_MS, esc, HOUR_MS, icon, since } from './markup'
 import type { LayoutHost, OpenIn, Outcome, SuggestLayout } from './suggest/layout'
@@ -1514,30 +1514,39 @@ function startDrag(id: string, folder: boolean, e: DragEvent) {
 }
 
 /**
- * Where a drag over the sidebar would land. In Kept, the top or bottom half of a tab's row places
- * the item before or after it, and the middle of a folder's row files it into the folder. Dropped
- * on a row or heading outside Kept, a tab leaves Kept. Folders only move within Kept, and never
- * into themselves.
+ * Where a drag over the sidebar would land. A tab dropped on the middle of another tab's row
+ * splits with it. In Kept, the top or bottom of a tab's row places the item before or after it,
+ * and the middle of a folder's row files it into the folder. Dropped on a row's edge or a heading
+ * outside Kept, a tab leaves Kept. Folders only move within Kept, and never into themselves.
  */
-function dropTarget(e: DragEvent): { el: HTMLElement; where: 'before' | 'after' | 'into' | 'keep' } | null {
+function dropTarget(e: DragEvent): { el: HTMLElement; where: 'before' | 'after' | 'into' | 'keep' | 'split' } | null {
   const el = (e.target as HTMLElement).closest<HTMLElement>('.row:not([data-settings]), .head:not(.app-head), .keep-zone, #kept')
   if (!el || el.dataset.id === dragId || el.dataset.folder === dragId) return null
   const dragged = dragFolder ? threadsEl.querySelector(`[data-folder="${dragId}"]`)?.nextElementSibling : null
   if (dragged?.classList.contains('folder-body') && dragged.contains(el)) return null
   if (el.matches('.keep-zone, #kept')) return { el: threadsEl.querySelector<HTMLElement>('.keep-zone')!, where: 'keep' }
-  if (!el.matches('#kept .row')) return dragFolder ? null : { el, where: 'into' }
   const box = el.getBoundingClientRect()
   const y = (e.clientY - box.top) / box.height
+  if (y >= 0.25 && y <= 0.75 && canSplitOnto(el)) return { el, where: 'split' }
+  if (!el.matches('#kept .row')) return dragFolder ? null : { el, where: 'into' }
   // An open folder's bottom edge is its first item's top, so a drop there goes into the folder.
   const openFolder = !!el.dataset.folder && !!el.nextElementSibling?.classList.contains('folder-body')
-  // Only a folder takes things into it; a tab's row is all above or below.
+  // Only a folder takes things into it; the rest of a tab's row is above or below it.
   const edge = el.dataset.folder ? 0.25 : 0.5
   if (y < edge) return { el, where: 'before' }
   if (y > 1 - edge && !openFolder) return { el, where: 'after' }
   return { el, where: el.dataset.folder ? 'into' : 'after' }
 }
 
-const DROP_MARKS = ['dz', 'ins-before', 'ins-after', 'ins-left', 'ins-right']
+/** Whether the tab being dragged can join the tab of row `el` in split view: not with itself, nor in a full split. */
+function canSplitOnto(el: HTMLElement): boolean {
+  const to = el.dataset.id
+  if (!S || !dragId || dragFolder || !to || !el.matches('.row') || to === dragId) return false
+  const panes = splitOf(S.splits, to)?.tabs ?? [to]
+  return !panes.includes(dragId) && panes.length < MAX_PANES
+}
+
+const DROP_MARKS = ['dz', 'dz-split', 'ins-before', 'ins-after', 'ins-left', 'ins-right']
 const clearDrop = () => sidebarEl.querySelectorAll(DROP_MARKS.map((m) => `.${m}`).join(', ')).forEach((x) => x.classList.remove(...DROP_MARKS))
 
 function endDrag() {
@@ -1554,7 +1563,7 @@ threadsEl.addEventListener('dragover', (e) => {
   const at = dropTarget(e)
   if (!at) return clearDrop()
   e.preventDefault()
-  const mark = at.where === 'before' ? 'ins-before' : at.where === 'after' ? 'ins-after' : 'dz'
+  const mark = at.where === 'before' ? 'ins-before' : at.where === 'after' ? 'ins-after' : at.where === 'split' ? 'dz-split' : 'dz'
   if (!at.el.classList.contains(mark)) {
     clearDrop()
     at.el.classList.add(mark)
@@ -1569,7 +1578,8 @@ threadsEl.addEventListener('drop', (e) => {
   endDrag()
   if (!at) return
   const { el, where } = at
-  if (where === 'keep') send('place', { id, target: null })
+  if (where === 'split') send('split-drop', { id, target: el.dataset.id })
+  else if (where === 'keep') send('place', { id, target: null })
   else if (where !== 'into') send('place', { id, target: el.dataset.id ?? el.dataset.folder, after: where === 'after' })
   else if (movingFolder) send('move-folder', { id, parent: el.dataset.folder })
   else if (el.dataset.folder) send('move', { id, kept: true, folder: el.dataset.folder })

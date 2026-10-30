@@ -257,3 +257,57 @@ test("a pane's suggestions hang from its whole bar and stay in the window", asyn
     }
   }
 })
+
+/** Drags tab `from`'s sidebar row onto tab `to`'s, `at` of the way down it, and drops it there. Returns the mark it showed. */
+async function dragRow(from: string, to: string, at: number) {
+  const ui = await jb.ui()
+  const box = (id: string) =>
+    ui.call((id) => {
+      const r = document.querySelector(`#threads .row[data-id="${id}"]`)!.getBoundingClientRect()
+      return { x: r.x + r.width / 2, y: r.y, h: r.height }
+    }, id)
+  const a = await box(from)
+  // Drags are caught over CDP, then played back as drag events.
+  await ui.send('Input.setInterceptDrags', { enabled: true })
+  const caught = new Promise<any>((resolve) => ui.on('Input.dragIntercepted', (p) => resolve(p.data)))
+  await ui.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: a.x, y: a.y + a.h / 2, button: 'left', clickCount: 1 })
+  await ui.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: a.x, y: a.y + a.h / 2 + 10, button: 'left', buttons: 1 })
+  const data = await caught
+  // Once the drag is under way the drop strips show and the rows move, so the target is measured then.
+  await waitFor(() => ui.eval('document.getElementById("threads").classList.contains("dragging")'), 'the drag to start')
+  const b = await box(to)
+  const y = b.y + b.h * at
+  await ui.send('Input.dispatchDragEvent', { type: 'dragEnter', x: b.x, y, data })
+  await ui.send('Input.dispatchDragEvent', { type: 'dragOver', x: b.x, y, data })
+  const mark = await ui.call((id) => document.querySelector(`#threads .row[data-id="${id}"]`)!.className, to)
+  await ui.send('Input.dispatchDragEvent', { type: 'drop', x: b.x, y, data })
+  await ui.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: b.x, y, button: 'left', clickCount: 1 })
+  await ui.send('Input.setInterceptDrags', { enabled: false })
+  return mark
+}
+
+test('dragging a tab onto the middle of another splits them', async () => {
+  const left = await openTab(jb, `${web.url}/left`)
+  const right = await openTab(jb, `${web.url}/right`)
+  await waitRows(jb, (rows) => rows.some((r) => r.id === left.id) && rows.some((r) => r.id === right.id), 'both rows')
+  assert.match(await dragRow(right.id, left.id, 0.5), /\bdz-split\b/)
+  const s = await jb.waitForState((s) => !!splitOf(s, left.id), 'a split')
+  assert.deepEqual(splitOf(s, left.id)!.tabs, [left.id, right.id])
+  assert.equal(s.activeId, right.id)
+  const ui = await jb.ui()
+  await waitFor(() => ui.eval(`!!document.querySelector('#threads .split-row .row[data-id="${left.id}"] ~ .row[data-id="${right.id}"]')`), 'one row of two')
+})
+
+test("dropping a tab on the edge of another's row doesn't split them", async () => {
+  const left = await openTab(jb, `${web.url}/left`)
+  await jb.send('move', { id: left.id, kept: true })
+  const right = await openTab(jb, `${web.url}/right`)
+  await jb.send('move', { id: right.id, kept: true })
+  await waitRows(jb, (rows) => rows.filter((r) => r.kept).length === 2, 'both rows in Kept')
+  assert.match(await dragRow(right.id, left.id, 0.1), /\bins-before\b/)
+  await jb.waitForState((s) => {
+    const kept = s.tabs.filter((t) => t.kept).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    return kept[0]?.id === right.id
+  }, 'right placed above left')
+  assert.equal((await jb.state()).splits.length, 0)
+})

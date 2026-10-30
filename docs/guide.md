@@ -201,7 +201,9 @@ you're on, in its profile, and puts you in the address bar. As in Arc, a split i
 sidebar, its tabs side by side, where the first of them comes: ⌘D on a kept tab keeps the new tab
 right after it, so the split stays in Kept, while on a pinned tab the pinned icon stays and the new tab
 goes to the top of Today. To split with a
-tab you already have, right-click it and choose **Open in split view**. Drag the gap between two
+tab you already have, right-click it and choose **Open in split view**, or drag its row onto the
+middle of another tab's row (the row lights up; dropping on its top or bottom edge moves the tab
+there instead, as before). Drag the gap between two
 panes to resize them. Each pane has its own address bar on top of its page, with back, reload, its
 profile, the address and the pinned extensions of its profile, so two panes in different profiles show
 each their own; the × at its end takes the pane out of the split. Click another pane's address to type

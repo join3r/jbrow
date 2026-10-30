@@ -2206,6 +2206,10 @@ function wireIpc() {
     const error = tabs.splitWith(id)
     if (error) toast(error)
   })
+  on<{ id: string; target: string }>('split-drop', ({ id, target }) => {
+    const error = tabs.splitDrop(id, target)
+    if (error) toast(error)
+  })
   on<{ url: string }>('copy-link', ({ url }) => {
     clipboard.writeText(url)
     panel.ui.send('url-copied')
