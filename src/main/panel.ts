@@ -19,6 +19,12 @@ export const SIDE_GAP = 8
 export const SIDE_HEADER = 32
 /** The smallest you can drag the window to: the sidebar and a usable page. */
 const MIN_SIZE = [SIDEBAR_WIDTH + 360, TOOLBAR_HEIGHT + 300] as const
+/**
+ * The unpinned panel's level: one below floating, still over every normal window. Chromium's
+ * picture-in-picture window is on the floating level itself, so it stays on top of jbrow, as do
+ * extension popups and sign-in windows. On the same level, focusing the panel would cover it.
+ */
+const LEVEL = ['floating', -1] as const
 
 /**
  * Where each style's show animation starts, relative to where the window ends up: the window's
@@ -164,7 +170,7 @@ export class Panel {
     this.win.contentView.addChildView(this.uiView)
     this.wakeUi(false)
     this.fitUi()
-    this.win.setAlwaysOnTop(true, 'floating')
+    this.win.setAlwaysOnTop(true, ...LEVEL)
     this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     this.applyContentProtection()
     if (BACKGROUND) this.win.setIgnoreMouseEvents(true)
@@ -193,7 +199,7 @@ export class Panel {
     this.pinned = on
     // The window stays where it is, and comes back there in its new mode too.
     if (this.visible && !this.animating && !this.pageFullscreen) this.savePlace()
-    this.win.setAlwaysOnTop(!on, 'floating')
+    this.win.setAlwaysOnTop(!on, ...LEVEL)
     this.win.setVisibleOnAllWorkspaces(!on, { visibleOnFullScreen: !on })
     if (BACKGROUND) return
     if (on) {
@@ -222,7 +228,7 @@ export class Panel {
       this.setFrame(BACKGROUND ? { ...offScreen(), width: bounds.width, height: bounds.height } : bounds)
       this.showNotice(site, bounds.width)
     } else {
-      this.win.setAlwaysOnTop(!this.pinned, 'floating')
+      this.win.setAlwaysOnTop(!this.pinned, ...LEVEL)
       if (this.beforeFullscreen) this.setFrame(this.beforeFullscreen)
       this.beforeFullscreen = null
     }
@@ -650,14 +656,14 @@ export class Panel {
   }
 
   /**
-   * Puts the unpinned panel back on the floating level. Something can drop it to the normal level
-   * while jbrow runs (the installed app's was found there; the cause isn't known yet), and then it
-   * opens under the window you're in instead of on top of it.
+   * Puts the unpinned panel back on its LEVEL. Something can drop it to the normal level while
+   * jbrow runs (the installed app's was found there; the cause isn't known yet), and then it opens
+   * under the window you're in instead of on top of it.
    */
   private float() {
     if (this.pinned || this.pageFullscreen) return
     if (!this.win.isAlwaysOnTop()) console.log('[panel] the window had dropped to the normal level; floating it again')
-    this.win.setAlwaysOnTop(true, 'floating')
+    this.win.setAlwaysOnTop(true, ...LEVEL)
   }
 
   async show() {
