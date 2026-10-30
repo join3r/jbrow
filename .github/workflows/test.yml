@@ -43,7 +43,10 @@ jobs:
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           sudo apt-get install -y xdotool
-          xvfb-run -a -s "-screen 0 1440x900x24" node test/run.mjs e2e --repeat ${{ env.REPEAT }}
+          date; xvfb-run -a -s "-screen 0 1440x900x24" node test/run.mjs e2e crash || true
+          date; coredumpctl list --no-pager || true; sudo journalctl --no-pager -n 40 -t systemd-coredump || true
+          date; (ulimit -c 0; xvfb-run -a -s "-screen 0 1440x900x24" node test/run.mjs e2e crash) || true
+          date; xvfb-run -a -s "-screen 0 1440x900x24" node test/run.mjs e2e --repeat ${{ env.REPEAT }}
       - uses: actions/upload-artifact@v5
         if: failure()
         with:
