@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { after, before, test } from 'node:test'
-import { html, launch, removeDir, serve, sleep, tempDir, waitFor, type Jbrow, type TestServer } from './harness'
+import { html, launch, removeDir, SANDBOXED, serve, sleep, tempDir, waitFor, type Jbrow, type TestServer } from './harness'
 import { activate, offline, openTab, waitLoaded } from './tab-helpers'
 
 let jb: Jbrow
@@ -19,6 +19,8 @@ const BACKGROUND = `chrome.runtime.onMessage.addListener((msg, sender, reply) =>
   if (msg.do === 'attach') chrome.tabs.query({ url: msg.url }).then(([t]) => chrome.debugger.attach({ tabId: t.id }, '1.3')).then(() => reply(true))
   return true
 })`
+// The extension's worker needs electron-chrome-extensions' chrome.tabs, which only a sandboxed jbrow gives it.
+const skip = !SANDBOXED && 'no sandbox here (Linux as root, or without user namespaces), so no tabs API in service workers'
 const CONTENT = `window.addEventListener('message', (e) => {
   if (e.data?.do) chrome.runtime.sendMessage(e.data).then((answer) => window.postMessage({ answer }, '*'))
 })`
@@ -76,9 +78,10 @@ async function askFront(url: string) {
   await page.eval(`window.postMessage({ do: 'front' }, '*')`)
 }
 
-test('looking up a sleeping tab leaves it asleep; attaching the debugger loads it', async () => {
+test('looking up a sleeping tab leaves it asleep; attaching the debugger loads it', { skip }, async () => {
   const kept = () => jb.state().then((s) => s.tabs.find((t) => t.id === 'kept')!)
-  await jb.waitForState((s) => s.tabs.find((t) => t.id === 'front')?.loaded, 'the front tab to load')
+  // Finished loading, not just given a page: asking it mid-load loses the answer with the old document.
+  await waitLoaded(jb, 'front', `${web.url}/one`)
   assert.equal((await kept()).loaded, false)
   const all = (await ask(`${web.url}/one`, { do: 'get-all' })) as { url: string; discarded: boolean }[]
   assert.ok(all.some((t) => t.url === `${web.url}/kept` && t.discarded), 'tabs.get answers for the sleeping tab')
@@ -88,7 +91,7 @@ test('looking up a sleeping tab leaves it asleep; attaching the debugger loads i
   await jb.waitForState((s) => s.tabs.find((t) => t.id === 'kept')?.loaded, 'the kept tab to load')
 })
 
-test('a background page an extension brings to the front stays where it is', async () => {
+test('a background page an extension brings to the front stays where it is', { skip }, async () => {
   const one = await openTab(jb, `${web.url}/one`)
   await waitLoaded(jb, one.id, `${web.url}/one`)
   const two = await openTab(jb, `${web.url}/two`)
@@ -99,7 +102,7 @@ test('a background page an extension brings to the front stays where it is', asy
   assert.equal((await jb.state()).activeId, two.id)
 })
 
-test('an extension can give back the tab that was in front a moment ago', async () => {
+test('an extension can give back the tab that was in front a moment ago', { skip }, async () => {
   const s = await jb.state()
   const one = s.tabs.find((t) => t.url === `${web.url}/one`)!
   const two = s.tabs.find((t) => t.url === `${web.url}/two`)!

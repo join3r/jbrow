@@ -38,7 +38,10 @@ jobs:
         run: node test/run.mjs e2e --repeat ${{ env.REPEAT }}
       - name: end-to-end tests (virtual display)
         if: runner.os == 'Linux'
+        # Ubuntu's AppArmor keeps unprivileged user namespaces from apps it has no profile for,
+        # and Chromium's sandbox needs them. Without the sandbox, extension workers get no APIs.
         run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           sudo apt-get install -y xdotool
           xvfb-run -a -s "-screen 0 1440x900x24" node test/run.mjs e2e --repeat ${{ env.REPEAT }}
       - uses: actions/upload-artifact@v5

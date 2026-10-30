@@ -24,7 +24,10 @@ const saved = (jb: Jbrow) => JSON.parse(readFileSync(jb.file('settings.json'), '
 test('prefs change the state and settings.json, and survive a relaunch', async () => {
   const userData = tempDir()
   dirs.push(userData)
-  let jb = await start({ userData, settings: offline() })
+  // Codex can only be picked once jbrow finds its command, and CI machines don't have one: any
+  // file that exists will do, since nothing restyles here.
+  let jb = await start({ userData, settings: { ...offline(), restyle: { codexPath: process.execPath } } })
+  await jb.waitForState((s) => s.restyleAgents.codex, 'jbrow to find codex')
   await jb.send('prefs', {
     appearance: 'dark',
     theme: 'ocean',
