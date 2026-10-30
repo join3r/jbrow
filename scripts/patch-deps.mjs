@@ -97,14 +97,13 @@ const patches = [
     },
     {
       file: `node_modules/electron-chrome-extensions/dist/${file}`,
-      why: 'DIAG',
-      find: `          } catch {
-            console.error(
-              \`browser-action-list failed to update`,
-      replace: `          } catch (e) {
-            console.error('DIAG getState ' + String(e && e.stack || e));
-            console.error(
-              \`browser-action-list failed to update`,
+      why: "<browser-action-list> waits for a partition before asking for its state. Without one it asked the UI's own session, which has no extensions, and when that answer came after jbrow had given it a profile's partition it logged \"failed to update\" naming the profile, as if that one had failed",
+      find: `        this.fetchState = async () => {
+          try {`,
+      replace: `        this.fetchState = async () => {
+          /* jbrow: no partition yet, see scripts/patch-deps.mjs */
+          if (!this.partition) return;
+          try {`,
     },
   ]),
   {

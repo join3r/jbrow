@@ -10,13 +10,6 @@ let web: TestServer
 /** Errors the UI page threw or logged. */
 const errors: string[] = []
 
-/**
- * Known noise, not jbrow's errors: <browser-action-list> (electron-chrome-extensions) asks the
- * UI's own session for its extensions as the page loads, before the first state tells it a
- * profile's partition, and logs that it couldn't.
- */
-const KNOWN = [/^console\.error: browser-action-list failed to update \[tab: null, partition: 'null'\]$/]
-
 before(async () => {
   web = await serve({
     '/': html('Page one', '<p>one apple</p>'),
@@ -26,7 +19,7 @@ before(async () => {
   jb = await launch({ settings: offline(web) })
   const ui = await jb.ui()
   ui.on('Runtime.exceptionThrown', (p) => add(`exception: ${p.exceptionDetails?.exception?.description ?? p.exceptionDetails?.text}`))
-  const add = (e: string) => KNOWN.some((k) => k.test(e)) || errors.push(e)
+  const add = (e: string) => errors.push(e)
   ui.on('Runtime.consoleAPICalled', (p) => {
     if (p.type === 'error' || p.type === 'assert') add(`console.${p.type}: ${p.args.map((a: { value?: unknown; description?: string }) => a.value ?? a.description).join(' ')}`)
   })
