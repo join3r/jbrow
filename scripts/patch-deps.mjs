@@ -95,6 +95,17 @@ const patches = [
         }
         if (this.isConnected) {`,
     },
+    {
+      file: `node_modules/electron-chrome-extensions/dist/${file}`,
+      why: 'DIAG',
+      find: `          } catch {
+            console.error(
+              \`browser-action-list failed to update`,
+      replace: `          } catch (e) {
+            console.error('DIAG getState ' + String(e && e.stack || e));
+            console.error(
+              \`browser-action-list failed to update`,
+    },
   ]),
   {
     file: 'node_modules/electron-chrome-extensions/dist/chrome-extension-api.preload.js',
