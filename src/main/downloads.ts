@@ -25,6 +25,8 @@ const runsCode = (file: string) => RUNS_CODE.has(path.extname(file).slice(1).toL
 
 /** Electron leaves downloads unquarantined, so Gatekeeper would never check them. Marks the file as Chrome does. */
 function quarantine(file: string, url: string): Promise<void> {
+  // Gatekeeper and xattr are macOS's; elsewhere each download logged that it couldn't.
+  if (process.platform !== 'darwin') return Promise.resolve()
   const value = `0081;${Math.floor(Date.now() / 1000).toString(16)};jbrow;${randomUUID().toUpperCase()}`
   return new Promise((resolve) =>
     execFile('/usr/bin/xattr', ['-w', 'com.apple.quarantine', value, file], (error) => {

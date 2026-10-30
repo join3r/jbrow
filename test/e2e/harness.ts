@@ -129,9 +129,12 @@ export class Cdp {
   }
 
   async click(x: number, y: number, button: 'left' | 'right' = 'left') {
-    for (const type of ['mousePressed', 'mouseReleased']) {
-      await this.send('Input.dispatchMouseEvent', { type, x, y, button, clickCount: 1 })
-    }
+    await this.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button, clickCount: 1 })
+    // A click can close its own page, as a permission prompt's buttons do. On a slow machine the
+    // page is gone before it answers the release, which went through all the same.
+    await this.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button, clickCount: 1 }).catch((error) => {
+      if (!this.closed) throw error
+    })
   }
 
   /** Clicks the middle of the first element matching a CSS selector. */
@@ -416,6 +419,26 @@ export function tempDir(prefix = 'jbrow-e2e-') {
   return mkdtempSync(path.join(tmpdir(), prefix))
 }
 
+/**
+ * Whether Chromium's sandbox can run here. On Linux it needs unprivileged user namespaces, which
+ * Ubuntu's AppArmor turns off (the CI workflow turns them back on) and which root in Docker doesn't
+ * get. Without the sandbox jbrow runs with --no-sandbox, and Electron then runs no preloads in
+ * service workers: extensions' workers get Electron's few built-in APIs instead of
+ * electron-chrome-extensions' (chrome.tabs.query knows only tabs with a page, for one).
+ */
+export const SANDBOXED = (() => {
+  if (process.platform !== 'linux') return true
+  if (process.getuid?.() === 0) return false
+  const read = (file: string) => {
+    try {
+      return readFileSync(file, 'utf8').trim()
+    } catch {
+      return null
+    }
+  }
+  return read('/proc/sys/kernel/apparmor_restrict_unprivileged_userns') !== '1' && read('/proc/sys/kernel/unprivileged_userns_clone') !== '0'
+})()
+
 const hasXvfb = (() => {
   if (process.platform !== 'linux') return false
   try {
@@ -476,8 +499,7 @@ export async function launch(opts: LaunchOptions = {}): Promise<Jbrow> {
   rmSync(path.join(userData, 'DevToolsActivePort'), { force: true })
 
   const args = [ROOT, ...(opts.hidden ? [] : ['--show']), '--remote-debugging-port=0', ...(opts.args ?? [])]
-  // GitHub's Linux runners don't allow Chromium's sandbox (unprivileged user namespaces).
-  if (process.platform === 'linux') args.push('--no-sandbox')
+  if (!SANDBOXED) args.push('--no-sandbox')
   const x = await ownDisplay()
   const proc = spawn(ELECTRON, args, {
     cwd: ROOT,

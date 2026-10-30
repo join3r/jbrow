@@ -95,6 +95,16 @@ const patches = [
         }
         if (this.isConnected) {`,
     },
+    {
+      file: `node_modules/electron-chrome-extensions/dist/${file}`,
+      why: "<browser-action-list> waits for a partition before asking for its state. Without one it asked the UI's own session, which has no extensions, and when that answer came after jbrow had given it a profile's partition it logged \"failed to update\" naming the profile, as if that one had failed",
+      find: `        this.fetchState = async () => {
+          try {`,
+      replace: `        this.fetchState = async () => {
+          /* jbrow: no partition yet, see scripts/patch-deps.mjs */
+          if (!this.partition) return;
+          try {`,
+    },
   ]),
   {
     file: 'node_modules/electron-chrome-extensions/dist/chrome-extension-api.preload.js',
