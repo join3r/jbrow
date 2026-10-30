@@ -14,10 +14,10 @@ Download it from [the latest release](https://github.com/join3r/jbrow/releases/l
 - **Windows:** `jbrow-<version>-x64-setup.exe`. It installs for your account, no administrator
   needed. The installer isn't code-signed yet, so SmartScreen warns the first time: **More info**,
   then **Run anyway**.
-- **Linux:** the AppImage (`jbrow-<version>.AppImage`), or the `.deb` for Debian and Ubuntu
-  (`sudo apt install ./jbrow_<version>_amd64.deb`). Make the AppImage executable
-  (`chmod +x`) and run it. On Ubuntu 22.04 and later it needs FUSE 2: `sudo apt install libfuse2`
-  (`libfuse2t64` on 24.04).
+- **Linux:** the `.deb` for Debian and Ubuntu (`sudo apt install ./jbrow_<version>_amd64.deb`), or
+  the AppImage (`jbrow-<version>.AppImage`) for other distributions: make it executable
+  (`chmod +x`) and run it. The AppImage needs FUSE 2 (`libfuse2`). Ubuntu 24.04 and later don't let
+  an AppImage set up Chromium's sandbox, so use the `.deb` there.
 
 The rest of this README describes the Mac, where keys say ⌘; on Windows and Linux it's Ctrl. These
 need macOS and aren't there on Windows and Linux yet: ⌥⇧Space's tabs of the app you were in, opening
