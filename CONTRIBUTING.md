@@ -121,9 +121,10 @@ release would replace your build. Settings says so.
 ### Signing and notarization
 
 The app is signed with the first Developer ID identity in your keychain. It's notarized only when
-electron-builder finds Apple credentials in the environment (`APPLE_KEYCHAIN_PROFILE`, or
-`APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`). A copy you build yourself doesn't
-need notarizing; one you send to someone else does.
+electron-builder finds Apple credentials in the environment: an App Store Connect API key
+(`APPLE_API_KEY`, the path to its .p8, with `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`), or
+`APPLE_KEYCHAIN_PROFILE`, or `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`. A
+copy you build yourself doesn't need notarizing; one you send to someone else does.
 
 ### Electron fuses
 
