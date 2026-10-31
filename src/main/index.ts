@@ -1752,6 +1752,33 @@ function makeDefaultBrowser() {
   for (const ms of [1000, 3000, 8000]) setTimeout(sendDefaultBrowser, ms)
 }
 
+/**
+ * Whether jbrow opens when you log in. The system keeps this, not settings.json, so turning it off
+ * under Login Items in System Settings shows here. 'dev' when jbrow runs from source, which would
+ * add the bare Electron app instead; 'approval' when macOS waits for you to allow it there.
+ */
+function sendLoginItem() {
+  if (panel.win.isDestroyed()) return
+  const login = app.getLoginItemSettings()
+  const status =
+    process.platform !== 'darwin' && process.platform !== 'win32'
+      ? 'unsupported'
+      : !app.isPackaged
+        ? 'dev'
+        : login.status === 'requires-approval'
+          ? 'approval'
+          : login.openAtLogin
+            ? 'on'
+            : 'off'
+  panel.ui.send('login-item', status)
+}
+
+function setLoginItem(on: boolean) {
+  if (!app.isPackaged) return
+  app.setLoginItemSettings({ openAtLogin: on })
+  sendLoginItem()
+}
+
 // ---------- profiles ----------
 
 const PROFILE_COLORS = ['#2f9aab', '#d0679a', '#7a6ad8', '#d9822b', '#3f9d5a', '#c4483f', '#5b7fa6', '#a08a2a']
@@ -2345,6 +2372,9 @@ function wireIpc() {
   on<{ id: string }>('default-profile', ({ id }) => setDefaultProfile(id))
   on('default-browser', () => sendDefaultBrowser())
   on('make-default-browser', () => makeDefaultBrowser())
+  on('login-item', () => sendLoginItem())
+  on<{ enabled: boolean }>('set-login-item', ({ enabled }) => setLoginItem(enabled))
+  on('open-login-items-settings', () => void shell.openExternal('x-apple.systempreferences:com.apple.LoginItems-Settings.extension'))
   on('updates', () => sendUpdates())
   on('check-updates', () => updates.check())
   on('install-update', () => void restartToUpdate())

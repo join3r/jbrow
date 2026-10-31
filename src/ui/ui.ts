@@ -2075,6 +2075,7 @@ function showSettings(show: boolean) {
     send('extensions')
     send('apps')
     send('default-browser')
+    send('login-item')
     send('updates')
     // You may have installed or removed claude or codex since jbrow looked.
     send('restyle-check')
@@ -3114,6 +3115,22 @@ window.jbrow.on('default-browser', (status: 'yes' | 'no' | 'dev') => {
   $('makeDefault').hidden = status !== 'no'
 })
 $('makeDefault').addEventListener('click', () => send('make-default-browser'))
+
+window.jbrow.on('login-item', (status: 'on' | 'off' | 'approval' | 'dev' | 'unsupported') => {
+  $('loginItem').hidden = status === 'unsupported'
+  const box = $<HTMLInputElement>('openAtLogin')
+  box.checked = status === 'on' || status === 'approval'
+  box.disabled = status === 'dev'
+  const help = $('loginItemHelp')
+  help.hidden = status !== 'approval' && status !== 'dev'
+  help.innerHTML =
+    status === 'approval'
+      ? 'macOS keeps jbrow from opening at login until you allow it under Login Items in System Settings.'
+      : 'Only the installed app can open at login, not jbrow running from source. Build it with <code>npm run dist</code>.'
+  $('loginItemsOpen').hidden = status !== 'approval'
+})
+$('openAtLogin').addEventListener('change', (e) => send('set-login-item', { enabled: (e.target as HTMLInputElement).checked }))
+$('loginItemsOpen').addEventListener('click', () => send('open-login-items-settings'))
 
 // ---------- updates ----------
 
