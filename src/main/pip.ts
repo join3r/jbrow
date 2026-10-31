@@ -53,8 +53,14 @@ export class MiniPlayer {
   private attempt = 0
   private entering: WebContents | null = null
 
-  /** `backToTab` runs with the video's page when the PiP window's "back to tab" button closes it. */
-  constructor(private backToTab: (wc: WebContents) => void) {}
+  /**
+   * `backToTab` runs with the video's page when the PiP window's "back to tab" button closes it,
+   * `changed` whenever jbrow's video goes into PiP or leaves it.
+   */
+  constructor(
+    private backToTab: (wc: WebContents) => void,
+    private changed: () => void = () => {},
+  ) {}
 
   get active() {
     return this.frame !== null
@@ -104,15 +110,19 @@ export class MiniPlayer {
     debug('entered', frame.url)
     this.frame = frame
     this.wc = wc
+    this.changed()
     void (run(WATCH) as Promise<boolean>)
       .then((playing) => {
         if (this.frame !== frame) return
         this.frame = null
+        this.changed()
         debug('left; playing =', playing)
         if (playing && trusted) this.backToTab(wc)
       })
       .catch(() => {
-        if (this.frame === frame) this.frame = null
+        if (this.frame !== frame) return
+        this.frame = null
+        this.changed()
       })
   }
 
@@ -121,6 +131,7 @@ export class MiniPlayer {
     this.entering = null
     const { frame, wc } = this
     this.frame = null
+    if (frame) this.changed()
     if (!frame || !wc || wc.isDestroyed()) return
     debug('exit')
     // The world doesn't matter here: there's nothing to trust in the result.

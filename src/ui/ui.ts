@@ -2245,6 +2245,9 @@ function renderSettings(all = false) {
   $<HTMLInputElement>('pipOnHide').checked = mp.onHide
   $<HTMLInputElement>('pipOnTabSwitch').checked = mp.onTabSwitch
   $<HTMLInputElement>('pipMutedToo').checked = mp.mutedToo
+  $('pipCornerItem').hidden = S.accessibility === null
+  $<HTMLInputElement>('pipMoveAway').checked = mp.moveAway
+  $('pipAccessibility').hidden = !mp.moveAway || S.accessibility !== false
   seg('pipSites', mp.sites)
   pipOnlySites.hidden = mp.sites !== 'only'
   pipExceptSites.hidden = mp.sites !== 'except'
@@ -2298,6 +2301,8 @@ function pipPrefs(change: Partial<Prefs['miniPlayer']>) {
 $('pipOnHide').addEventListener('change', (e) => pipPrefs({ onHide: (e.target as HTMLInputElement).checked }))
 $('pipOnTabSwitch').addEventListener('change', (e) => pipPrefs({ onTabSwitch: (e.target as HTMLInputElement).checked }))
 $('pipMutedToo').addEventListener('change', (e) => pipPrefs({ mutedToo: (e.target as HTMLInputElement).checked }))
+$('pipMoveAway').addEventListener('change', (e) => pipPrefs({ moveAway: (e.target as HTMLInputElement).checked }))
+$('pipAccessibilityOpen').addEventListener('click', () => send('open-accessibility-settings'))
 $('pipSites').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) pipPrefs({ sites: b.dataset.value as Prefs['miniPlayer']['sites'] })

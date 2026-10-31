@@ -30,6 +30,7 @@ import { logPath, setupLogging } from './log'
 import { Panel } from './panel'
 import { SitePermissions } from './permissions'
 import { MiniPlayer } from './pip'
+import { PipCorner } from './pip-corner'
 import { pickShareSource } from './screenshare'
 import { SidePanels } from './side-panel'
 import { attachStorageEvents } from './storage-events'
@@ -102,12 +103,19 @@ const NOTICE_SEEN_MS = 3000
 // The PiP window's "back to tab" brings jbrow back on the video's tab. A page can make its video
 // leave PiP while playing too, so it only counts if a click just made jbrow the frontmost app:
 // showing the panel takes keyboard focus from whatever you're typing in.
-const miniPlayer = new MiniPlayer(async (wc) => {
-  if ((await frontmostApp())?.pid !== process.pid) return
-  const id = tabs.idForWebContents(wc)
-  if (id && id !== tabs.activeId) tabs.activate(id)
-  void panel.show()
-})
+const miniPlayer = new MiniPlayer(
+  async (wc) => {
+    if ((await frontmostApp())?.pid !== process.pid) return
+    const id = tabs.idForWebContents(wc)
+    if (id && id !== tabs.activeId) tabs.activate(id)
+    void panel.show()
+  },
+  () => watchPipCorner(),
+)
+const pipCorner = new PipCorner()
+function watchPipCorner() {
+  pipCorner.watch(miniPlayer.active && settings.miniPlayer.moveAway)
+}
 /** The page that was in front, for moving its video into the mini player when you switch tabs. */
 let shownPage: Electron.WebContents | null = null
 /** Names and icons of apps, for the sidebar's app sections and the Apps settings. */
@@ -219,6 +227,7 @@ function state(): UiState {
     crash: active ? tabs.crash(active.id) : null,
     devices: active ? devices.view(active.id) : null,
     styledSites: restyler.styledSites(),
+    accessibility: process.platform === 'darwin' ? systemPreferences.isTrustedAccessibilityClient(false) : null,
     restyleAgents: restyler.agents(),
     zoomSites: zoom.list(),
     nav: tabs.navState(),
@@ -1062,7 +1071,10 @@ function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.miniPlayer) {
     const mp = { ...settings.miniPlayer, ...prefs.miniPlayer }
     const clean = (list: string[]) => list.map((p) => p.trim()).filter(Boolean)
+    // Turning on corner switching asks for the Accessibility access it needs, with macOS's own prompt.
+    if (mp.moveAway && !settings.miniPlayer.moveAway && process.platform === 'darwin') systemPreferences.isTrustedAccessibilityClient(true)
     settings.miniPlayer = { ...mp, onlySites: clean(mp.onlySites), exceptSites: clean(mp.exceptSites) }
+    watchPipCorner()
   }
   if (prefs.zoom) {
     if (prefs.zoom.remember !== undefined) zoom.setRemember(prefs.zoom.remember)
@@ -2227,6 +2239,7 @@ function wireIpc() {
   })
   on<Partial<Prefs>>('prefs', (prefs) => updatePrefs(prefs))
   on('open-settings-file', () => void shell.openPath(settingsPath()))
+  on('open-accessibility-settings', () => void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'))
   on<{ id: string; name: string }>('rename', ({ id, name }) => tabs.rename(id, name))
   on<{ id: string }>('restore', ({ id }) => tabs.restore(id))
   on<{ ids: string[] }>('unarchive', ({ ids }) => void unarchiveThreads(ids))

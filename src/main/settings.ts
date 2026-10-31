@@ -143,7 +143,7 @@ const DEFAULTS: Settings = {
   openApps: [],
   extensionShortcuts: {},
   restyle: { enabled: false, agent: 'claude', model: 'sonnet', codexModel: '', claudePath: '', codexPath: '' },
-  miniPlayer: { onHide: true, onTabSwitch: false, mutedToo: false, sites: 'all', onlySites: [], exceptSites: [] },
+  miniPlayer: { onHide: true, onTabSwitch: false, mutedToo: false, moveAway: false, sites: 'all', onlySites: [], exceptSites: [] },
   zoom: { defaultPercent: 100, remember: true, sites: {} },
   sidePanelWidth: 360,
   welcomed: false,

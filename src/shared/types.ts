@@ -151,6 +151,8 @@ export interface UiState {
   devices: DeviceChooserView | null
   /** Every site with a restyle, for the settings screen. */
   styledSites: StyledSite[]
+  /** Whether jbrow may move other windows, which the mini player's corner switching needs. Null off macOS. */
+  accessibility: boolean | null
   /** Whether the claude and codex commands are installed; null until jbrow has looked. */
   restyleAgents: Record<RestyleAgent, boolean | null>
   /** Sites with a zoom of their own, in percent. */
@@ -305,6 +307,8 @@ export interface MiniPlayerPrefs {
   onTabSwitch: boolean
   /** Muted videos too, not only ones playing with sound. */
   mutedToo: boolean
+  /** Move it to another corner when you switch to a window it covers. macOS only. */
+  moveAway: boolean
   /** Which sites: every one, only those in `onlySites`, or every one but those in `exceptSites`. */
   sites: 'all' | 'only' | 'except'
   /** Address patterns, as for private addresses. Both lists are kept whichever `sites` uses. */
