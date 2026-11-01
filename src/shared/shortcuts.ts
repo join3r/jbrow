@@ -82,6 +82,7 @@ export const ACTIONS = [
   { id: 'back', label: 'Back', key: 'Command+[' },
   { id: 'forward', label: 'Forward', key: 'Command+]' },
   { id: 'pin', label: 'Pin the window', key: 'Command+Shift+P' },
+  { id: 'sidebar', label: 'Show or hide the sidebar', key: 'Command+S' },
   { id: 'history', label: 'History', key: 'Command+Y' },
   { id: 'settings', label: 'Settings', key: 'Command+,' },
   { id: 'devTools', label: "Developer tools for the page", key: 'Command+Alt+I' },

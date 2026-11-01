@@ -269,10 +269,11 @@ export class Panel {
     const { x, y, width, height } = this.contentBox()
     if (this.pageFullscreen) return { x, y, width, height }
     const side = this.hooks.sideWidth()
+    const left = this.settings().hideSidebar ? GUTTER : SIDEBAR_WIDTH
     return {
-      x: x + SIDEBAR_WIDTH,
+      x: x + left,
       y: y + TOOLBAR_HEIGHT,
-      width: Math.max(0, width - SIDEBAR_WIDTH - GUTTER - (side ? side + SIDE_GAP : 0)),
+      width: Math.max(0, width - left - GUTTER - (side ? side + SIDE_GAP : 0)),
       height: Math.max(0, height - TOOLBAR_HEIGHT - GUTTER),
     }
   }

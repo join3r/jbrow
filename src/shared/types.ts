@@ -192,6 +192,8 @@ export interface Prefs {
   animation: { style: AnimMessage['style']; durationMs: number; ease: AnimMessage['ease'] }
   /** Playful animations in jbrow's own UI. */
   whimsy: boolean
+  /** The page takes the sidebar's room; the sidebar slides over it from the window's left edge. */
+  hideSidebar: boolean
   /** Addresses matching one of these show as "Private" until clicked. `*` matches anything. */
   privateUrls: string[]
   /** Keep the text of pages you visit for the history page's search. */

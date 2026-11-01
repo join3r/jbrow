@@ -2,6 +2,8 @@
 /* Theme colors are set on [data-theme] rather than :root alone, so a theme swatch in settings can show its own. */
 :root {
   --sidebar: 256px;
+  /* Where the pages and their bars start: past the sidebar, or just the gutter while it's hidden. */
+  --rail: var(--sidebar);
   --toolbar: 40px;
   --bar: 32px;
   --gutter: 8px;
@@ -153,7 +155,7 @@ button:focus-visible, input:focus-visible, [role='button']:focus-visible { outli
 .side-tools { position: absolute; z-index: 1; top: var(--gutter); left: 8px; width: calc(var(--sidebar) - 16px); height: var(--bar); display: flex; align-items: center; justify-content: flex-end; gap: 4px; -webkit-app-region: drag; }
 .side-tools > * { -webkit-app-region: no-drag; }
 /* The address bars sit above the pages, one per pane; main lays each page right under its bar. */
-#toolbar { position: absolute; z-index: 1; top: var(--gutter); left: var(--sidebar); right: calc(var(--gutter) + var(--side, 0px)); height: var(--bar); }
+#toolbar { position: absolute; z-index: 1; top: var(--gutter); left: var(--rail); right: calc(var(--gutter) + var(--side, 0px)); height: var(--bar); }
 .panel.settings-open #toolbar { display: none; }
 #filter { flex: 1; min-width: 0; }
 /* Sized by label and never bold when selected, so picking one doesn't push "Personal" into an ellipsis. */
@@ -224,7 +226,7 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .bar .pop, .bar .suggest { top: calc(100% + 4px); }
 /* The suggestions are as wide as the bar. A narrow pane's spread over its neighbors (SUGGEST_WIDTH in ui.ts),
    rightward, or leftward when the pane is too near the right edge for that. */
-.bar .suggest { right: auto; width: 100%; min-width: min(560px, 100vw - var(--sidebar) - 2 * var(--gutter)); }
+.bar .suggest { right: auto; width: 100%; min-width: min(560px, 100vw - var(--rail) - 2 * var(--gutter)); }
 .bar.grow-left .suggest { left: auto; right: 0; }
 .omni-field { position: relative; flex: 1; min-width: 0; height: 100%; }
 #omnibox { width: 100%; height: 100%; border: 0; background: none; outline: none; color: var(--ink); padding: 0 6px; font: 13px var(--font); user-select: text; }
@@ -345,6 +347,23 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 /* The address bar's suggestions are styled in suggest/suggest.css and each layout's own file next to it. */
 
 /* ---------- sidebar ---------- */
+/*
+ * Hidden, the sidebar waits off the left edge and slides in over the page, on a card of its own,
+ * when the pointer reaches the edge strip (see setPeek). The UI is above the page meanwhile.
+ */
+.sidebar-edge, .sidebar-card { display: none; }
+.panel.sidebar-hidden { --rail: var(--gutter); }
+.panel.sidebar-hidden .sidebar-edge { display: block; position: absolute; z-index: 2; top: 0; bottom: 0; left: 0; width: var(--gutter); }
+.panel.sidebar-hidden.sidebar-peek .sidebar-edge { display: none; }
+.panel.sidebar-hidden .sidebar-card { display: block; position: absolute; z-index: 1; top: 0; bottom: 0; left: 0; width: var(--sidebar); border-radius: 0 12px 12px 0; background: var(--solid); box-shadow: 0 0 0 0.5px var(--line), 0 12px 40px rgba(0, 0, 0, 0.22); }
+.panel.sidebar-hidden :is(.sidebar-card, .side-tools, #sidebar) { transform: translateX(calc(-100% - 48px)); transition: transform var(--dur) cubic-bezier(0.2, 0.8, 0.2, 1); }
+.panel.sidebar-hidden.sidebar-peek :is(.sidebar-card, .side-tools, #sidebar) { transform: none; }
+/* Over the address bars, which reach to the window's edge while it's hidden. */
+.panel.sidebar-hidden :is(.sidebar-card, .side-tools, #sidebar) { z-index: 3; }
+.panel.sidebar-hidden:not(.sidebar-peek) :is(.side-tools, #sidebar) { visibility: hidden; transition: transform var(--dur) cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s var(--dur); }
+@media (prefers-reduced-motion: reduce) {
+  .panel.sidebar-hidden :is(.sidebar-card, .side-tools, #sidebar) { transition: none; }
+}
 #sidebar { position: absolute; z-index: 1; top: var(--toolbar); left: 0; bottom: 0; width: var(--sidebar); display: flex; flex-direction: column; padding: 0 8px var(--gutter); }
 /* Window-wide controls sit at the foot of the sidebar, out of the pages' way; their popovers open upward. */
 .side-foot { flex: none; display: flex; align-items: center; gap: 2px; padding-top: 6px; }
@@ -513,7 +532,7 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .rules-pop textarea { display: block; width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 7px; background: var(--selected); color: var(--ink); padding: 6px 8px; font: 12px var(--mono); }
 
 /* ---------- content (the native page view sits on top of this) ---------- */
-#content { position: absolute; z-index: 0; left: var(--sidebar); top: var(--toolbar); right: calc(var(--gutter) + var(--side, 0px)); bottom: var(--gutter); border-radius: 0 0 9px 9px; overflow: hidden; background: var(--surface); box-shadow: 0 0 0 100vmax var(--tint); }
+#content { position: absolute; z-index: 0; left: var(--rail); top: var(--toolbar); right: calc(var(--gutter) + var(--side, 0px)); bottom: var(--gutter); border-radius: 0 0 9px 9px; overflow: hidden; background: var(--surface); box-shadow: 0 0 0 100vmax var(--tint); }
 /*
  * While a popover or the suggestions cover the page, jbrow's UI sits above the live page (see
  * Panel.setOverlay), so the page area turns clear. Blur can't reach a page in another view, so
@@ -533,7 +552,7 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .pane-bgs { display: contents; }
 .pane { position: absolute; top: 0; bottom: 0; border-radius: 0 0 9px 9px; background: var(--surface); display: grid; place-items: center; color: var(--muted); font-size: 12px; }
 .split > :is(.blank, .cert-warn) { position: absolute; top: 0; bottom: 0; left: var(--fx); width: var(--fw); overflow-y: auto; border-radius: 0 0 9px 9px; background: var(--surface); }
-.panes { position: absolute; z-index: 0; left: var(--sidebar); top: var(--toolbar); right: calc(var(--gutter) + var(--side, 0px)); bottom: var(--gutter); pointer-events: none; }
+.panes { position: absolute; z-index: 0; left: var(--rail); top: var(--toolbar); right: calc(var(--gutter) + var(--side, 0px)); bottom: var(--gutter); pointer-events: none; }
 .pane-ring { position: absolute; top: calc(-1 * var(--bar)); bottom: 0; border-radius: 9px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); }
 .pane-split { position: absolute; top: 0; bottom: 0; width: var(--pane-gap); cursor: col-resize; pointer-events: auto; }
 /* The other panes' bars: what they show, and a click on the address makes the pane active with the keyboard in its bar. */

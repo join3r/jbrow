@@ -45,6 +45,8 @@ export interface Settings {
   animation: { style: AnimationStyle; durationMs: number; ease: AnimationEase }
   /** Playful animations in jbrow's own UI: tabs popping in and puffing away, pages sliding in as you switch tabs. */
   whimsy: boolean
+  /** The page takes the sidebar's room; the sidebar slides over it from the window's left edge. */
+  hideSidebar: boolean
   /** %s is replaced by the encoded query. Pick one under Address bar in settings, or any address with %s. */
   searchUrl: string
   /** Ask the search engine for suggestions as you type in the address bar. Never for addresses or private ones. */
@@ -124,6 +126,7 @@ const DEFAULTS: Settings = {
   linkedApps: [],
   animation: { style: 'materialize', durationMs: 180, ease: 'spring' },
   whimsy: false,
+  hideSidebar: false,
   searchUrl: 'https://www.google.com/search?q=%s',
   searchSuggestions: true,
   urlBarStyle: 'columns',
@@ -192,6 +195,7 @@ export function loadSettings(): Settings {
     if (!Array.isArray(settings.openApps)) settings.openApps = DEFAULTS.openApps
     if (!settings.profileSites || typeof settings.profileSites !== 'object') settings.profileSites = {}
     if (typeof settings.whimsy !== 'boolean') settings.whimsy = DEFAULTS.whimsy
+    if (typeof settings.hideSidebar !== 'boolean') settings.hideSidebar = DEFAULTS.hideSidebar
     if (!Number.isFinite(settings.sidePanelWidth)) settings.sidePanelWidth = DEFAULTS.sidePanelWidth
     if (!['system', 'light', 'dark'].includes(settings.appearance)) settings.appearance = DEFAULTS.appearance
     if (!THEMES.some((t) => t.id === settings.theme)) settings.theme = DEFAULTS.theme

@@ -1262,10 +1262,62 @@ function forgetVisit(v: VisitItem) {
   showSuggestions()
 }
 
+// ---------- hidden sidebar ----------
+// Hidden, the sidebar slides in over the page while the pointer is at the window's left edge and
+// over the sidebar, and goes again once it moves away. The UI is above the page meanwhile.
+
+const sideTop = $('sideTop')
+let peeking = false
+let unpeekTimer: number | undefined
+const sidebarHiddenNow = () => root.classList.contains('sidebar-hidden')
+
+function setPeek(on: boolean) {
+  clearTimeout(unpeekTimer)
+  unpeekTimer = undefined
+  if (on === peeking) return
+  peeking = on
+  root.classList.toggle('sidebar-peek', on)
+  syncOverlay()
+}
+
+/** Something in the sidebar still needs it out: a field you're typing in, a popover of its own, a drag. */
+function sidebarBusy() {
+  const inSidebar = (el: Element | null) => !!el && (sidebarEl.contains(el) || sideTop.contains(el))
+  const typing = document.activeElement?.matches('input, textarea, [contenteditable]') && inSidebar(document.activeElement)
+  const popOpen = [...document.querySelectorAll('.pop:not([hidden])')].some((p) => inSidebar(p) || p.id === 'filterPop')
+  return typing || popOpen || sidebarEl.classList.contains('dragging')
+}
+
+/** Puts the sidebar away shortly, unless the pointer comes back or something in it is still in use. */
+function unpeekSoon() {
+  if (!peeking || unpeekTimer !== undefined || sidebarBusy()) return
+  unpeekTimer = window.setTimeout(() => {
+    unpeekTimer = undefined
+    if (!sidebarBusy()) setPeek(false)
+  }, 300)
+}
+
+$('sidebarEdge').addEventListener('mouseenter', () => sidebarHiddenNow() && setPeek(true))
+document.addEventListener('mousemove', (e) => {
+  if (!peeking) return
+  if (e.clientX > sidebarEl.offsetWidth + 24) unpeekSoon()
+  else {
+    clearTimeout(unpeekTimer)
+    unpeekTimer = undefined
+  }
+})
+document.documentElement.addEventListener('mouseleave', () => unpeekSoon())
+// Renaming a tab from its menu, or tabbing into the sidebar, brings it out to work in.
+sidebarEl.addEventListener('focusin', () => sidebarHiddenNow() && setPeek(true))
+sidebarEl.addEventListener('focusout', () => requestAnimationFrame(() => !sidebarEl.matches(':hover') && unpeekSoon()))
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && peeking && !sidebarBusy()) setPeek(false)
+})
+
 /** The page hides while anything of jbrow's own covers it; see Panel.setOverlay. */
 let overlaySent = false
 function syncOverlay() {
-  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !certPop.hidden || !devicePop.hidden || !profilePop.hidden || !soundPop.hidden || jbrowPageShown() || welcome.isOpen
+  const on = peeking || !suggest.hidden || !extPop.hidden || !dlPop.hidden || !certPop.hidden || !devicePop.hidden || !profilePop.hidden || !soundPop.hidden || jbrowPageShown() || welcome.isOpen
   if (on !== overlaySent) {
     overlaySent = on
     send('overlay', { on })
@@ -2036,6 +2088,7 @@ const pipOnlySites = $<HTMLTextAreaElement>('pipOnlySites')
 const pipExceptSites = $<HTMLTextAreaElement>('pipExceptSites')
 const quietLinks = $<HTMLInputElement>('quietLinks')
 const whimsy = $<HTMLInputElement>('whimsy')
+const hideSidebar = $<HTMLInputElement>('hideSidebar')
 const autoUpdate = $<HTMLInputElement>('autoUpdate')
 const keepLoadedPinned = $<HTMLInputElement>('keepLoadedPinned')
 const keepLoadedKept = $<HTMLInputElement>('keepLoadedKept')
@@ -2317,6 +2370,7 @@ function renderSettings(all = false) {
   pinWindow.checked = S.pinned
   quietLinks.checked = S.prefs.quietLinks
   whimsy.checked = S.prefs.whimsy
+  hideSidebar.checked = S.prefs.hideSidebar
   autoUpdate.checked = S.prefs.autoUpdate
   keepLoadedPinned.checked = S.prefs.keepLoaded.pinned
   keepLoadedKept.checked = S.prefs.keepLoaded.kept
@@ -2324,6 +2378,8 @@ function renderSettings(all = false) {
   renderUrlBarStyle()
   $('showHotkey').textContent = keyLabel('show') || 'its hotkey'
   $('appHotkey').textContent = keyLabel('showApp') || 'The app hotkey'
+  $('sidebarKey').textContent = keyLabel('sidebar')
+  $('sidebarKeyHelp').hidden = !keyLabel('sidebar')
   renderActionKeys()
 }
 
@@ -2825,6 +2881,7 @@ whimsy.addEventListener('change', () => {
   setWhimsy(whimsy.checked)
   sendPrefs({ whimsy: whimsy.checked })
 })
+hideSidebar.addEventListener('change', () => sendPrefs({ hideSidebar: hideSidebar.checked }))
 autoUpdate.addEventListener('change', () => sendPrefs({ autoUpdate: autoUpdate.checked }))
 keepLoadedPinned.addEventListener('change', () => sendPrefs({ keepLoaded: { ...S!.prefs.keepLoaded, pinned: keepLoadedPinned.checked } }))
 keepLoadedKept.addEventListener('change', () => sendPrefs({ keepLoaded: { ...S!.prefs.keepLoaded, kept: keepLoadedKept.checked } }))
@@ -3955,6 +4012,8 @@ window.jbrow.on('state', (state: UiState) => {
   if (S && S.activeId !== state.activeId) closeFind(false)
   if (S && !S.pinned && state.pinned) flourish($('pin').querySelector('svg'), 'wiggle')
   setWhimsy(state.prefs.whimsy)
+  root.classList.toggle('sidebar-hidden', state.prefs.hideSidebar)
+  if (!state.prefs.hideSidebar) setPeek(false)
   S = state
   historyPage.setProfiles(state.profiles)
   document.documentElement.dataset.theme = state.prefs.theme
@@ -4076,6 +4135,7 @@ window.jbrow.on('anim', (m: AnimMessage) => {
   // revealing a private address and opening the suggestions.
   omnibox.blur()
   hideSuggestions()
+  setPeek(false)
   setExtensions(false)
   setDownload(null)
   setRestyle(false)

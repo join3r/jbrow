@@ -16,6 +16,8 @@
   <body>
     <div id="root" class="panel" data-style="materialize">
       <div class="drag-strip"></div>
+      <div id="sidebarEdge" class="sidebar-edge"></div>
+      <div class="sidebar-card"></div>
       <header id="sideTop" class="side-tools">
         <div id="filter" class="seg" role="group" aria-label="Show profile"></div>
         <button id="newTab" class="icon" data-icon="plus" title="New tab" aria-label="New tab"></button>
@@ -403,6 +405,14 @@
                   <span class="label"></span>
                   <button id="animPreview" class="chip">Preview</button>
                 </div>
+              </div>
+              <div class="set-item" data-keywords="hide sidebar autohide auto-hide collapse full width tabs list edge">
+                <h3>Sidebar</h3>
+                <label class="check">
+                  <input id="hideSidebar" type="checkbox" />
+                  <span>Hide the sidebar and give its room to the page. Point at the window's left edge and it slides in
+                    over the page until you move away.<span id="sidebarKeyHelp"> <b id="sidebarKey">⌘S</b> switches it too.</span></span>
+                </label>
               </div>
               <div class="set-item" data-keywords="whimsy whimsical playful fun delight bounce poof hop slide tab switch animation">
                 <h3>Whimsy</h3>

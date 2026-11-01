@@ -248,6 +248,7 @@ function state(): UiState {
       profileSwitcher: settings.profileSwitcher,
       animation: settings.animation,
       whimsy: settings.whimsy,
+      hideSidebar: settings.hideSidebar,
       privateUrls: settings.privateUrls,
       historyText: settings.historyText,
       historyTextSkip: settings.historyTextSkip,
@@ -830,6 +831,10 @@ function runAction(id: ActionId) {
       return wc?.navigationHistory.goForward()
     case 'pin':
       return setPinned(!panel.pinned)
+    case 'sidebar':
+      setSidebarHidden(!settings.hideSidebar)
+      saveSettings(settings)
+      return pushState()
     case 'history':
       return panel.ui.send('history', {})
     case 'settings':
@@ -982,6 +987,15 @@ function finishWelcome(pinned: boolean) {
 }
 
 /** Pins or unpins the window and remembers it for next launch. */
+/** The pages move into the sidebar's room or out of it; the UI follows with the next state. */
+function setSidebarHidden(on: boolean) {
+  if (settings.hideSidebar === on) return
+  settings.hideSidebar = on
+  tabs.layout()
+  sidePanels?.layout()
+  buildAppMenu()
+}
+
 function setPinned(on: boolean) {
   panel.setPinned(on)
   if (settings.pinned !== on) {
@@ -1045,6 +1059,7 @@ function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.profileSwitcher === 'auto' || prefs.profileSwitcher === 'menu') settings.profileSwitcher = prefs.profileSwitcher
   if (prefs.animation) settings.animation = { ...settings.animation, ...prefs.animation }
   if (typeof prefs.whimsy === 'boolean') settings.whimsy = prefs.whimsy
+  if (typeof prefs.hideSidebar === 'boolean') setSidebarHidden(prefs.hideSidebar)
   if (prefs.privateUrls) settings.privateUrls = prefs.privateUrls.map((p) => p.trim()).filter(Boolean)
   if (typeof prefs.historyText === 'boolean') settings.historyText = prefs.historyText
   if (prefs.historyTextSkip) settings.historyTextSkip = prefs.historyTextSkip.map((p) => p.trim()).filter(Boolean)
@@ -2725,6 +2740,8 @@ function buildAppMenu() {
           zoomItem(0, 'Actual Size', 'Command+0'),
           zoomItem(1, 'Zoom In', 'Command+='),
           zoomItem(-1, 'Zoom Out', 'Command+-'),
+          { type: 'separator' },
+          { ...item('sidebar', 'Hide Sidebar'), type: 'checkbox', checked: settings.hideSidebar },
           { type: 'separator' },
           item('splitView', 'Split View'),
           item('paneLeft', 'Focus Left Pane'),
