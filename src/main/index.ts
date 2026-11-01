@@ -2438,6 +2438,7 @@ function wireIpc() {
     pushState()
   })
   on('new-folder', () => newFolder())
+  on<{ name: string; rules: string[] }>('add-folder', ({ name, rules }) => tabs.updateFolder(tabs.createFolder(name).id, { rules }))
   on('sidebar-menu', () => sidebarMenu())
   on<{ id: string }>('folder-menu', ({ id }) => folderMenu(id))
   on<{ id: string; name?: string; rules?: string[]; collapsed?: boolean }>('folder', ({ id, ...change }) => tabs.updateFolder(id, change))

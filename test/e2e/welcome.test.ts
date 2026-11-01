@@ -80,6 +80,10 @@ test('going through the welcome applies its choices, and ethereal unpins the win
   await click(ui, 'wl-new-tabs-at-bottom')
   await jb.waitForState((s) => s.prefs.newTabsAt === 'bottom', 'new tabs at the bottom')
   await waitFor(() => jb.readJson('settings.json').newTabsAt === 'bottom', 'settings.json to have newTabsAt')
+  await click(ui, 'wl-video-folder')
+  const videos = await jb.waitForState((s) => s.folders.some((f) => f.name === 'YouTube'), 'the YouTube folder')
+  assert.deepEqual(videos.folders.find((f) => f.name === 'YouTube')!.rules, ['youtube.com/watch', 'youtu.be/'])
+  await waitFor(async () => !(await ui.eval('!!document.getElementById("wl-video-folder")')), 'the button to give way')
 
   await click(ui, 'wl-next')
   await waitFor(async () => /Address bar/.test(await stepLabel(ui)), 'the address bar step')

@@ -56,6 +56,8 @@ function caps(shortcut: string) {
   const keys = [...MAC_ORDER.filter((m) => parts.includes(m)), key]
   return `<span class="wl-keys">${keys.map((k) => `<kbd>${esc(GLYPHS[k] ?? k)}</kbd>`).join('')}</span>`
 }
+// The folder the welcome offers to make: YouTube videos about to archive move into it instead.
+const VIDEO_RULES = ['youtube.com/watch', 'youtu.be/']
 const days = (n: number) => (n === 1 ? '1 day' : `${n} days`)
 
 /**
@@ -112,7 +114,7 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
   let sceneMode: 'pinned' | 'ethereal' = 'ethereal'
 
   const q = <T extends HTMLElement>(sel: string) => el.querySelector<T>(sel)
-  const stateKey = (s: UiState) => JSON.stringify([s.prefs, s.profiles, s.keys.show, s.keys.showApp, s.thirdPartyCookiesBlocked])
+  const stateKey = (s: UiState) => JSON.stringify([s.prefs, s.profiles, s.keys.show, s.keys.showApp, s.thirdPartyCookiesBlocked, s.folders.map((f) => f.rules)])
 
   function open(isFirst: boolean) {
     first = isFirst
@@ -228,6 +230,7 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
     <label class="wl-row"><span class="txt"><span class="label">${title}</span><span class="sub">${sub}</span></span>
       <span class="wl-switch"><input type="checkbox" id="wl-pref-${pref}" data-pref="${pref}" ${on ? 'checked' : ''}><span></span></span></label>`
   const profileColor = (i: number) => S!.profiles[i % S!.profiles.length].color
+  const videoFolder = () => S!.folders.find((f) => VIDEO_RULES.some((r) => f.rules.includes(r)))
 
   function sceneHtml() {
     const p = S!.profiles.find((x) => x.id === S!.prefs.defaultProfile) ?? S!.profiles[0]
@@ -410,6 +413,7 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
         `<div class="t" style="--c:${esc(profileColor(1))}"><span>Hacker News</span></div>`,
         `<div class="t sleep" style="--c:${esc(profileColor(0))}"><span>RFC 9110 <small>· ${p.summarizeAfterDays ? `${days(p.summarizeAfterDays)} ago` : 'open'}</small></span></div>`,
       ]
+      const videos = videoFolder()
       return `
       <div class="wl-head">
         <span class="wl-eyebrow">Tabs and links</span>
@@ -422,6 +426,7 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
           <div class="sec">Kept</div>
           <div class="t" style="--c:${esc(profileColor(0))}"><span>Sprint board</span></div>
           <div class="t" style="--c:${esc(profileColor(1))}"><span>Flat in Lisbon</span></div>
+          ${videos ? `<div class="f"><span>${esc(videos.name)}</span></div><div class="t in" style="--c:${esc(profileColor(0))}"><span>Strange Loop · Keynote</span></div>` : ''}
           <div class="sec">Today</div>
           ${p.newTabsAt === 'bottom' ? [...today].reverse().join('') : today.join('')}
           ${p.archiveAfterDays ? '<div class="arch"><span>Archived 3 tabs</span><b>Undo</b></div>' : ''}
@@ -431,6 +436,8 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
             ${seg('new-tabs-at', [['top', 'Top'], ['bottom', 'Bottom']], p.newTabsAt)}</div>
           ${stepper('summarizeAfterDays', 'Sleep after', 'The page unloads and the row says which site it was. Kept tabs never sleep.')}
           ${stepper('archiveAfterDays', 'Archive after', 'The tab leaves the sidebar. Undo puts it back where it was.')}
+          <div class="wl-row"><span class="txt"><span class="label">Save YouTube videos</span><span class="sub">A video you haven't got to moves into a ${videos ? `<b>${esc(videos.name)}</b>` : 'YouTube'} folder in Kept instead of archiving. Any folder can catch tabs this way: right-click it and choose Auto-file rules.</span></span>
+            ${videos ? '<span class="wl-made">Folder in Kept</span>' : '<button id="wl-video-folder" class="wl-btn" data-act="video-folder">Make the folder</button>'}</div>
           ${toggle('quietLinks', p.quietLinks, 'Quiet links', 'Links an app opens on its own, without your click, wait in the background with a dot. The menu bar counts them: jb •2.')}
           ${toggle('miniOnHide', p.miniPlayer.onHide, 'Keep videos playing', 'A playing video moves to a picture-in-picture window when jbrow hides.')}
         </div>
@@ -646,6 +653,8 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
         const k = b.dataset.k as 'summarizeAfterDays' | 'archiveAfterDays'
         return prefs({ [k]: Math.max(0, Math.min(90, S.prefs[k] + Number(v))) })
       }
+      case 'video-folder':
+        return videoFolder() || send('add-folder', { name: 'YouTube', rules: VIDEO_RULES })
       case 'engine':
         return prefs({ searchUrl: v })
       case 'urlbar':
