@@ -173,6 +173,7 @@ function render() {
   $('back').title = `Back${keyHint('back')}`
   $('forward').title = `Forward${keyHint('forward')}`
   $('settingsButton').title = `Settings${keyHint('settings')}`
+  $('historyButton').title = `History${keyHint('history')}`
   $('pin').setAttribute('aria-pressed', String(S.pinned))
   $('pin').title = `${S.pinned ? 'Pinned: a regular window' : 'Pin: keep as a regular window'} with a Dock icon${keyHint('pin')}`
   if (!editing()) showAddress()
@@ -2084,6 +2085,7 @@ function showHistory(show: boolean, text?: string) {
 /** History came up or went: the page goes behind it or comes back. */
 function historyShown(shown: boolean) {
   root.classList.toggle('settings-open', shown || !settingsEl.hidden)
+  $('historyButton').setAttribute('aria-pressed', String(shown))
   send('history-shown', { on: shown })
   renderThreads()
   renderPanes()
@@ -2908,6 +2910,7 @@ $('urlBarStyle').addEventListener('click', (e) => {
 })
 $('openSettingsFile').addEventListener('click', () => send('open-settings-file'))
 $('settingsButton').addEventListener('click', () => setSettings(!!settingsEl.hidden))
+$('historyButton').addEventListener('click', () => setHistory(!historyPage.shown))
 $('closeSettings').addEventListener('click', () => setSettings(false))
 // ---------- profiles ----------
 
