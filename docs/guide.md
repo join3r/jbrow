@@ -87,6 +87,7 @@ These are the defaults; change any of them under **Shortcuts** in settings. ⌘1
 | ⌃⌘← / ⌃⌘→ | Focus the pane on the left / right of a split |
 | ⌘R / ⇧⌘R | Reload / reload without the cache (or ⇧-click the reload button) |
 | ⇧⌘T | Reopen the last closed tab (again for the one before) |
+| ⌘Y | History |
 | ⌘F | Find in page (Return / ⌘G next, ⇧Return / ⇧⌘G previous, Esc closes) |
 | ⌘P | Print, or Save as PDF from the print dialog |
 | ⌘L | Address bar |
@@ -150,8 +151,8 @@ switches to the tab you're naming. Sites you haven't been to complete too, from 
 sites worldwide and in Slovakia that ships with jbrow (`youtu` becomes `youtube.com`), but your
 history always comes first. Three letters only complete to one of the top thousand sites; four or
 more to any on the list. The list comes from the Chrome UX Report and Tranco, with adult sites left
-out. Arrow to a history row and press ⇧Delete (or click its × on hover)
-to remove it from the history. Private addresses show as **Private** in the suggestions and are never
+out. Arrow to a history row and press Delete (fn⌫ on a laptop, or ⇧⌫), or click its × on hover,
+to remove it from the history and the history page. Private addresses show as **Private** in the suggestions and are never
 completed. History is kept in `visits.json` next to `settings.json`: the address, title, number of
 visits and last visit of each page, up to 5000 pages per profile, forgotten after 90 days.
 
@@ -324,6 +325,58 @@ second download asks first, as in Chrome, and while jbrow is hidden it's simply 
 close their details, and if one finishes while jbrow is hidden, you get a notification. A link that opens
 a new tab only to start a download closes that tab again.
 
+## History
+
+⌘Y (or **File → Show History**) opens History as a tab of its own in the sidebar, as settings opens.
+It keeps every visit for a year: when, which profile, how you got there and how long the page was in
+front of you (counted while jbrow is in front and you're at the computer, or while the page plays
+sound). It also keeps the text that was on each page, so you can find one by what it said rather
+than its title.
+
+- **Search** looks in titles, addresses and page text, every word. A match in the text shows the
+  sentence it was in. `site:github.com`, `in:work` (a profile) and `from:slack` (the app a link came
+  from) narrow it down, alone or with words.
+- **Filters** on the left, each with how many visits it would leave: when (today, since yesterday,
+  7 or 30 days, the year), profile, how you got there (typed, searched, followed a link, from
+  another app, imported), the sites you visited most, pages you stayed on for a minute or more,
+  pages still open in a tab or in Kept. Redirects and sign-in pages you were on for a moment are
+  hidden unless you turn **Hide redirects** off.
+- **Trails** group visits that followed from one start: a search, an address you typed, a link from
+  another app, with the links you followed from there (in the same tab or in tabs it opened). Each
+  can be reopened as tabs, or kept as a folder in Kept named after how it started.
+- **Pages** lists every visit by day, **Sites** the sites by time spent with their last 7 days, and
+  **Searches** what you searched for and which pages each search led to. Click a search to find it
+  in history, a site to see its pages.
+
+Click a page to open it in a new tab, ⌘-click or middle-click to open it in the background. The ×
+on a row forgets the page: every visit to it, its text, and its place in the address bar's
+suggestions. Clearing history under **Privacy** clears this too.
+
+The text of private addresses is never kept. Under **Privacy → History** you can stop keeping page
+text, or leave out sites (one per line, written as private addresses are). Everything stays in
+`history.sqlite` on your computer.
+
+## Importing from another browser
+
+**Import** in settings brings what you had in Chrome, Arc, Brave, Edge, Vivaldi, Chromium, Safari or
+Firefox into a jbrow profile. Pick the browser (each of its profiles is listed on its own; Arc's go by
+their spaces' names) and the profile it goes into: one of yours, or **New profile**, named after it.
+A profile of the same name is picked for you. Then choose what comes along:
+
+- **History** from the last 90 days, for the address bar's suggestions and completions.
+- **Bookmarks**, in a collapsed folder in Kept named after the browser, with their folders. The
+  bookmarks bar is at its top; other, mobile and Safari's reading list get folders of their own.
+- **Arc's sidebar**: Favorites become pinned tabs, and each space's pinned tabs and folders go in a
+  Kept folder named after the space. Split views and tab groups leave their tabs in the folder.
+- **Site logins** (cookies) from the Chromium browsers, on the Mac only, so sites stay signed in.
+  macOS asks whether jbrow may use that browser's key from the Keychain; without it nothing is
+  imported. Passwords aren't imported: they stay in your password manager.
+
+Imported tabs have no page until you open them. Importing again adds only what's new: pages and
+folders already there are left alone. Safari's files need Full Disk Access for jbrow (System Settings
+→ Privacy & Security); the section links there when that's what's missing. jbrow only reads the
+other browser's files, from a copy, so it can stay open.
+
 ## Restyling sites with Claude
 
 Restyling is off until you turn on **Restyle sites** under **Restyling** in settings, which you can
@@ -361,7 +414,7 @@ a request takes about 15 to 60 seconds. Styles are kept in `styles.json` next to
 ## Settings
 
 The settings screen (⌘, or the sliders icon) has a sidebar of sections: **General** (pinning and the window's size, search engine and
-search suggestions, quiet links, the default browser), **Profiles**, **Tabs** (archiving), **Archived**, **Apps**, **Animation**, **Restyling**,
+search suggestions, quiet links, the default browser), **Profiles**, **Tabs** (archiving), **Archived**, **Apps**, **Import**, **Animation**, **Restyling**,
 **Privacy** (private addresses, dangerous sites, clearing browsing data, screen sharing) and **Shortcuts** (jbrow's own and extensions').
 The search above the sections finds any setting or shortcut, and **Shortcuts** has its own search.
 Changes apply right away. Private addresses: any address that contains
@@ -412,7 +465,8 @@ on first run. The menu bar item's **Open settings.json** opens it. Restart jbrow
 - `restyle`: `enabled`, whether restyling is on; `model` for restyling (a Claude model alias such as sonnet, opus or haiku) and
   `claudePath`, the claude command if jbrow doesn't find it on its own.
 
-Tabs, folders and archived tabs are in `tabs.json` next to it, and the browsing history in `visits.json`.
+Tabs, folders and archived tabs are in `tabs.json` next to it, the address bar's history in `visits.json`, and
+the history page's visits and page text in `history.sqlite`.
 Extensions' side panel options are in `side-panel.json` and their user scripts in `user-scripts.json`.
 
 ## Extensions
@@ -484,6 +538,6 @@ is Chrome's, with Electron's and jbrow's names taken out. Google sign-in is the 
 Electron's own user agent, since Google refuses sign-in from a browser that claims to be Chrome and
 isn't. jbrow isn't a Google product and isn't affiliated with Google.
 
-Everything jbrow keeps is in `~/Library/Application Support/jbrow`: settings, tabs, history,
+Everything jbrow keeps is in `~/Library/Application Support/jbrow`: settings, tabs, history (with the text of pages you visited),
 profiles with their cookies and logins, extensions and favicons. Its log is
 `~/Library/Logs/jbrow/main.log`. Deleting the first folder resets jbrow.

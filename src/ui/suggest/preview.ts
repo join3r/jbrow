@@ -175,7 +175,8 @@ export function previewLayout(host?: LayoutHost): SuggestLayout & { selection():
       case 'Delete':
       case 'Backspace': {
         const item = zone === 'list' ? selected(m) : null
-        return e.shiftKey && item?.kind === 'visit' ? { do: 'forget', item } : none
+        // Delete on its own, or ⇧ with either key: ⌫ alone stays for fixing what's typed.
+        return (e.shiftKey || e.key === 'Delete') && item?.kind === 'visit' ? { do: 'forget', item } : none
       }
     }
     return none
@@ -327,7 +328,7 @@ function listView(m: SuggestModel, zone: Zone, at: number): string {
         const goal = item === m.goal
         const x =
           item.kind === 'visit'
-            ? `<span class="sp-x" role="button" data-forget="${n}" title="Remove from history (⇧Delete)" aria-label="Remove from history">${icon('close')}</span>`
+            ? `<span class="sp-x" role="button" data-forget="${n}" title="Remove from history (Delete)" aria-label="Remove from history">${icon('close')}</span>`
             : ''
         const tip = item.kind === 'search' ? '' : ` title="${esc(item.shownUrl)}"`
         return `<button class="sg sp-row${hi ? ' hi' : ''}${zone === 'list' && hi ? ' cur' : ''}${goal ? ' goal' : ''}${goal && zone === 'none' ? ' now' : ''}" data-kind="${item.kind}" data-i="${n}" role="option" aria-selected="${hi}"${tip} tabindex="-1">

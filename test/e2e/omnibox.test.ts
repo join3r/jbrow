@@ -4,7 +4,7 @@
 // they aren't covered here.
 import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
-import type { SuggestReply } from '../../src/shared/types'
+import type { HistoryReply, SuggestReply } from '../../src/shared/types'
 import { html, launch, serve, SHIFT, waitFor, type Cdp, type Jbrow, type TestServer } from './harness'
 import { activeTab, focusedId, offline, openTab, record } from './ui-helpers'
 
@@ -303,6 +303,23 @@ test('with more than one profile, Tab in the text switches the profile; in the m
   await ui.press('Tab')
   await waitFor(async () => (await selected(ui))?.zone === 'search', 'Tab to the searches')
   assert.equal(await ui.eval('document.getElementById("profileName").textContent'), other.name)
+  await ui.press('Escape')
+})
+
+test('Delete on a highlighted history row forgets the page, in the suggestions and on the history page', async () => {
+  const ui = await jb.ui()
+  await focusOmnibox(ui)
+  await ui.type('zebra')
+  await waitFor(async () => (await rows(ui)).some((x) => x.kind === 'visit' && x.title === 'Zebra Notes'), 'the history row')
+  await ui.press('ArrowDown')
+  await ui.press('ArrowDown')
+  await waitFor(async () => (await selected(ui))?.title === 'Zebra Notes', 'the history row selected')
+  await ui.press('Delete')
+  await waitFor(async () => !(await rows(ui)).some((x) => x.title === 'Zebra Notes'), 'the row to go')
+  const replies = await record<HistoryReply>(jb, 'history-reply')
+  await jb.send('history-query', { seq: 7, text: 'zebra', view: 'pages', when: 'all', profile: 'all', how: [], sites: [], read: false, hideRedirects: false, state: 'any', limit: 50 })
+  const r = await replies.waitFor((r) => r.seq === 7, 'the history page\'s answer')
+  assert.equal(r.total, 0)
   await ui.press('Escape')
 })
 

@@ -3,8 +3,8 @@ import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { siteProfile as matchSiteProfile, urlMatcher } from '../shared/patterns'
 import { awayFromHome, besideClosed, isInFolder, isPinned, keptThreads, numberedThreads, sections, type FolderView } from '../shared/threads'
-import { forcedSearch, isSearchUrl, looksLikeAddress, suggestUrlFor } from '../shared/engines'
-import { THEMES, URL_BAR_STYLES, type AppEntry, type AppLabel, type Folder, type ExtensionView, type PaneBar, type Prefs, type Profile, type RestyleAgent, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
+import { forcedSearch, isSearchUrl, looksLikeAddress, SEARCH_ENGINES, suggestUrlFor } from '../shared/engines'
+import { THEMES, URL_BAR_STYLES, type AppEntry, type AppLabel, type Folder, type ExtensionView, type HistoryQuery, type ImportKind, type ImportResult, type PaneBar, type Prefs, type Profile, type RestyleAgent, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
 import { BACKGROUND } from './background'
 import { Certificates } from './certs'
@@ -16,6 +16,8 @@ import { SignInSheets } from './signin'
 import { isSearchPage, SiteInfo } from './site-info'
 import { ExtensionCommands } from './commands'
 import { eraseExtensionData, iconOf, localize, localizedName, messages, readFolder, type ExtensionFolder } from './extension-files'
+import { HistoryLog, pageKey, searchOf, TEXT_CHARS } from './history-log'
+import { findSources, readSource } from './import'
 import { forgetInstall } from './installed'
 import { jbrowExtensionDir } from './jbrow-extension'
 import { Downloads, type DownloadAction } from './downloads'
@@ -84,10 +86,17 @@ let userScripts: UserScripts
 let updates: Updates
 /** Pages you've visited, per profile, for the address bar's suggestions. */
 const visits = new BrowsingHistory()
+/** Every visit with how you got there and the page's text, for the history page. Opened at startup. */
+const historyLog = new HistoryLog({
+  openerOf: (tabId) => tabs.get(tabId)?.opener,
+  searchOf: (url) => searchOf(url, [...SEARCH_ENGINES, { name: 'Search', url: settings.searchUrl }]),
+})
 /** The settings screen is recording a shortcut: key presses go to it, not to jbrow or extensions. */
 let recordingShortcut = false
 /** The settings tab is the one showing, so closing a tab closes it. */
 let settingsShown = false
+/** The history page is showing, so the key for closing a tab closes it. */
+let historyShown = false
 
 let filter = 'all'
 let scope: { key: string; name: string } | null = null
@@ -240,6 +249,8 @@ function state(): UiState {
       animation: settings.animation,
       whimsy: settings.whimsy,
       privateUrls: settings.privateUrls,
+      historyText: settings.historyText,
+      historyTextSkip: settings.historyTextSkip,
       profileSites: settings.profileSites,
       hideFromScreenCapture: settings.hideFromScreenCapture,
       dangerousSites: settings.dangerousSites,
@@ -780,6 +791,7 @@ function runAction(id: ActionId) {
     }
     case 'closeTab':
       if (settingsShown) panel.ui.send('settings', { open: false })
+      else if (historyShown) panel.ui.send('history', { open: false })
       else if (tabs.activeId) void closeTab(tabs.activeId)
       else tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
       return
@@ -818,6 +830,8 @@ function runAction(id: ActionId) {
       return wc?.navigationHistory.goForward()
     case 'pin':
       return setPinned(!panel.pinned)
+    case 'history':
+      return panel.ui.send('history', {})
     case 'settings':
       return panel.ui.send('settings', {})
     case 'devTools':
@@ -899,7 +913,7 @@ function onKey(input: Electron.Input): boolean {
 const popupTabs = new WeakMap<Electron.WebContents, Electron.WebContents>()
 
 /** jbrow's commands that bring up the panel when pressed in another window, to do their thing there. */
-const PANEL_ACTIONS = new Set<ActionId>(['newTab', 'newTabNextProfile', 'settings'])
+const PANEL_ACTIONS = new Set<ActionId>(['newTab', 'newTabNextProfile', 'history', 'settings'])
 
 /**
  * Keys in jbrow's other windows: extension popups, pop-out windows and popups pages open. As in
@@ -1032,6 +1046,8 @@ function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.animation) settings.animation = { ...settings.animation, ...prefs.animation }
   if (typeof prefs.whimsy === 'boolean') settings.whimsy = prefs.whimsy
   if (prefs.privateUrls) settings.privateUrls = prefs.privateUrls.map((p) => p.trim()).filter(Boolean)
+  if (typeof prefs.historyText === 'boolean') settings.historyText = prefs.historyText
+  if (prefs.historyTextSkip) settings.historyTextSkip = prefs.historyTextSkip.map((p) => p.trim()).filter(Boolean)
   if (prefs.profileSites) {
     settings.profileSites = Object.fromEntries(
       Object.entries(prefs.profileSites)
@@ -1519,7 +1535,10 @@ async function clearBrowsingData({ profile, cookies, cache, history }: { profile
   )
   if (response !== 0) return
   try {
-    if (history) visits.clear(profile)
+    if (history) {
+      visits.clear(profile)
+      historyLog.clear(profile)
+    }
     for (const rt of targets) {
       if (cookies) {
         await rt.session.clearData({ dataTypes: SITE_DATA, excludeOrigins: extensionOrigins(rt) })
@@ -1681,6 +1700,7 @@ async function openFromApp(url: string, clicked = false) {
   const profile = siteProfile(url) || (from && settings.appProfiles[from.bundleId]) || settings.defaultProfile
   if (quiet) {
     const rec = tabs.create({ profile, url, ...fields, activate: false, unread: true })
+    historyLog.intend(rec.id, 'app', from?.name ?? 'another app')
     quietLinks.add(rec.id)
     tabs.webContentsFor(rec.id)?.setAudioMuted(true)
     console.log(`[links] opened quietly: ${url}`)
@@ -1689,7 +1709,8 @@ async function openFromApp(url: string, clicked = false) {
   if (filter !== 'all' && filter !== profile) filter = 'all'
   if (scope && scope.key !== (fields as { scope?: string }).scope) scope = null
   if (!panel.visible) sweep()
-  tabs.create({ profile, url, ...fields })
+  const rec = tabs.create({ profile, url, ...fields })
+  historyLog.intend(rec.id, 'app', from?.name ?? 'another app')
   pushState()
   await panel.show()
   focusActive()
@@ -1827,8 +1848,8 @@ function attachProfile(rt: ProfileRuntime) {
 }
 
 let addingProfile = false
-/** Adds a profile; `rename` opens settings with its name ready to type over. */
-async function addProfile(rename = true) {
+/** Adds a profile and returns it; `rename` opens settings with its name ready to type over. */
+async function addProfile(rename = true, name?: string): Promise<Profile | undefined> {
   if (addingProfile) return
   addingProfile = true
   try {
@@ -1838,7 +1859,7 @@ async function addProfile(rename = true) {
     const used = new Set(settings.profiles.map((p) => p.color))
     const profile: Profile = {
       id: `profile-${n}`,
-      name: `Profile ${n}`,
+      name: name?.trim() || `Profile ${n}`,
       color: PROFILE_COLORS.find((c) => !used.has(c)) ?? PROFILE_COLORS[n % PROFILE_COLORS.length],
     }
     const rt = await setupProfile(profile, settings, profileDeps)
@@ -1849,6 +1870,7 @@ async function addProfile(rename = true) {
     commands.watchProfile(rt)
     sendProfiles()
     if (rename) panel.ui.send('rename-profile', profile.id)
+    return profile
   } catch (error) {
     console.error('[profiles] could not add a profile:', error)
     toast(`Couldn't add a profile: ${error instanceof Error ? error.message : String(error)}`)
@@ -1920,6 +1942,7 @@ async function deleteProfile(id: string) {
   extensionDebugger.forgetProfile(id)
   userScripts.forgetProfile(id)
   visits.clear(id)
+  historyLog.clear(id)
 
   settings.profiles = settings.profiles.filter((p) => p.id !== id)
   if (settings.defaultProfile === id) settings.defaultProfile = settings.profiles[0].id
@@ -1965,6 +1988,139 @@ function profileMenu(id: string) {
     { type: 'separator' },
     { label: 'Delete profile…', enabled: settings.profiles.length > 1, click: () => void deleteProfile(id) },
   ]).popup({ window: panel.win })
+}
+
+// ---------- importing from other browsers ----------
+
+function sendImportSources() {
+  if (panel.win.isDestroyed()) return
+  panel.ui.send('import-sources', { sources: findSources(), profiles: settings.profiles })
+}
+
+let importing = false
+/**
+ * Brings `kinds` from another browser's profile into a jbrow profile, or a new one named after it
+ * with 'new': history into the address bar's, bookmarks and Arc's spaces into Kept, Arc's
+ * Favorites as pinned tabs, and cookies into the profile's session, so its sites stay signed in.
+ */
+async function importFrom(source: string, profile: string, kinds: ImportKind[]) {
+  if (importing) return
+  importing = true
+  const result: ImportResult = { source, errors: [] }
+  try {
+    const src = findSources().find((s) => s.id === source)
+    if (!src) throw new Error("That browser isn't there anymore.")
+    const data = await readSource(source, kinds.filter((k) => src.kinds.includes(k)))
+    result.errors.push(...data.errors)
+    const target = profile === 'new' ? await addProfile(false, src.profile || src.browser) : settings.profiles.find((p) => p.id === profile)
+    const rt = target && runtimes.get(target.id)
+    if (!target || !rt) throw new Error("Couldn't find the profile to import into.")
+    result.profile = target.id
+    if (data.history) {
+      result.history = visits.import(target.id, data.history)
+      historyLog.importPages(target.id, data.history, src.browser)
+    }
+    if (data.bookmarks) result.bookmarks = tabs.importTabs(target.id, [], data.bookmarks)
+    if (data.pinned || data.spaces) result.sidebar = tabs.importTabs(target.id, data.pinned ?? [], data.spaces ?? [])
+    if (data.cookies) {
+      const sites = new Set<string>()
+      await Promise.all(
+        data.cookies.map((c) =>
+          rt.session.cookies.set(c).then(
+            () => sites.add((c.domain ?? new URL(c.url).hostname).replace(/^\./, '')),
+            () => {},
+          ),
+        ),
+      )
+      await rt.session.cookies.flushStore()
+      result.logins = sites.size
+    }
+  } catch (error) {
+    console.error('[import] failed:', error)
+    result.errors.push(error instanceof Error ? error.message : String(error))
+  } finally {
+    importing = false
+  }
+  if (!panel.win.isDestroyed()) panel.ui.send('import-result', result)
+}
+
+// ---------- history page ----------
+
+/** How often the time each page on screen is in front gets counted. */
+const FOREGROUND_TICK_MS = 5000
+/** Without a key press or mouse move for this long, you've stepped away, unless a page plays sound. */
+const AWAY_S = 120
+/** How long after a page arrives its text is kept: long enough for most pages to fill in. */
+const TEXT_AFTER_MS = 4000
+/** Its own world, so reading the text never meets the page's scripts. */
+const TEXT_WORLD = 1994
+
+/** Adds the time since the last tick to the visits of the pages you're looking at. */
+function countForeground() {
+  if (!panel.visible || settingsShown || historyShown || panel.win.isDestroyed()) return
+  const shown = tabs.shown()
+  const audible = shown.some((id) => tabs.webContentsFor(id)?.isCurrentlyAudible())
+  if (!audible && (!panel.win.isFocused() || powerMonitor.getSystemIdleTime() >= AWAY_S)) return
+  historyLog.addTime(shown, FOREGROUND_TICK_MS / 1000)
+}
+
+/** Keeps a page's text a few seconds after it arrives, if it's still there and may be kept. */
+function keepTextSoon(tabId: string, visit: number) {
+  setTimeout(() => {
+    if (!settings.historyText || historyLog.currentVisit(tabId) !== visit) return
+    const rec = tabs.get(tabId)
+    const wc = tabs.webContentsFor(tabId)
+    if (!rec || !wc) return
+    const url = wc.getURL()
+    if (!/^https?:/i.test(url) || urlMatcher(settings.privateUrls)(url) || urlMatcher(settings.historyTextSkip)(url)) return
+    void wc
+      .executeJavaScriptInIsolatedWorld(TEXT_WORLD, [{ code: `(document.body && document.body.innerText || '').slice(0, ${TEXT_CHARS})` }])
+      .then((text: unknown) => {
+        if (typeof text === 'string' && text.trim() && historyLog.currentVisit(tabId) === visit) historyLog.saveText(rec.profile, url, wc.getTitle(), text)
+      })
+      .catch(() => {})
+  }, TEXT_AFTER_MS)
+}
+
+/** The pages tabs are on, and the ones in Kept, by profile and address. */
+function historyContext() {
+  const open = new Set<string>()
+  const kept = new Set<string>()
+  for (const t of tabs.records) {
+    if (t.url) open.add(pageKey(t.profile, t.url))
+    if (t.kept) kept.add(pageKey(t.profile, t.home?.url ?? t.url))
+  }
+  return { open, kept, profiles: settings.profiles }
+}
+
+function sendHistory(q: HistoryQuery) {
+  if (panel.win.isDestroyed()) return
+  try {
+    panel.ui.send('history-reply', historyLog.query(q, historyContext()))
+  } catch (error) {
+    console.error('[history] query failed:', error)
+  }
+}
+
+/** Opens a page from the history page, in its profile: in front, or in the background. */
+function openFromHistory(url: string, profile: string, background: boolean) {
+  if (!/^https?:/i.test(url)) return
+  const p = settings.profiles.some((x) => x.id === profile) ? profile : settings.defaultProfile
+  tabs.create({ profile: p, url, ...scopeFields(), ...(background && { activate: false, unread: true }) })
+  if (!background) panel.ui.send('history', { open: false })
+}
+
+/** Reopens a trail's pages as tabs, or keeps them in a Kept folder named after how it started. */
+function trailAction(trail: number, action: 'open' | 'keep', name: string) {
+  const pages = historyLog.trailPages(trail)
+  if (!pages.length) return
+  const profile = settings.profiles.some((x) => x.id === pages[0].profile) ? pages[0].profile : settings.defaultProfile
+  if (action === 'keep') {
+    const added = tabs.importTabs(profile, [], [{ title: name.slice(0, 80) || 'Trail', children: pages.map((p) => ({ url: p.url, title: p.title })) }])
+    return toast(added ? `Kept ${added === 1 ? '1 tab' : `${added} tabs`} in “${name.slice(0, 80)}”.` : 'Those pages are in Kept already.')
+  }
+  pages.forEach((p, i) => tabs.create({ profile, url: p.url, ...scopeFields(), activate: i === 0 }))
+  panel.ui.send('history', { open: false })
 }
 
 // ---------- apps ----------
@@ -2233,6 +2389,7 @@ function wireIpc() {
       else cur.profile = profile
       if (filter !== 'all' && filter !== profile) filter = 'all'
     }
+    if (tabs.activeId) historyLog.intend(tabs.activeId, 'typed')
     tabs.navigate(input, search)
   })
   on<{ input: string; profile?: string; seq: number }>('suggest', (request) => suggest(request))
@@ -2253,7 +2410,11 @@ function wireIpc() {
     clipboard.writeText(url)
     panel.ui.send('url-copied')
   })
-  on<{ profile?: string; url: string }>('forget-visit', ({ profile, url }) => visits.forget(profile ?? tabs.active()?.profile ?? settings.defaultProfile, url))
+  on<{ profile?: string; url: string }>('forget-visit', ({ profile, url }) => {
+    const p = profile ?? tabs.active()?.profile ?? settings.defaultProfile
+    visits.forget(p, url)
+    historyLog.forgetPage(p, url)
+  })
   on<{ id: string }>('close', ({ id }) => void closeTab(id))
   on<{ id: string }>('go-home', ({ id }) => tabs.goHome(id))
   on<{ id: string; muted: boolean }>('mute', ({ id, muted }) => tabs.setMuted(id, muted))
@@ -2363,6 +2524,13 @@ function wireIpc() {
   on<{ key: string; profile: string }>('app-profile', ({ key, profile }) => setAppProfile(key, profile))
   on<{ key: string }>('app-menu', ({ key }) => appMenu(key))
   on('add-app', () => void addApp())
+  on('import-sources', () => sendImportSources())
+  on<HistoryQuery>('history-query', (q) => sendHistory(q))
+  on<{ url: string; profile: string; background?: boolean }>('history-open', ({ url, profile, background }) => openFromHistory(url, profile, !!background))
+  on<{ trail: number; action: 'open' | 'keep'; name: string }>('history-trail', ({ trail, action, name }) => trailAction(trail, action, name))
+  on<{ on: boolean }>('history-shown', ({ on: shown }) => (historyShown = shown))
+  on<{ source: string; profile: string; kinds: ImportKind[] }>('import', ({ source, profile, kinds }) => void importFrom(source, profile, kinds))
+  on('open-full-disk-access', () => void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'))
   on<{ rename?: boolean } | undefined>('add-profile', (data) => void addProfile(data?.rename !== false))
   on<{ id: string }>('delete-profile', ({ id }) => void deleteProfile(id))
   on<{ id: string; name?: string; color?: string; icon?: string }>('profile', ({ id, ...change }) => updateProfile(id, change))
@@ -2524,6 +2692,7 @@ function buildAppMenu() {
           item('newTabNextProfile', 'New Tab in Next Profile'),
           { label: 'New Folder', click: () => newFolder() },
           item('reopenTab', 'Reopen Closed Tab'),
+          item('history', 'Show History'),
           { type: 'separator' },
           item('closeTab', 'Close Tab'),
           { type: 'separator' },
@@ -2649,6 +2818,7 @@ app.whenReady().then(async () => {
     archivedSent = -1
     setRecording(false)
     settingsShown = false
+    historyShown = false
     panel.setOverlay(false)
     pushState()
   })
@@ -2761,8 +2931,16 @@ app.whenReady().then(async () => {
       restyler.onNavigate(wc)
       zoom.apply(wc)
     },
-    onVisit: (profile, url) => visits.record(profile, url, ''),
-    onTitle: (profile, url, title) => visits.setTitle(profile, url, title),
+    onVisit: (profile, url, tabId) => {
+      visits.record(profile, url, '')
+      const visit = historyLog.visit(tabId, profile, url)
+      if (visit !== null) keepTextSoon(tabId, visit)
+    },
+    onPageInput: (tabId) => historyLog.touched(tabId),
+    onTitle: (profile, url, title) => {
+      visits.setTitle(profile, url, title)
+      historyLog.setTitle(profile, url, title)
+    },
     print: (wc) => printPage(wc),
     saveAsPdf: (wc) => void savePageAsPdf(wc),
     download: (wc, url) => downloads.start(wc, url),
@@ -2857,6 +3035,12 @@ app.whenReady().then(async () => {
   tabs.keepLoaded = settings.keepLoaded
   tabs.load()
   visits.load()
+  try {
+    historyLog.open(path.join(app.getPath('userData'), 'history.sqlite'))
+  } catch (error) {
+    console.error('[history] could not open history.sqlite, visits are not kept:', error)
+  }
+  setInterval(countForeground, FOREGROUND_TICK_MS)
   // Threads opened from one app carry the name it had in front.
   for (const t of tabs.records) if (t.scope && !t.scope.includes('+') && t.scopeName) apps.note(t.scope, t.scopeName)
   // settings.json may have been edited by hand since: put threads where the links now say.
@@ -2907,6 +3091,7 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll()
   tabs?.flush()
   visits.flush()
+  historyLog.close()
 })
 // jbrow has no windows to close; it quits only from the menu bar item.
 app.on('window-all-closed', () => {})

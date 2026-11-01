@@ -194,6 +194,10 @@ export interface Prefs {
   whimsy: boolean
   /** Addresses matching one of these show as "Private" until clicked. `*` matches anything. */
   privateUrls: string[]
+  /** Keep the text of pages you visit for the history page's search. */
+  historyText: boolean
+  /** Sites whose text isn't kept. */
+  historyTextSkip: string[]
   /** Sites per profile ID that always open in that profile. */
   profileSites: Record<string, string[]>
   hideFromScreenCapture: boolean
@@ -575,4 +579,145 @@ export interface SiteCert {
   daysLeft?: number
   /** You chose to go ahead despite the error. */
   trusted?: boolean
+}
+
+/** A page from another browser: a bookmark, or a pinned or favorite tab. */
+export interface ImportedPage {
+  url: string
+  title: string
+}
+
+/** A bookmark or a folder of them, from another browser. */
+export type ImportedNode = ImportedPage | { title: string; children: ImportedNode[] }
+
+/** What can come from another browser. */
+export type ImportKind = 'history' | 'bookmarks' | 'sidebar' | 'logins'
+
+/** One profile of another browser that jbrow can import from. */
+export interface ImportSource {
+  /** Browser and profile, e.g. `arc:Profile 1`. */
+  id: string
+  browser: string
+  /** The profile's name in that browser. Empty when the browser has just one. */
+  profile: string
+  /** What it can import from this one. */
+  kinds: ImportKind[]
+}
+
+/** What one import brought in, or why it couldn't. */
+export interface ImportResult {
+  source: string
+  /** The profile it went into. */
+  profile?: string
+  history?: number
+  bookmarks?: number
+  sidebar?: number
+  logins?: number
+  /** Parts that couldn't be read, as sentences. */
+  errors: string[]
+}
+
+/** How a page was reached: typed, from a search, a link, a link from another app, imported, or none of those (a tab waking up). */
+export type VisitHow = 'typed' | 'search' | 'link' | 'app' | 'imported' | 'other'
+export type HistoryView = 'trails' | 'pages' | 'sites' | 'searches'
+/** Since the start of today or yesterday, or the last 7, 30 or 365 days. */
+export type HistoryWhen = 'today' | 'yesterday' | 'week' | 'month' | 'all'
+
+/** What the history page asks for: its search and filters. */
+export interface HistoryQuery {
+  seq: number
+  /** Words to find in a page's title, address or text, with site:, in: and from: operators. */
+  text: string
+  view: HistoryView
+  when: HistoryWhen
+  /** A profile ID, or 'all'. */
+  profile: string
+  /** Empty for any. */
+  how: VisitHow[]
+  /** Hosts; empty for any. */
+  sites: string[]
+  /** Only pages you stayed on for a minute or more. */
+  read: boolean
+  /** Leave out pages left within seconds: redirects and sign-ins. */
+  hideRedirects: boolean
+  /** Only pages a tab is on now, or that are in Kept. */
+  state: 'any' | 'open' | 'kept'
+  /** How many visits (or sites, or searches) to send. */
+  limit: number
+}
+
+export interface HistoryVisit {
+  id: number
+  profile: string
+  url: string
+  title: string
+  host: string
+  /** When, in ms. */
+  at: number
+  /** Seconds the page was in front. */
+  secs: number
+  how: VisitHow
+  /** The app a link came from, or the browser an imported page came from. */
+  app?: string
+  /** What was searched, on a search engine's results page. */
+  query?: string
+  trail: number
+  /** Whether a tab is on it now, or it's in Kept. */
+  state?: 'open' | 'kept'
+  /** Where the page's text matched, the matches between \u0001 and \u0002. */
+  snippet?: string
+}
+
+/** Visits that followed one another from one start: a search, a typed address, a link from an app. */
+export interface HistoryTrail {
+  id: number
+  profile: string
+  /** The visit it started with, which may not match the filters. */
+  start: { how: VisitHow; app?: string; query?: string; host: string; title: string }
+  secs: number
+  /** The matching visits, oldest first. */
+  visits: HistoryVisit[]
+}
+
+export interface HistorySite {
+  host: string
+  visits: number
+  secs: number
+  last: number
+  /** Visits on each of the last 7 days, oldest first. */
+  days: number[]
+}
+
+export interface HistorySearch {
+  id: number
+  profile: string
+  at: number
+  query: string
+  engine: string
+  /** Pages the search led to. */
+  led: { url: string; title: string }[]
+  more: number
+}
+
+export interface HistoryReply {
+  seq: number
+  /** Matching visits, the seconds spent on them and the trails they're in. */
+  total: number
+  secs: number
+  trailCount: number
+  /** There are more to show than were sent. */
+  more: boolean
+  pages?: HistoryVisit[]
+  trails?: HistoryTrail[]
+  sites?: HistorySite[]
+  searches?: HistorySearch[]
+  /** How many visits each filter's choices would give, with the other filters as they are. */
+  facets: {
+    when: Record<HistoryWhen, number>
+    profile: Record<string, number>
+    how: Record<string, number>
+    sites: { host: string; count: number }[]
+    open: number
+    kept: number
+  }
 }

@@ -73,6 +73,10 @@ export interface Settings {
   quietLinks: boolean
   /** Addresses matching these show as "Private" in the address bar until clicked. `*` matches anything. */
   privateUrls: string[]
+  /** Keep the text of pages you visit, so the history page finds them by what they said. */
+  historyText: boolean
+  /** Sites whose text isn't kept, as private addresses are written. Private addresses never are. */
+  historyTextSkip: string[]
   /** Threads unseen this many days unload their pages and show as a one-line summary. Kept ones unload without the summary, unless `keepLoaded` says not to. 0 never does. */
   summarizeAfterDays: number
   /** Threads unseen this many days are archived, unless kept or caught by a folder's rules. 0 never archives. */
@@ -132,6 +136,8 @@ const DEFAULTS: Settings = {
   pinned: true,
   quietLinks: true,
   privateUrls: [],
+  historyText: true,
+  historyTextSkip: [],
   summarizeAfterDays: 3,
   archiveAfterDays: 7,
   keepLoaded: { kept: false, pinned: true },

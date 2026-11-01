@@ -237,6 +237,7 @@
               <button class="set-nav-item" data-section="archived"><span data-icon="archive"></span>Archived</button>
               <button class="set-nav-item" data-section="profiles"><span data-icon="user"></span>Profiles</button>
               <button class="set-nav-item" data-section="apps"><span data-icon="grid"></span>Apps</button>
+              <button class="set-nav-item" data-section="import"><span data-icon="import"></span>Import</button>
               <button class="set-nav-item" data-section="extensions"><span data-icon="puzzle"></span>Extensions</button>
               <button class="set-nav-item" data-section="miniPlayer"><span data-icon="pip"></span>Mini player</button>
               <button class="set-nav-item" data-section="restyling"><span data-icon="wand"></span>Restyling</button>
@@ -604,6 +605,47 @@
               </div>
             </section>
 
+            <section class="set-section" data-section="import">
+              <h2 class="set-section-title">Import</h2>
+              <div class="set-item" data-keywords="import migrate switch move chrome arc safari firefox brave edge vivaldi chromium bookmarks history favorites spaces logins cookies signed in">
+                <p class="help">
+                  Bring what you had in another browser on this computer into a profile. Importing again adds only
+                  what's new. Passwords stay in your password manager.
+                </p>
+                <div id="importNone" class="help" hidden>No other browsers found.</div>
+                <div id="importForm">
+                  <div class="field">
+                    <span class="label">From</span>
+                    <div id="importSource" class="seg seg-wrap" role="group" aria-label="Browser to import from"></div>
+                  </div>
+                  <div class="field">
+                    <span class="label">Into</span>
+                    <div id="importProfile" class="seg seg-wrap" role="group" aria-label="Profile to import into"></div>
+                  </div>
+                  <label class="check" data-kind="history">
+                    <input type="checkbox" checked />
+                    <span>History from the last 90 days, for the address bar's suggestions.</span>
+                  </label>
+                  <label class="check" data-kind="bookmarks">
+                    <input type="checkbox" checked />
+                    <span>Bookmarks, in a folder in Kept.</span>
+                  </label>
+                  <label class="check" data-kind="sidebar">
+                    <input type="checkbox" checked />
+                    <span>Favorites as pinned tabs, and each space's pinned tabs in a Kept folder named after it.</span>
+                  </label>
+                  <label class="check" data-kind="logins">
+                    <input type="checkbox" checked />
+                    <span>Site logins (cookies), so sites stay signed in. macOS asks whether jbrow may use
+                      <span id="importKeychain">the browser</span>'s key from the Keychain: click Allow.</span>
+                  </label>
+                  <button id="importButton" class="chip">Import</button>
+                  <p id="importResult" class="help" aria-live="polite" hidden></p>
+                  <button id="importDiskAccess" class="link" hidden>Open Full Disk Access settings</button>
+                </div>
+              </div>
+            </section>
+
             <section class="set-section" data-section="extensions">
               <h2 class="set-section-title">Extensions</h2>
               <div class="set-item" data-keywords="extension extensions add-ons plugins turn off disable enable remove uninstall delete">
@@ -716,7 +758,7 @@
                 </div>
                 <label class="check">
                   <input id="clearHistory" type="checkbox" checked />
-                  <span>History. The pages the address bar suggests; to remove one, highlight it there and press ⇧Delete.</span>
+                  <span>History. The pages the address bar suggests; to remove one, highlight it there and press Delete (fn⌫ on a laptop).</span>
                 </label>
                 <label class="check">
                   <input id="clearCookies" type="checkbox" checked />
@@ -728,6 +770,19 @@
                 </label>
                 <button id="clearData" class="chip">Clear data…</button>
                 <p class="help">To clear one site, click the lock or warning icon next to the address bar.</p>
+              </div>
+              <div class="set-item" data-keywords="history page text search remember forget keep year sites exclude banking">
+                <h3>History</h3>
+                <label class="check">
+                  <input id="historyText" type="checkbox" />
+                  <span>Remember the text of pages you visit, so History (⌘Y) finds them by what they said. It stays on this
+                    computer, for a year. Private addresses are never kept.</span>
+                </label>
+                <div class="field">
+                  <span class="label">Except on</span>
+                  <textarea id="historyTextSkip" rows="3" spellcheck="false" placeholder="*.mybank.example&#10;mail.example.com"></textarea>
+                </div>
+                <p class="help">One site per line, written as private addresses are. Pages already kept from them stay until you forget them in History.</p>
               </div>
               <div class="set-item" data-keywords="third party cookies tracking trackers cross site embedded sign in block">
                 <h3>Third-party cookies</h3>
@@ -795,6 +850,7 @@
             <p id="setNoMatch" class="help set-no-match" hidden></p>
           </div>
         </section>
+        <section id="history" class="history" hidden tabindex="-1" aria-label="History"></section>
       </main>
       <div id="panes" class="panes" hidden></div>
       <aside id="sidePanel" class="side-panel" hidden>

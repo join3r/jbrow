@@ -106,7 +106,8 @@ export function columnsLayout(): SuggestLayout & { selection(): { zone: Zone; at
       case 'Delete':
       case 'Backspace': {
         const item = selected(m)
-        return e.shiftKey && item?.kind === 'visit' ? { do: 'forget', item } : none
+        // Delete on its own, or ⇧ with either key: ⌫ alone stays for fixing what's typed.
+        return (e.shiftKey || e.key === 'Delete') && item?.kind === 'visit' ? { do: 'forget', item } : none
       }
     }
     return none
@@ -170,7 +171,7 @@ function rowView(item: Item, i: number, z: Section, hi: boolean): string {
   const dot = tab?.profile?.color && tab.sub.startsWith(tab.profile.name) ? `<span class="dot" style="background:${esc(tab.profile.color)}"></span>` : ''
   const end =
     item.kind === 'visit'
-      ? `<span class="sx-x" role="button" data-forget="${i}" title="Remove from history (⇧Delete)" aria-label="Remove from history">${icon('close')}</span>`
+      ? `<span class="sx-x" role="button" data-forget="${i}" title="Remove from history (Delete)" aria-label="Remove from history">${icon('close')}</span>`
       : item.kind === 'archived'
         ? `<span class="sx-end" title="Archived">${icon('archive')}</span>`
         : ''

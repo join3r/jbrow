@@ -8,7 +8,7 @@ import { addressUrl, forcedSearch } from '../shared/engines'
 import { urlMatcher } from '../shared/patterns'
 import { MAX_PANES, paneSpans, splitOf } from '../shared/split'
 import { byOrder, createdBeside, flatten, isAsleep, isInFolder, isRoot, parentFolder, samePage, subtree, threadsOf } from '../shared/threads'
-import type { CrashView, Folder, KeepLoaded, Profile, Split, TabRecord, UiTab } from '../shared/types'
+import type { CrashView, Folder, ImportedNode, ImportedPage, KeepLoaded, Profile, Split, TabRecord, UiTab } from '../shared/types'
 import type { Certificates } from './certs'
 import type { DangerousSites } from './dangerous'
 import type { DeviceChooser } from './devices'
@@ -52,7 +52,9 @@ export interface TabsDeps {
   /** A page committed a navigation to a new document. */
   onNavigate: (wc: WebContents) => void
   /** A tab's page went to an address, for the browsing history; and its title arrived. */
-  onVisit: (profile: string, url: string) => void
+  onVisit: (profile: string, url: string, tabId: string) => void
+  /** You clicked, tapped or typed in a tab's page. */
+  onPageInput: (tabId: string) => void
   onTitle: (profile: string, url: string, title: string) => void
   /** The page menu's Print… and Save as PDF…. */
   print: (wc: WebContents) => void
@@ -583,7 +585,7 @@ export class Tabs {
       this.clearUpgrade(id)
       this.dropFailedUpgrade(id, wc, url)
       onNav(e, url)
-      this.deps.onVisit(rec()?.profile ?? rt.profile.id, url)
+      this.deps.onVisit(rec()?.profile ?? rt.profile.id, url, id)
       this.deps.logins.loaded(id)
       this.deps.onNavigate(wc)
     })
@@ -591,7 +593,7 @@ export class Tabs {
       // A single-page site moving to another page counts as a visit; a jump to #section doesn't.
       const before = rec()?.url ?? ''
       onNav(e, url)
-      if (isMainFrame && url.split('#')[0] !== before.split('#')[0]) this.deps.onVisit(rec()?.profile ?? rt.profile.id, url)
+      if (isMainFrame && url.split('#')[0] !== before.split('#')[0]) this.deps.onVisit(rec()?.profile ?? rt.profile.id, url, id)
     })
     // Stopping from inside a navigation event crashes Electron. A tick later the site hasn't
     // answered yet, and a page that somehow got through still stays under the warning.
@@ -665,6 +667,9 @@ export class Tabs {
     wc.on('audio-state-changed', () => this.deps.onChange())
     wc.on('did-start-loading', () => this.setLoading(id, true))
     wc.on('did-stop-loading', () => this.setLoading(id, false))
+    wc.on('input-event', (_e, input) => {
+      if (input.type === 'mouseDown' || input.type === 'rawKeyDown' || input.type === 'keyDown' || input.type === 'gestureTap') this.deps.onPageInput(id)
+    })
     wc.on('before-input-event', (event, input) => {
       // Esc leaves fullscreen, as in Chrome; the page doesn't get it.
       if (input.type === 'keyDown' && input.key === 'Escape' && this.fullscreenId === id) {
@@ -1609,6 +1614,62 @@ export class Tabs {
     this.changed()
   }
 
+  // ---------- import ----------
+
+  /**
+   * Tabs from another browser, in one profile: `pinned` become pinned icons and `kept` a tree of
+   * folders and tabs at the bottom of Kept. A page that profile already keeps is left out, and a
+   * folder goes into one of the same name in the same place, so importing twice adds nothing.
+   * The tabs have no page until you open them. Returns how many tabs it added.
+   */
+  importTabs(profile: string, pinned: ImportedPage[], kept: ImportedNode[]): number {
+    const have = new Set(this.records.filter((t) => t.kept && t.profile === profile).map((t) => t.home?.url ?? t.url))
+    const now = Date.now()
+    let tick = 0
+    let added = 0
+    const add = (page: ImportedPage, fields: Partial<TabRecord>) => {
+      if (!/^https?:/i.test(page.url) || have.has(page.url)) return
+      have.add(page.url)
+      let favicon: string | undefined
+      try {
+        favicon = faviconUrl(profile, `${new URL(page.url).origin}/favicon.ico`)
+      } catch {}
+      const title = page.title || page.url
+      this.records.push({
+        id: randomUUID(),
+        profile,
+        url: page.url,
+        title,
+        favicon,
+        kept: true,
+        home: { url: page.url, title, favicon },
+        createdAt: now + tick++,
+        lastSeen: now,
+        ...fields,
+      })
+      added++
+    }
+    const folderIn = (name: string, parent: string | undefined, collapsed: boolean) => {
+      const same = this.folders.find((f) => f.name === name && parentFolder(this.folders, f) === parent)
+      if (same) return same.id
+      const folder: Folder = { id: randomUUID(), name, rules: [], createdAt: now + tick++, ...(parent && { parent }), ...(collapsed && { collapsed }) }
+      this.folders.push(folder)
+      return folder.id
+    }
+    const walk = (nodes: ImportedNode[], parent: string | undefined) => {
+      for (const node of nodes) {
+        if ('url' in node) add(node, { folder: parent })
+        else if (hasPages(node)) walk(node.children, folderIn(node.title || 'Folder', parent, !parent))
+      }
+    }
+    for (const page of pinned) add(page, { pinned: true })
+    walk(kept, undefined)
+    if (!added) return 0
+    this.changed()
+    this.loadPinned()
+    return added
+  }
+
   // ---------- archive ----------
 
   /**
@@ -1764,6 +1825,9 @@ function searchEngineName(searchUrl: string): string {
     return 'the web'
   }
 }
+
+/** Whether a folder from another browser holds a page somewhere inside it. */
+const hasPages = (node: ImportedNode): boolean => 'url' in node || node.children.some(hasPages)
 
 /** `search` sends the text to the search engine even if it looks like an address, as a leading ? does. */
 export function toUrl(input: string, searchUrl: string, search = false): string {

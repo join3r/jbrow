@@ -60,6 +60,7 @@ A short welcome sets up the parts that matter. Every choice applies right away, 
 | ⌘T / ⇧⌘N | New tab / new tab in the next profile |
 | ⌘D | Split view |
 | ⇧⌘T | Reopen the last closed tab |
+| ⌘Y | History |
 | ⇧⌘P | Pin or unpin the window |
 | ⌘, | Settings |
 

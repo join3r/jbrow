@@ -120,7 +120,33 @@ export class BrowsingHistory {
     }
   }
 
-  /** Removes one page, as ⇧Delete on a suggestion does. */
+  /**
+   * Pages from another browser's history. A page already here keeps the higher visit count and
+   * the later visit, so importing twice changes nothing. Returns how many pages were new.
+   */
+  import(profile: string, pages: { url: string; title: string; visits: number; last: number }[]): number {
+    let map = this.profiles.get(profile)
+    if (!map) this.profiles.set(profile, (map = new Map()))
+    const added: string[] = []
+    for (const p of pages) {
+      if (!/^https?:/i.test(p.url)) continue
+      const v = map.get(p.url)
+      if (!v) {
+        map.set(p.url, { url: p.url, title: p.title, visits: Math.max(1, p.visits), last: p.last })
+        added.push(p.url)
+        continue
+      }
+      v.visits = Math.max(v.visits, p.visits)
+      if (p.last > v.last) v.last = p.last
+      if (!v.title && p.title) v.title = p.title
+    }
+    // Pages older than 90 days, or over the cap, go again here.
+    this.flush()
+    const kept = this.profiles.get(profile)
+    return kept ? added.filter((url) => kept.has(url)).length : 0
+  }
+
+  /** Removes one page, as Delete on a suggestion does. */
   forget(profile: string, url: string) {
     if (this.profiles.get(profile)?.delete(url)) this.flush()
   }

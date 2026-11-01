@@ -9,8 +9,9 @@ import { DAY_MS, esc, HOUR_MS, icon, since } from './markup'
 import type { LayoutHost, OpenIn, Outcome, SuggestLayout } from './suggest/layout'
 import { LAYOUTS, layoutPictureHtml, URL_BAR_LAYOUTS } from './suggest/layouts'
 import { isEmpty, suggestModel, type Item, type SuggestModel, type VisitItem } from './suggest/model'
+import { initHistory } from './history'
 import { initWelcome } from './welcome'
-import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type ExtensionView, type PaneBar, type Prefs, type Profile, type SearchReply, type SiteInfoReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type UpdateView, type UrlBarStyle, type VisitView } from '../shared/types'
+import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type HistoryReply, type ExtensionView, type ImportKind, type ImportResult, type ImportSource, type PaneBar, type Prefs, type Profile, type SearchReply, type SiteInfoReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type UpdateView, type UrlBarStyle, type VisitView } from '../shared/types'
 import { afterRender, beforeRender, downloadsChanged, flourish, setWhimsy } from './whimsy'
 
 declare global {
@@ -48,6 +49,9 @@ const filterPop = $('filterPop')
 const soundPop = $('soundPop')
 const send = window.jbrow.send
 const welcome = initWelcome($('welcome'), send, () => syncOverlay())
+const historyPage = initHistory($('history'), (channel, data) => (channel === 'history-settings' ? setSettings(true, 'privacy') : send(channel, data)), (shown) => historyShown(shown), (url) => isPrivate(url))
+/** History is open as its own tab in the sidebar, as settings is; historyPage.shown says whether it's the one showing. */
+let historyTab = false
 
 let S: UiState | null = null
 let renaming: string | null = null
@@ -305,7 +309,7 @@ const shownPanes = () => activeSplit()?.tabs ?? (S?.activeId ? [S.activeId] : []
 function renderPanes() {
   const split = activeSplit()
   contentEl.classList.toggle('split', !!split)
-  panesEl.hidden = !split || !settingsEl.hidden
+  panesEl.hidden = !split || jbrowPageShown()
   renderBar(split)
   if (!split || !S) {
     paneBgs.innerHTML = ''
@@ -790,6 +794,12 @@ function renderThreads() {
         <span class="end"><button class="act" data-close-settings title="Close" aria-label="Close settings">${icon('close')}</button></span>
       </div>`
     : ''
+  if (historyTab) {
+    html += `<div class="row set-row ${historyPage.shown ? 'cur' : ''}" role="button" tabindex="0" data-settings data-history>
+        <span class="fav">${icon('history')}</span><span class="t">History</span>
+        <span class="end"><button class="act" data-close-history title="Close" aria-label="Close history">${icon('close')}</button></span>
+      </div>`
+  }
   // A pinned tab being renamed shows as a row under the icons.
   const pinOpen = s.pinned.find((v) => renaming === v.root.id)
   if (pinOpen) html += `<div class="pin-open">${row(pinOpen.root, pinOpen)}</div>`
@@ -889,7 +899,7 @@ function renderPins(pinned: ThreadView<UiTab>[], numbered: Map<string, number>) 
       const n = numbered.get(t.id)
       const classes = [
         'pin-tile',
-        open && settingsEl.hidden ? 'cur' : '',
+        open && !jbrowPageShown() ? 'cur' : '',
         v.all.some((x) => x.loading) ? 'loading' : '',
         v.all.some((x) => x.unread) ? 'unread' : '',
         t.crashed ? 'crashed' : '',
@@ -1122,8 +1132,8 @@ function row(t: UiTab, thread: ThreadView<UiTab>, number?: number, showApp = tru
   const closable = !t.kept || t.loaded || away
   const classes = [
     'row',
-    t.id === S.activeId && settingsEl.hidden ? 'cur' : '',
-    t.id !== S.activeId && settingsEl.hidden && shownPanes().includes(t.id) ? 'beside' : '',
+    t.id === S.activeId && !jbrowPageShown() ? 'cur' : '',
+    t.id !== S.activeId && !jbrowPageShown() && shownPanes().includes(t.id) ? 'beside' : '',
     t.loading ? 'loading' : '',
     t.unread ? 'unread' : '',
     t.crashed ? 'crashed' : '',
@@ -1243,7 +1253,7 @@ function applyCompletion(c: CompletionView | null) {
   if (fits) omnibox.setSelectionRange(typed.length, value.length)
 }
 
-/** ⇧Delete on a history page, or its ×: the page leaves the history and the suggestions. */
+/** Delete on a history page, or its ×: the page leaves the history page, the history and the suggestions. */
 function forgetVisit(v: VisitItem) {
   send('forget-visit', { profile: typedIn(), url: v.url })
   visitHits = visitHits.filter((x) => x.url !== v.url)
@@ -1254,7 +1264,7 @@ function forgetVisit(v: VisitItem) {
 /** The page hides while anything of jbrow's own covers it; see Panel.setOverlay. */
 let overlaySent = false
 function syncOverlay() {
-  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !certPop.hidden || !devicePop.hidden || !profilePop.hidden || !soundPop.hidden || !settingsEl.hidden || welcome.isOpen
+  const on = !suggest.hidden || !extPop.hidden || !dlPop.hidden || !certPop.hidden || !devicePop.hidden || !profilePop.hidden || !soundPop.hidden || jbrowPageShown() || welcome.isOpen
   if (on !== overlaySent) {
     overlaySent = on
     send('overlay', { on })
@@ -1406,6 +1416,8 @@ threadsEl.addEventListener('click', (e) => {
     return send('go-home', { id: home.dataset.home })
   }
   if (el.closest('[data-show-archived]')) return showArchived()
+  if (el.closest('[data-close-history]')) return setHistory(false)
+  if (el.closest('[data-history]')) return showHistory(true)
   if (el.closest('[data-close-settings]')) return setSettings(false)
   if (el.closest('[data-settings]')) return showSettings(true)
   const folder = el.closest<HTMLElement>('.frow')
@@ -1451,6 +1463,7 @@ threadsEl.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && el.classList.contains('row')) {
     e.preventDefault()
     if (el.dataset.folder) toggleFolder(el.dataset.folder)
+    else if (el.hasAttribute('data-history')) showHistory(true)
     else if (el.hasAttribute('data-settings')) showSettings(true)
     else {
       showSettings(false)
@@ -2039,6 +2052,7 @@ const SECTION_NAMES: Record<string, string> = {
   archived: 'Archived',
   profiles: 'Profiles',
   apps: 'Apps',
+  import: 'Import',
   extensions: 'Extensions',
   miniPlayer: 'Mini player',
   restyling: 'Restyling',
@@ -2047,8 +2061,45 @@ const SECTION_NAMES: Record<string, string> = {
 }
 let section = 'general'
 
+/** Settings or history covers the page area. */
+const jbrowPageShown = () => !settingsEl.hidden || historyPage.shown
+
+/** Opens history as a tab in the sidebar and shows it, searching for `text` if given, or closes the tab. */
+function setHistory(open: boolean, text?: string) {
+  if (open && settingsTab) setSettings(false)
+  historyTab = open
+  if (open) showHistory(true, text)
+  else historyPage.hide()
+  renderThreads()
+}
+
+/** Switches between the history tab and the page, keeping the tab in the sidebar. */
+function showHistory(show: boolean, text?: string) {
+  if (!show) return historyPage.hide()
+  if (!historyTab) return
+  if (!settingsEl.hidden) showSettings(false)
+  historyPage.show(text)
+}
+
+/** History came up or went: the page goes behind it or comes back. */
+function historyShown(shown: boolean) {
+  root.classList.toggle('settings-open', shown || !settingsEl.hidden)
+  send('history-shown', { on: shown })
+  renderThreads()
+  renderPanes()
+  syncOverlay()
+  if (shown) {
+    setExtensions(false)
+    focusUi()
+  } else if (settingsEl.hidden) send('focus-page')
+}
+
 /** Opens settings as a tab and shows it, or closes the tab. With a section, opens that one. */
 function setSettings(open: boolean, to?: string) {
+  if (open && historyTab) {
+    historyTab = false
+    historyPage.hide()
+  }
   if (to) showSection(to)
   settingsTab = open
   if (open === !settingsEl.hidden) renderThreads()
@@ -2057,6 +2108,8 @@ function setSettings(open: boolean, to?: string) {
 
 /** Switches between the settings tab and the page, keeping the tab in the sidebar. */
 function showSettings(show: boolean) {
+  // A tab coming up takes over from history as it does from settings; settings does too.
+  historyPage.hide()
   if (show === !settingsEl.hidden || (show && !settingsTab)) return
   settingsEl.hidden = !show
   root.classList.toggle('settings-open', show)
@@ -2074,6 +2127,7 @@ function showSettings(show: boolean) {
     send('shortcuts')
     send('extensions')
     send('apps')
+    send('import-sources')
     send('default-browser')
     send('login-item')
     send('updates')
@@ -2082,6 +2136,7 @@ function showSettings(show: boolean) {
   } else {
     stopRecording()
     savePrivateUrls()
+    saveHistoryTextSkip()
     savePipSites()
     send('focus-page')
   }
@@ -2224,6 +2279,8 @@ function renderSettings(all = false) {
   $('animSpeedOut').textContent = `${animSpeed.value} ms`
   for (const id of ['animSpeed', 'animEase', 'animPreview']) $(id).closest('.field')!.classList.toggle('off', animation.style === 'off')
   if (all || document.activeElement !== privateUrls) privateUrls.value = S.prefs.privateUrls.join('\n')
+  $<HTMLInputElement>('historyText').checked = S.prefs.historyText
+  if (all || document.activeElement !== historyTextSkip) historyTextSkip.value = S.prefs.historyTextSkip.join('\n')
   hideCapture.checked = hideFromScreenCapture
   dangerousSites.checked = S.prefs.dangerousSites
   blockCookies.checked = S.prefs.blockThirdPartyCookies
@@ -2296,6 +2353,13 @@ privateUrls.addEventListener('input', () => {
   privateTimer = window.setTimeout(savePrivateUrls, 400)
 })
 privateUrls.addEventListener('blur', savePrivateUrls)
+const historyTextSkip = $<HTMLTextAreaElement>('historyTextSkip')
+function saveHistoryTextSkip() {
+  const list = historyTextSkip.value.split('\n').map((l) => l.trim()).filter(Boolean)
+  if (S && list.join('\n') !== S.prefs.historyTextSkip.join('\n')) sendPrefs({ historyTextSkip: list })
+}
+historyTextSkip.addEventListener('blur', saveHistoryTextSkip)
+$<HTMLInputElement>('historyText').addEventListener('change', (e) => sendPrefs({ historyText: (e.target as HTMLInputElement).checked }))
 function pipPrefs(change: Partial<Prefs['miniPlayer']>) {
   if (S) sendPrefs({ miniPlayer: { ...S.prefs.miniPlayer, ...change } })
 }
@@ -3206,6 +3270,112 @@ appListEl.addEventListener('contextmenu', (e) => {
 })
 $('addApp').addEventListener('click', () => send('add-app'))
 
+// ---------- import ----------
+
+let importList: { sources: ImportSource[]; profiles: Profile[] } = { sources: [], profiles: [] }
+let importFrom = ''
+/** The profile picked for each source, by source ID; 'new' for a new profile named after it. */
+const importInto = new Map<string, string>()
+let importBusy = false
+
+const sourceName = (s: ImportSource) => (s.profile ? `${s.browser} · ${s.profile}` : s.browser)
+
+/** A profile of the same name as the source's, or else the default one. */
+function importTarget(s: ImportSource): string {
+  const picked = importInto.get(s.id)
+  if (picked && (picked === 'new' || importList.profiles.some((p) => p.id === picked))) return picked
+  const same = s.profile && importList.profiles.find((p) => p.name.toLowerCase() === s.profile.toLowerCase())
+  return same ? same.id : (S?.prefs.defaultProfile ?? importList.profiles[0]?.id ?? 'new')
+}
+
+function renderImport() {
+  const { sources, profiles } = importList
+  $('importNone').hidden = !!sources.length
+  $('importForm').hidden = !sources.length
+  if (!sources.length) return
+  if (!sources.some((s) => s.id === importFrom)) importFrom = sources[0].id
+  const src = sources.find((s) => s.id === importFrom)!
+  $('importSource').innerHTML = sources
+    .map((s) => `<button data-value="${esc(s.id)}" aria-pressed="${s.id === importFrom}">${esc(sourceName(s))}</button>`)
+    .join('')
+  const into = importTarget(src)
+  $('importProfile').innerHTML = [...profiles, { id: 'new', name: 'New profile', color: '' }]
+    .map((p) => {
+      const dot = p.color ? `<span class="dot" style="background:${esc(p.color)}"></span>` : ''
+      const title = p.id === 'new' ? ` title="${esc(`A new profile named ${src.profile || src.browser}`)}"` : ''
+      return `<button data-value="${esc(p.id)}" aria-pressed="${p.id === into}"${title}>${dot}${esc(p.name)}</button>`
+    })
+    .join('')
+  for (const label of $('importForm').querySelectorAll<HTMLElement>('[data-kind]')) label.hidden = !src.kinds.includes(label.dataset.kind as ImportKind)
+  $('importKeychain').textContent = src.browser
+  syncImportButton()
+}
+
+const importKinds = () =>
+  [...$('importForm').querySelectorAll<HTMLElement>('[data-kind]')]
+    .filter((l) => !l.hidden && l.querySelector('input')!.checked)
+    .map((l) => l.dataset.kind as ImportKind)
+
+function syncImportButton() {
+  const b = $<HTMLButtonElement>('importButton')
+  b.disabled = importBusy || !importKinds().length
+  b.textContent = importBusy ? 'Importing…' : 'Import'
+}
+
+const count = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`
+
+/** "4,213 pages of history, 52 bookmarks and logins for 312 sites". */
+function importSummary(r: ImportResult): string {
+  const parts = [
+    r.history && count(r.history, 'page of history', 'pages of history'),
+    r.bookmarks && count(r.bookmarks, 'bookmark', 'bookmarks'),
+    r.sidebar && count(r.sidebar, 'tab from the sidebar', 'tabs from the sidebar'),
+    r.logins && `logins for ${count(r.logins, 'site', 'sites')}`,
+  ].filter((x): x is string => !!x)
+  if (!parts.length) return ''
+  const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]
+  return `Imported ${list}.`
+}
+
+$('importSource').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (!b) return
+  importFrom = b.dataset.value!
+  $('importResult').hidden = $('importDiskAccess').hidden = true
+  renderImport()
+})
+$('importProfile').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
+  if (!b) return
+  importInto.set(importFrom, b.dataset.value!)
+  renderImport()
+})
+$('importForm').addEventListener('change', syncImportButton)
+$('importButton').addEventListener('click', () => {
+  const src = importList.sources.find((s) => s.id === importFrom)
+  if (!src || importBusy) return
+  importBusy = true
+  $('importResult').hidden = $('importDiskAccess').hidden = true
+  syncImportButton()
+  send('import', { source: src.id, profile: importTarget(src), kinds: importKinds() })
+})
+$('importDiskAccess').addEventListener('click', () => send('open-full-disk-access'))
+window.jbrow.on('import-sources', (data: typeof importList) => {
+  importList = data
+  renderImport()
+})
+window.jbrow.on('import-result', (r: ImportResult) => {
+  importBusy = false
+  // A new profile is the one to import into from here on.
+  if (r.profile) importInto.set(r.source, r.profile)
+  const summary = importSummary(r)
+  const text = [summary || (r.errors.length ? '' : 'Nothing new to import.'), ...r.errors].filter(Boolean).join(' ')
+  $('importResult').textContent = text
+  $('importResult').hidden = !text
+  $('importDiskAccess').hidden = !r.errors.some((e) => e.includes('Full Disk Access'))
+  send('import-sources')
+})
+
 // ---------- extensions ----------
 
 const extListEl = $('extList')
@@ -3376,6 +3546,7 @@ document.addEventListener('keydown', (e) => {
   else if (dlOpen) setDownload(null)
   else if (!settingsEl.hidden && archSel.size) selectArchived([])
   else if (!settingsEl.hidden) setSettings(false)
+  else if (historyPage.shown) setHistory(false)
 })
 
 // ---------- find in page ----------
@@ -3782,6 +3953,7 @@ window.jbrow.on('state', (state: UiState) => {
   if (S && !S.pinned && state.pinned) flourish($('pin').querySelector('svg'), 'wiggle')
   setWhimsy(state.prefs.whimsy)
   S = state
+  historyPage.setProfiles(state.profiles)
   document.documentElement.dataset.theme = state.prefs.theme
   document.documentElement.dataset.profileStyle = state.prefs.profileStyle
   render()
@@ -3833,6 +4005,8 @@ window.jbrow.on('url-copied', () => {
   }, 1200)
 })
 window.jbrow.on('settings', ({ open, section }: { open?: boolean; section?: string }) => setSettings(open ?? !!settingsEl.hidden, section))
+window.jbrow.on('history', ({ open, text }: { open?: boolean; text?: string }) => setHistory(open ?? !historyPage.shown, text))
+window.jbrow.on('history-reply', (r: HistoryReply) => historyPage.reply(r))
 window.jbrow.on('rename-tab', (id: string) => startRename(id))
 window.jbrow.on('extensions', (data: typeof extList) => {
   extList = data
