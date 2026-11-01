@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.0
+
+- Import from Chrome, Arc, Brave, Edge, Vivaldi, Chromium, Safari or Firefox: history, bookmarks,
+  Arc's sidebar and, from the Chromium browsers on the Mac, site logins (cookies). Passwords stay in
+  your password manager.
+- A History page with trails, filters and search in the text of pages you visited. Pages you told
+  it to forget stay forgotten, and private addresses show as Private. Delete on a highlighted
+  history suggestion forgets it. A History button sits in the sidebar footer beside the pin.
+- Drag a tab onto another in the sidebar to split them. Links get Open in background tab and Open
+  in split view in their context menu.
+- Hide the sidebar (⌘S) to give the page its room; pointing at the window's left edge slides it in.
+- Start at login, in Settings → General.
+- The mini player stays above the jbrow window and can move to another corner when it's in the way
+  of a window you switch to.
+- The welcome offers a YouTube folder in Kept that catches videos before they're archived.
+- Split view: a pane's address suggestions cover its whole bar and stay inside the window.
+
 ## 0.1.1
 
 - jbrow for Windows (x64 installer) and Linux (x64 AppImage and .deb). Keys that say ⌘ on the Mac
