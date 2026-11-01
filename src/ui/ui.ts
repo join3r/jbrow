@@ -1,7 +1,7 @@
 import { cssEase } from '../shared/ease'
 import { engineOf, isSearchUrl, SEARCH_ENGINES, suggestUrlFor } from '../shared/engines'
 import { urlMatcher } from '../shared/patterns'
-import { awayFromHome, displayName, folderThreads, isAsleep, isFolder, isPinned, keptThreads, numberedThreads, sections, threadsOf, type AppView, type FolderView, type KeptItem, type ThreadView } from '../shared/threads'
+import { awayFromHome, displayName, folderThreads, headless, isAsleep, isFolder, isPinned, keptThreads, numberedThreads, sections, shownContexts, threadsOf, unkeptThreads, type AppView, type ContextView, type FolderView, type KeptItem, type ThreadView } from '../shared/threads'
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { dragDivider, MAX_PANES, PANE_GAP, paneSpans, splitOf } from '../shared/split'
 import { EMOJI_GROUPS, splitEmoji } from './emoji'
@@ -768,11 +768,11 @@ function renderThreads() {
   const draft = renameInput ? { value: renameInput.value, start: renameInput.selectionStart, end: renameInput.selectionEnd } : null
 
   const appNames = Object.fromEntries(Object.entries(S.apps).map(([k, l]) => [k, l.name]))
-  const s = sections(S.tabs, { filter: S.filter, scope: S.scope?.key ?? null, activeId: S.activeId, now: S.now, folders: S.folders, appNames, earlierAfterMs: S.prefs.earlierAfterHours * HOUR_MS, newTabsAt: S.prefs.newTabsAt })
-  const numbered = new Map(numberedThreads(s, { from: S.prefs.numberFrom, openApps: S.prefs.openApps }).map((v, i) => [v.root.id, i + 1]))
+  const s = sections(S.tabs, { filter: S.filter, scope: S.scope?.key ?? null, context: S.scope?.context?.key ?? null, activeId: S.activeId, now: S.now, folders: S.folders, appNames, earlierAfterMs: S.prefs.earlierAfterHours * HOUR_MS, newTabsAt: S.prefs.newTabsAt })
+  const numbered = new Map(numberedThreads(s, { from: S.prefs.numberFrom, openApps: S.prefs.openApps, openContexts: S.prefs.openContexts }).map((v, i) => [v.root.id, i + 1]))
   // As in Arc, a split view is one row, where the first of its tabs comes in the sidebar; its
   // other tabs don't show again further down. Pinned tabs stay icons.
-  const listed = new Map([...keptThreads(s), ...s.today, ...s.apps.flatMap((a) => [...a.threads, ...a.earlier]), ...s.earlier].map((v) => [v.root.id, v]))
+  const listed = new Map([...keptThreads(s), ...unkeptThreads(s)].map((v) => [v.root.id, v]))
   const drawn = new Set<string>()
   const tile = (v: ThreadView<UiTab>, showApp: boolean) => {
     if (drawn.has(v.root.id)) return ''
@@ -807,8 +807,12 @@ function renderThreads() {
   // Kept has no heading: it's the top section. The strip under it takes drops to keep a thread at its bottom.
   const kept = s.top.filter((i) => !isFolder(i) || keptFolderShown(i, narrowed)).map((i) => (isFolder(i) ? folderRow(i, block, narrowed) : block(i))).join('')
   html += `<div id="kept" class="kept">${kept}</div><div class="keep-zone"></div>`
-  html += `<div class="head" data-head="today">${recentLabel(S.prefs.earlierAfterHours)}</div>`
-  html += s.today.map(block).join('') || `<div class="empty">Nothing here yet</div>`
+  // Showing one app, the conversations and projects its tabs were opened in come first, the one you came from on top.
+  html += contextGroups(s.contexts, appBlock, !s.today.length && !s.earlier.length)
+  if (s.today.length || !s.contexts.length) {
+    html += `<div class="head" data-head="today">${recentLabel(S.prefs.earlierAfterHours)}</div>`
+    html += s.today.map(block).join('') || `<div class="empty">Nothing here yet</div>`
+  }
   // Earlier sits at the bottom of the sidebar, away from what's current, with the way to archived
   // threads under it. Apps' sections come last, collapsed until opened.
   const archivedLink = archivedList.length
@@ -1050,16 +1054,48 @@ function recentLabel(hours: number): string {
 /** An app's section: its heading toggles it, and collapsed it still shows the thread you're on. */
 function appSection(a: AppView<UiTab>, block: (v: ThreadView<UiTab>) => string): string {
   const open = !!S?.prefs.openApps.includes(a.scope)
-  const count = a.threads.length + a.earlier.length
+  const all = [...a.contexts.flatMap((g) => g.threads), ...a.threads, ...a.earlier]
   const icons = (S?.apps[a.scope]?.icons ?? []).map((src) => `<img src="${esc(src)}" alt="">`).join('')
   let html = `<div class="head app-head" role="button" tabindex="0" aria-expanded="${open}" data-app-head="${esc(a.scope)}" title="${esc(a.name)}">
-    <span class="chev">${icon('forward')}</span>${icons ? `<span class="app-icons">${icons}</span>` : ''}<span class="app-name">${esc(a.name)}</span>${!open && playingIn([...a.threads, ...a.earlier]) ? soundMark : ''}<span class="meta">${count}</span>
+    <span class="chev">${icon('forward')}</span>${icons ? `<span class="app-icons">${icons}</span>` : ''}<span class="app-name">${esc(a.name)}</span>${!open && playingIn(all) ? soundMark : ''}<span class="meta">${all.length}</span>
   </div>`
   const shown = (v: ThreadView<UiTab>) => open || holdsActive(v)
+  if (open) html += contextGroups(a.contexts, block, !a.threads.length && !a.earlier.length)
+  else html += a.contexts.flatMap((g) => g.threads).filter(holdsActive).map(block).join('')
   html += a.threads.filter(shown).map(block).join('')
   const earlier = a.earlier.filter(shown)
   if (earlier.length) html += `<div class="earlier">${earlier.map(block).join('')}</div>`
   return html
+}
+
+/**
+ * An app's tabs by the conversation, thread or project they were opened in: a heading per group
+ * that folds it, the one you came from marked. A single group with nothing beside it (`alone`)
+ * needs no heading. A folded group still shows the tab you're on.
+ */
+function contextGroups(groups: ContextView<UiTab>[], block: (v: ThreadView<UiTab>) => string, alone: boolean): string {
+  if (!S || !groups.length) return ''
+  if (headless(groups, alone)) return groups[0].threads.map(block).join('')
+  const open = new Set(shownContexts(groups, S.prefs.openContexts, alone).map((g) => g.key))
+  return groups
+    .map((g) => {
+      const expanded = open.has(g.key)
+      const here = g.key === S!.scope?.context?.key
+      const head = `<div class="ctx-head${here ? ' here' : ''}" role="button" tabindex="0" aria-expanded="${expanded}" data-ctx-head="${esc(g.key)}" data-like="${esc(g.threads[0].root.id)}" title="${esc(g.name)}">
+        <span class="chev">${icon('forward')}</span><span class="t">${esc(g.name)}</span>${here ? '<span class="here-dot" title="You came from here"></span>' : ''}${!expanded && playingIn(g.threads) ? soundMark : ''}<span class="meta">${g.threads.length}</span>
+      </div>`
+      const body = g.threads.filter((v) => expanded || holdsActive(v)).map(block).join('')
+      return body ? `${head}<div class="ctx-body">${body}</div>` : head
+    })
+    .join('')
+}
+
+function toggleContext(key: string) {
+  if (!S) return
+  const open = S.prefs.openContexts
+  S.prefs.openContexts = open.includes(key) ? open.filter((k) => k !== key) : [...open, key]
+  sendPrefs({ openContexts: S.prefs.openContexts })
+  renderThreads()
 }
 
 function toggleApp(scope: string) {
@@ -1477,6 +1513,8 @@ threadsEl.addEventListener('click', (e) => {
   if (folder) return void (!renaming && toggleFolder(folder.dataset.folder!))
   const appHead = el.closest<HTMLElement>('[data-app-head]')
   if (appHead) return toggleApp(appHead.dataset.appHead!)
+  const ctxHead = el.closest<HTMLElement>('[data-ctx-head]')
+  if (ctxHead) return toggleContext(ctxHead.dataset.ctxHead!)
   const r = el.closest<HTMLElement>('.row')
   if (r && !renaming) {
     showSettings(false)
@@ -1512,6 +1550,10 @@ threadsEl.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && el.dataset.appHead) {
     e.preventDefault()
     return toggleApp(el.dataset.appHead)
+  }
+  if ((e.key === 'Enter' || e.key === ' ') && el.dataset.ctxHead) {
+    e.preventDefault()
+    return toggleContext(el.dataset.ctxHead)
   }
   if ((e.key === 'Enter' || e.key === ' ') && el.classList.contains('row')) {
     e.preventDefault()
@@ -1583,10 +1625,11 @@ function startDrag(id: string, folder: boolean, e: DragEvent) {
  * Where a drag over the sidebar would land. A tab dropped on the middle of another tab's row
  * splits with it. In Kept, the top or bottom of a tab's row places the item before or after it,
  * and the middle of a folder's row files it into the folder. Dropped on a row's edge or a heading
- * outside Kept, a tab leaves Kept. Folders only move within Kept, and never into themselves.
+ * outside Kept, a tab leaves Kept; on another tab's row or a group's heading it also joins that
+ * app section and group. Folders only move within Kept, and never into themselves.
  */
 function dropTarget(e: DragEvent): { el: HTMLElement; where: 'before' | 'after' | 'into' | 'keep' | 'split' } | null {
-  const el = (e.target as HTMLElement).closest<HTMLElement>('.row:not([data-settings]), .head:not(.app-head), .keep-zone, #kept')
+  const el = (e.target as HTMLElement).closest<HTMLElement>('.row:not([data-settings]), .head:not(.app-head), .ctx-head, .keep-zone, #kept')
   if (!el || el.dataset.id === dragId || el.dataset.folder === dragId) return null
   const dragged = dragFolder ? threadsEl.querySelector(`[data-folder="${dragId}"]`)?.nextElementSibling : null
   if (dragged?.classList.contains('folder-body') && dragged.contains(el)) return null
@@ -1594,6 +1637,7 @@ function dropTarget(e: DragEvent): { el: HTMLElement; where: 'before' | 'after' 
   const box = el.getBoundingClientRect()
   const y = (e.clientY - box.top) / box.height
   if (y >= 0.25 && y <= 0.75 && canSplitOnto(el)) return { el, where: 'split' }
+  if (el.matches('.ctx-head') && (dragFolder || el.dataset.like === dragId)) return null
   if (!el.matches('#kept .row')) return dragFolder ? null : { el, where: 'into' }
   // An open folder's bottom edge is its first item's top, so a drop there goes into the folder.
   const openFolder = !!el.dataset.folder && !!el.nextElementSibling?.classList.contains('folder-body')
@@ -1649,7 +1693,8 @@ threadsEl.addEventListener('drop', (e) => {
   else if (where !== 'into') send('place', { id, target: el.dataset.id ?? el.dataset.folder, after: where === 'after' })
   else if (movingFolder) send('move-folder', { id, parent: el.dataset.folder })
   else if (el.dataset.folder) send('move', { id, kept: true, folder: el.dataset.folder })
-  else send('move', { id, kept: false })
+  // Onto a tab or a group's heading: into that app section and group too.
+  else send('move', { id, kept: false, like: el.dataset.like ?? el.dataset.id })
 })
 threadsEl.addEventListener('dragend', () => endDrag())
 
@@ -2361,6 +2406,9 @@ function renderSettings(all = false) {
   $('pipCornerItem').hidden = S.accessibility === null
   $<HTMLInputElement>('pipMoveAway').checked = mp.moveAway
   $('pipAccessibility').hidden = !mp.moveAway || S.accessibility !== false
+  $('appContextsItem').hidden = S.accessibility === null
+  $<HTMLInputElement>('appContexts').checked = S.prefs.appContexts
+  $('appContextsAccess').hidden = !S.prefs.appContexts || S.accessibility !== false
   seg('pipSites', mp.sites)
   pipOnlySites.hidden = mp.sites !== 'only'
   pipExceptSites.hidden = mp.sites !== 'except'
@@ -2426,6 +2474,8 @@ $('pipOnTabSwitch').addEventListener('change', (e) => pipPrefs({ onTabSwitch: (e
 $('pipMutedToo').addEventListener('change', (e) => pipPrefs({ mutedToo: (e.target as HTMLInputElement).checked }))
 $('pipMoveAway').addEventListener('change', (e) => pipPrefs({ moveAway: (e.target as HTMLInputElement).checked }))
 $('pipAccessibilityOpen').addEventListener('click', () => send('open-accessibility-settings'))
+$('appContexts').addEventListener('change', (e) => sendPrefs({ appContexts: (e.target as HTMLInputElement).checked }))
+$('appContextsOpen').addEventListener('click', () => send('open-accessibility-settings'))
 $('pipSites').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')
   if (b) pipPrefs({ sites: b.dataset.value as Prefs['miniPlayer']['sites'] })

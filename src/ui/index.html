@@ -614,6 +614,18 @@
                 <div id="appList" class="app-list"></div>
                 <button id="addApp" class="chip">Add app…</button>
               </div>
+              <div id="appContextsItem" class="set-item" data-keywords="apps conversation channel dm slack mail thread project window title group context accessibility">
+                <h3>Conversations</h3>
+                <label class="check">
+                  <input id="appContexts" type="checkbox" />
+                  <span>Group an app's tabs by the conversation, mail thread or project you opened them in. Showing one app's
+                    tabs puts the one you're in first.</span>
+                </label>
+                <p id="appContextsAccess" class="help" hidden>
+                  jbrow needs Accessibility access to read which one you're in.
+                  <button id="appContextsOpen" class="link">Open System Settings</button>
+                </p>
+              </div>
             </section>
 
             <section class="set-section" data-section="import">

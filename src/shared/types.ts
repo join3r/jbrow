@@ -35,6 +35,9 @@ export interface TabRecord {
   scopeName?: string
   /** Bundle ID of the app the thread was opened from, so it goes back there if that app is unlinked. */
   app?: string
+  /** The conversation, mail thread or project of that app it was opened in (WindowContext.key). */
+  context?: string
+  contextName?: string
   /** Empty for a new tab that hasn't navigated yet. */
   url: string
   title: string
@@ -125,7 +128,8 @@ export interface UiState {
   tabExtensions: Record<string, { name: string; icon?: string }>
   profiles: Profile[]
   filter: string
-  scope: { key: string; name: string } | null
+  /** Showing one app's tabs, with `context` the conversation, thread or project you came from in it. */
+  scope: { key: string; name: string; context?: { key: string; name: string } } | null
   /** Names and icons of the apps threads belong to, by scope key. */
   apps: Record<string, AppLabel>
   pinned: boolean
@@ -226,6 +230,10 @@ export interface Prefs {
   newTabsAt: NewTabsAt
   /** App sections at the bottom of the sidebar that are open, by scope key. The rest are collapsed. */
   openApps: string[]
+  /** Context groups in the sidebar that are open, by context key. The rest are folded. */
+  openContexts: string[]
+  /** Group an app's tabs by the conversation, thread or project they were opened in. Needs Accessibility access. */
+  appContexts: boolean
   /** Restyling is on (see RestyleSettings.enabled). */
   restyleEnabled: boolean
   /** Claude model alias for restyling sites. */

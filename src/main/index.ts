@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, M
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { siteProfile as matchSiteProfile, urlMatcher } from '../shared/patterns'
-import { awayFromHome, besideClosed, isInFolder, isPinned, keptThreads, numberedThreads, sections, type FolderView } from '../shared/threads'
+import { awayFromHome, besideClosed, isInFolder, isPinned, keptThreads, numberedThreads, sections, unkeptThreads, type FolderView } from '../shared/threads'
 import { forcedSearch, isSearchUrl, looksLikeAddress, SEARCH_ENGINES, suggestUrlFor } from '../shared/engines'
 import { THEMES, URL_BAR_STYLES, type AppEntry, type AppLabel, type Folder, type ExtensionView, type HistoryQuery, type ImportKind, type ImportResult, type PaneBar, type Prefs, type Profile, type RestyleAgent, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
@@ -24,6 +24,7 @@ import { Downloads, type DownloadAction } from './downloads'
 import { handleFavicons } from './favicons'
 import { FindInPage } from './find'
 import { frontmostApp, type FrontApp } from './frontmost'
+import { contextOf } from './window-context'
 import { ExtensionDebugger } from './debugger'
 import { libraryOf } from './library'
 import { IdleWatcher } from './idle'
@@ -99,7 +100,7 @@ let settingsShown = false
 let historyShown = false
 
 let filter = 'all'
-let scope: { key: string; name: string } | null = null
+let scope: { key: string; name: string; context?: { key: string; name: string } } | null = null
 let lastFront: FrontApp | null = null
 let hiddenAt = 0
 /**
@@ -266,6 +267,8 @@ function state(): UiState {
       numberFrom: settings.numberFrom,
       newTabsAt: settings.newTabsAt,
       openApps: settings.openApps,
+      openContexts: settings.openContexts,
+      appContexts: settings.appContexts,
       restyleEnabled: settings.restyle.enabled,
       restyleAgent: settings.restyle.agent,
       restyleModel: settings.restyle.model,
@@ -530,8 +533,11 @@ function siteProfile(url: string): string | undefined {
 }
 
 function scopeFields() {
-  return scope ? { scope: scope.key, scopeName: scope.name, app: lastFront?.bundleId } : {}
+  return scope ? { scope: scope.key, scopeName: scope.name, app: lastFront?.bundleId, context: scope.context?.key, contextName: scope.context?.name } : {}
 }
+
+/** The conversation, thread or project `app`'s window is on, when grouping by them is on. */
+const contextFor = (app: FrontApp) => (settings.appContexts ? contextOf(app) : Promise.resolve(null))
 
 /** Bundle IDs in a scope key: one app, or a linked group joined with +. */
 const appsIn = (key: string) => key.split('+')
@@ -551,7 +557,7 @@ function appLabels(): Record<string, AppLabel> {
 
 function threadsInView() {
   const appNames = Object.fromEntries(Object.entries(appLabels()).map(([k, l]) => [k, l.name]))
-  return sections(tabs.records, { filter, scope: scope?.key ?? null, activeId: tabs.activeId, now: Date.now(), folders: tabs.folders, appNames, earlierAfterMs: settings.earlierAfterHours * HOUR_MS, newTabsAt: settings.newTabsAt })
+  return sections(tabs.records, { filter, scope: scope?.key ?? null, context: scope?.context?.key ?? null, activeId: tabs.activeId, now: Date.now(), folders: tabs.folders, appNames, earlierAfterMs: settings.earlierAfterHours * HOUR_MS, newTabsAt: settings.newTabsAt })
 }
 
 /** Unloads and archives stale threads, or files them into folders, per settings. */
@@ -615,7 +621,7 @@ function undoArchive() {
 /** Most recently seen tab among the threads the sidebar currently shows. */
 function mostRecentInView(): string | undefined {
   const s = threadsInView()
-  const all = [...s.pinned, ...keptThreads(s), ...s.today, ...s.apps.flatMap((a) => [...a.threads, ...a.earlier]), ...s.earlier]
+  const all = [...s.pinned, ...keptThreads(s), ...unkeptThreads(s)]
   return all.sort((a, b) => b.lastSeen - a.lastSeen)[0]?.last.id
 }
 
@@ -659,9 +665,24 @@ async function onAppHotkey() {
   if (!lastFront) return onHotkey()
   const key = scopeForApp(settings, lastFront.bundleId)
   if (panel.visible && scope?.key === key) return panel.hide()
-  scope = { key, name: scopeName(key) }
+  const context = front ? await contextFor(front) : scope?.key === key ? scope.context : undefined
+  scope = { key, name: scopeName(key), context: context ?? undefined }
   filter = 'all'
+  if (context) openContext(key, context.key)
   await summon()
+}
+
+/**
+ * Opens a context's group in the sidebar and folds the app's other groups, as ⌥⇧Space from it
+ * puts it first. Its most recent tab comes up unless you're already on one of its tabs.
+ */
+function openContext(key: string, context: string, activate = true) {
+  const ofApp = new Set(tabs.records.filter((t) => t.scope === key && t.context).map((t) => t.context!))
+  settings.openContexts = [...settings.openContexts.filter((c) => !ofApp.has(c)), context]
+  saveSettings(settings)
+  if (!activate || tabs.active()?.context === context) return
+  const recent = tabs.records.filter((t) => t.context === context && t.scope === key && !t.kept).sort((a, b) => b.lastSeen - a.lastSeen)[0]
+  if (recent) tabs.activate(recent.id)
 }
 
 /** Global shortcuts jbrow holds now, for unregistering. */
@@ -742,7 +763,7 @@ function setActionKey(id: ActionId, shortcut: string): string | null {
 // ---------- keyboard shortcuts inside the panel ----------
 
 function openThread(n: number) {
-  const thread = numberedThreads(threadsInView(), { from: settings.numberFrom, openApps: settings.openApps })[n - 1]
+  const thread = numberedThreads(threadsInView(), { from: settings.numberFrom, openApps: settings.openApps, openContexts: settings.openContexts })[n - 1]
   if (thread) tabs.activate(thread.last.id)
 }
 
@@ -1099,6 +1120,12 @@ function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.numberFrom === 'pinned' || prefs.numberFrom === 'kept' || prefs.numberFrom === 'today') settings.numberFrom = prefs.numberFrom
   if (prefs.newTabsAt === 'top' || prefs.newTabsAt === 'bottom') settings.newTabsAt = prefs.newTabsAt
   if (Array.isArray(prefs.openApps)) settings.openApps = prefs.openApps.filter((k) => typeof k === 'string')
+  if (Array.isArray(prefs.openContexts)) settings.openContexts = prefs.openContexts.filter((k) => typeof k === 'string')
+  if (prefs.appContexts !== undefined) {
+    // Turning it on asks for the Accessibility access it needs, with macOS's own prompt.
+    if (prefs.appContexts && !settings.appContexts && process.platform === 'darwin') systemPreferences.isTrustedAccessibilityClient(true)
+    settings.appContexts = !!prefs.appContexts
+  }
   if (prefs.miniPlayer) {
     const mp = { ...settings.miniPlayer, ...prefs.miniPlayer }
     const clean = (list: string[]) => list.map((p) => p.trim()).filter(Boolean)
@@ -1703,14 +1730,16 @@ function suggest({ input, profile, seq }: { input: string; profile?: string; seq
  * section of the sidebar, and brings jbrow up on it. The app the link came from is still in front when it arrives.
  */
 async function openFromApp(url: string, clicked = false) {
-  const [front, quiet] = await Promise.all([frontmostApp(), !clicked && openQuietly()])
+  const front = await frontmostApp()
   const from = front && front.pid !== process.pid ? front : null
+  const [context, quiet] = await Promise.all([from ? contextFor(from) : null, !clicked && openQuietly()])
   let fields = {}
   if (from) {
     lastFront = from
     apps.note(from.bundleId, from.name)
     const key = scopeForApp(settings, from.bundleId)
-    fields = { scope: key, scopeName: scopeName(key), app: from.bundleId }
+    fields = { scope: key, scopeName: scopeName(key), app: from.bundleId, context: context?.key, contextName: context?.name }
+    if (context && !quiet) openContext(key, context.key, false)
   }
   const profile = siteProfile(url) || (from && settings.appProfiles[from.bundleId]) || settings.defaultProfile
   if (quiet) {
@@ -2192,7 +2221,7 @@ function rescopeThreads() {
   })
   if (scope && lastFront) {
     const key = scopeForApp(settings, lastFront.bundleId)
-    scope = { key, name: scopeName(key) }
+    scope = { key, name: scopeName(key), context: scope.context }
   }
   pushState()
 }
@@ -2457,7 +2486,7 @@ function wireIpc() {
   on('sidebar-menu', () => sidebarMenu())
   on<{ id: string }>('folder-menu', ({ id }) => folderMenu(id))
   on<{ id: string; name?: string; rules?: string[]; collapsed?: boolean }>('folder', ({ id, ...change }) => tabs.updateFolder(id, change))
-  on<{ id: string; kept?: boolean; folder?: string }>('move', ({ id, kept, folder }) => tabs.move(id, !!kept, folder))
+  on<{ id: string; kept?: boolean; folder?: string; like?: string }>('move', ({ id, kept, folder, like }) => tabs.move(id, !!kept, folder, like))
   on<{ id: string; target: string | null; after?: boolean }>('place', ({ id, target, after }) => tabs.place(id, target, after))
   on<{ id: string; target: string | null; after?: boolean }>('pin-tab', ({ id, target, after }) => tabs.pin(id, target, after))
   on<{ id: string; parent: string | null }>('move-folder', ({ id, parent }) => tabs.moveFolder(id, parent))

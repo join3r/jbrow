@@ -503,6 +503,20 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .app-head .chev svg.i { width: 10px; height: 10px; }
 .app-head[aria-expanded="true"] .chev { transform: rotate(90deg); }
 .app-icons { flex: none; display: inline-flex; }
+
+/* Context groups: an app's tabs by the conversation, thread or project they were opened in. */
+.ctx-head { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 5px 8px 5px 6px; border-radius: 6px; font-size: 12.5px; color: var(--muted); white-space: nowrap; cursor: default; }
+.ctx-head:hover { background: var(--hover); color: var(--ink); }
+.ctx-head .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ctx-head .meta { font-weight: 400; }
+.ctx-head[aria-expanded="true"] .meta { visibility: hidden; }
+.ctx-head .chev { flex: none; display: inline-grid; place-items: center; transition: transform 0.12s; }
+.ctx-head .chev svg.i { width: 10px; height: 10px; }
+.ctx-head[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.ctx-head.here { color: var(--ink); font-weight: 600; }
+.ctx-head .here-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.ctx-head.dz { color: var(--accent); }
+.ctx-body { display: flex; flex-direction: column; gap: 1px; padding-left: 14px; }
 .app-icons img, .app-icons .no-icon { width: 14px; height: 14px; }
 .app-icons > * + * { margin-left: -4px; }
 

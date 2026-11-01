@@ -56,6 +56,8 @@ export function flatten<T extends TabRecord>(tabs: T[]): boolean {
       t.scope = root.scope
       t.scopeName = root.scopeName
       t.app = root.app
+      t.context = root.context
+      t.contextName = root.contextName
       t.kept = root.kept
       t.folder = root.pinned ? undefined : root.folder
       t.order = root.kept && !root.pinned && root.order !== undefined ? root.order + (i + 1) / (rest.length + 1) : undefined
@@ -128,6 +130,15 @@ export interface AppView<T extends TabRecord> {
   threads: ThreadView<T>[]
   /** Threads unseen for a while, shown dimmed at the end of the app's section. */
   earlier: ThreadView<T>[]
+  /** Its threads opened in a conversation, thread or project of the app, above the rest. */
+  contexts: ContextView<T>[]
+}
+
+/** Threads opened from one conversation, mail thread or project of an app (see WindowContext). */
+export interface ContextView<T extends TabRecord> {
+  key: string
+  name: string
+  threads: ThreadView<T>[]
 }
 
 export interface Sections<T extends TabRecord> {
@@ -143,6 +154,12 @@ export interface Sections<T extends TabRecord> {
   /** One section per app, by name, for threads that aren't kept. Empty while showing one app. */
   apps: AppView<T>[]
   earlier: ThreadView<T>[]
+  /**
+   * While showing one app, its threads opened in a conversation, thread or project, one group per
+   * context: the one you came from first, then the rest by when you last saw them. Today and
+   * Earlier then hold only the app's other threads. Empty while showing everything.
+   */
+  contexts: ContextView<T>[]
 }
 
 /**
@@ -165,6 +182,8 @@ export function sections<T extends TabRecord>(
     earlierAfterMs?: number
     /** Where new tabs go outside Kept. Main and the UI must pass the same value, as it orders the ⌘ numbers. */
     newTabsAt?: NewTabsAt
+    /** The context ⌥⇧Space came from, whose group goes first. Main and the UI must pass the same value. */
+    context?: string | null
   },
 ): Sections<T> {
   const views = tabs
@@ -184,15 +203,20 @@ export function sections<T extends TabRecord>(
   // Showing one app, its threads are the whole list; otherwise each app gets its own section.
   const inApp = (v: ThreadView<T>) => !opts.scope && !!v.root.scope
   const ordered = opts.newTabsAt === 'bottom' ? views : [...views].reverse()
-  const loose = ordered.filter((v) => !v.root.kept && !inApp(v))
+  const grouped = (v: ThreadView<T>) => !v.root.kept && !!v.root.context
+  const contexts = (threads: ThreadView<T>[]) => groupByContext(threads, opts.context ?? null)
+  const loose = ordered.filter((v) => !v.root.kept && !inApp(v) && !(opts.scope && grouped(v)))
   const kept = views.filter((v) => v.root.kept && !v.root.pinned)
   const apps = new Map<string, AppView<T>>()
+  const appGrouped = new Map<string, ThreadView<T>[]>()
   for (const v of ordered.filter((v) => !v.root.kept && inApp(v))) {
     const key = v.root.scope!
     let app = apps.get(key)
-    if (!app) apps.set(key, (app = { scope: key, name: opts.appNames?.[key] || v.root.scopeName || key, threads: [], earlier: [] }))
-    ;(old(v) ? app.earlier : app.threads).push(v)
+    if (!app) apps.set(key, (app = { scope: key, name: opts.appNames?.[key] || v.root.scopeName || key, threads: [], earlier: [], contexts: [] }))
+    if (grouped(v)) appGrouped.set(key, [...(appGrouped.get(key) ?? []), v])
+    else (old(v) ? app.earlier : app.threads).push(v)
   }
+  for (const [key, threads] of appGrouped) apps.get(key)!.contexts = contexts(threads)
   const byAge = [...opts.folders].sort((a, b) => a.createdAt - b.createdAt)
   const folderView = (folder: Folder): FolderView<T> => {
     const threads = kept.filter((v) => v.root.folder === folder.id).sort((a, b) => byOrder(a.root, b.root))
@@ -209,7 +233,32 @@ export function sections<T extends TabRecord>(
     today: loose.filter((v) => !old(v)),
     apps: [...apps.values()].sort((a, b) => a.name.localeCompare(b.name) || a.scope.localeCompare(b.scope)),
     earlier: loose.filter((v) => old(v)),
+    contexts: opts.scope ? contexts(ordered.filter(grouped)) : [],
   }
+}
+
+/**
+ * Threads in one group per context, each group keeping the threads' order: `first`'s group on
+ * top, then the others, most recently seen first.
+ */
+function groupByContext<T extends TabRecord>(threads: ThreadView<T>[], first: string | null): ContextView<T>[] {
+  const groups = new Map<string, ContextView<T> & { lastSeen: number }>()
+  for (const v of threads) {
+    const key = v.root.context!
+    let g = groups.get(key)
+    if (!g) groups.set(key, (g = { key, name: v.root.contextName || key, threads: [], lastSeen: 0 }))
+    g.threads.push(v)
+    g.lastSeen = Math.max(g.lastSeen, v.lastSeen)
+  }
+  return [...groups.values()]
+    .sort((a, b) => Number(b.key === first) - Number(a.key === first) || b.lastSeen - a.lastSeen)
+    .map(({ key, name, threads }) => ({ key, name, threads }))
+}
+
+/** Every thread outside Kept and the pinned icons: Today, Earlier, the apps' sections and their context groups. */
+export function unkeptThreads<T extends TabRecord>(s: Sections<T>): ThreadView<T>[] {
+  const grouped = (cs: ContextView<T>[]) => cs.flatMap((g) => g.threads)
+  return [...grouped(s.contexts), ...s.today, ...s.apps.flatMap((a) => [...grouped(a.contexts), ...a.threads, ...a.earlier]), ...s.earlier]
 }
 
 /** Kept threads in sidebar order, those in folders included. With `skipCollapsed`, not those in collapsed folders. */
@@ -226,13 +275,26 @@ export function keptThreads<T extends TabRecord>(s: Sections<T>, { skipCollapsed
  */
 export function numberedThreads<T extends TabRecord>(
   s: Sections<T>,
-  { from = 'pinned', openApps = [] }: { from?: 'pinned' | 'kept' | 'today'; openApps?: string[] } = {},
+  { from = 'pinned', openApps = [], openContexts = [] }: { from?: 'pinned' | 'kept' | 'today'; openApps?: string[]; openContexts?: string[] } = {},
 ): ThreadView<T>[] {
   const pinned = from === 'pinned' ? s.pinned : []
   const kept = from === 'today' ? [] : keptThreads(s, { skipCollapsed: true })
-  const apps = s.apps.filter((a) => openApps.includes(a.scope)).flatMap((a) => a.threads)
-  return [...pinned, ...kept, ...s.today, ...apps].slice(0, 9)
+  const open = (groups: ContextView<T>[], alone: boolean) => shownContexts(groups, openContexts, alone).flatMap((g) => g.threads)
+  const contexts = open(s.contexts, !s.today.length && !s.earlier.length)
+  const apps = s.apps.filter((a) => openApps.includes(a.scope)).flatMap((a) => [...open(a.contexts, !a.threads.length && !a.earlier.length), ...a.threads])
+  return [...pinned, ...kept, ...contexts, ...s.today, ...apps].slice(0, 9)
 }
+
+/**
+ * The context groups that are open: those in `openContexts`. A single group with no other threads
+ * beside it (`alone`) has no heading to fold it with, so it's always open.
+ */
+export function shownContexts<T extends TabRecord>(groups: ContextView<T>[], openContexts: string[], alone: boolean): ContextView<T>[] {
+  return alone && groups.length === 1 ? groups : groups.filter((g) => openContexts.includes(g.key))
+}
+
+/** Whether context groups show without headings: a single one with no other threads beside it. */
+export const headless = (groups: ContextView<TabRecord>[], alone: boolean) => alone && groups.length === 1
 
 /**
  * The creation time for a tab opened from `opener`, so it sits right beside the opener on the side
@@ -258,7 +320,8 @@ export function createdBeside(tabs: TabRecord[], opener: TabRecord, now: number)
  * for a kept tab, or one alone in its section.
  */
 export function besideClosed<T extends TabRecord>(s: Sections<T>, id: string, newTabsAt: NewTabsAt = 'top'): string | undefined {
-  const lists = [s.today, ...s.apps.flatMap((a) => [a.threads, a.earlier]), s.earlier]
+  const groups = (cs: ContextView<T>[]) => cs.map((g) => g.threads)
+  const lists = [...groups(s.contexts), s.today, ...s.apps.flatMap((a) => [...groups(a.contexts), a.threads, a.earlier]), s.earlier]
   for (const list of lists) {
     const i = list.findIndex((v) => v.all.some((t) => t.id === id))
     if (i < 0) continue

@@ -97,6 +97,10 @@ export interface Settings {
   newTabsAt: NewTabsAt
   /** App sections open at the bottom of the sidebar, by scope key. They start collapsed. */
   openApps: string[]
+  /** Context groups open in the sidebar, by context key. The rest are folded. */
+  openContexts: string[]
+  /** Group each app's tabs by the conversation, mail thread or project they were opened in. Needs Accessibility access. */
+  appContexts: boolean
   /** Your extension shortcuts, per profile, extension ID and command: Electron accelerators, '' for none. Unlisted commands use the extension's suggestion. */
   extensionShortcuts: Record<string, Record<string, Record<string, string>>>
   /** Restyling sites with Claude Code or Codex. */
@@ -150,6 +154,8 @@ const DEFAULTS: Settings = {
   numberFrom: 'today',
   newTabsAt: 'top',
   openApps: [],
+  openContexts: [],
+  appContexts: true,
   extensionShortcuts: {},
   restyle: { enabled: false, agent: 'claude', model: 'sonnet', codexModel: '', claudePath: '', codexPath: '' },
   miniPlayer: { onHide: true, onTabSwitch: false, mutedToo: false, moveAway: false, sites: 'all', onlySites: [], exceptSites: [] },
@@ -193,6 +199,8 @@ export function loadSettings(): Settings {
     if (!['pinned', 'kept', 'today'].includes(settings.numberFrom)) settings.numberFrom = DEFAULTS.numberFrom
     if (!['top', 'bottom'].includes(settings.newTabsAt)) settings.newTabsAt = DEFAULTS.newTabsAt
     if (!Array.isArray(settings.openApps)) settings.openApps = DEFAULTS.openApps
+    if (!Array.isArray(settings.openContexts)) settings.openContexts = DEFAULTS.openContexts
+    if (typeof settings.appContexts !== 'boolean') settings.appContexts = DEFAULTS.appContexts
     if (!settings.profileSites || typeof settings.profileSites !== 'object') settings.profileSites = {}
     if (typeof settings.whimsy !== 'boolean') settings.whimsy = DEFAULTS.whimsy
     if (typeof settings.hideSidebar !== 'boolean') settings.hideSidebar = DEFAULTS.hideSidebar

@@ -175,6 +175,17 @@ Tabs opened from an app with ⌥⇧Space get their own section in the sidebar, u
 icon (linked apps share one), and tabs opened from those go to the top of the same section. Kept tabs
 stay in Kept.
 
+Inside an app's section, tabs are grouped by the conversation, mail thread or project you opened
+them in: a Slack DM or channel, a Discord channel, a Mail thread, a VS Code or Xcode project. jbrow
+reads it from the title of the app's window when you press ⌥⇧Space or click a link there, so a link
+from Jane's DM lands in Jane's group. ⌥⇧Space shows all of the app's tabs with the group you came
+from on top and open, and the app's other groups folded below; click a group's name to fold or open
+it. Drag a tab onto a group's name, or onto the edge of a tab in it, to move it there; onto the edge
+of a tab outside any group to take it out of its group. An app with one group shows its tabs without a heading. Apps jbrow has no rule for are grouped
+by the document their window shows, or else by the window's title. Terminals and other browsers
+aren't grouped, as their titles change with what's running. This needs Accessibility access (macOS
+asks when you turn it on); turn it off under **Apps** → **Conversations** in settings.
+
 Pinned tabs sit at the top of the sidebar as icons only. Right-click a tab → **Pin to top**, or drag
 it onto the icons. They share one row and get smaller as you pin more; drag the line under them down
 for another row (double-click it for one row again). Drag the icons to reorder them, or drag one into
@@ -438,6 +449,8 @@ on first run. The menu bar item's **Open settings.json** opens it. Restart jbrow
   Set it under **Apps** in settings.
 - `linkedApps`: groups of bundle IDs that share one set of tabs for ⌥⇧Space. Under **Apps**,
   right-click an app to link or unlink it; its tabs move along right away.
+- `appContexts`: group each app's tabs by the conversation, thread or project they were opened in
+  (default `true`, needs Accessibility access). `openContexts`: the groups open in the sidebar.
 - `animation`: `style` (materialize, slide, scale, fade, off), `durationMs`, `ease` (spring, snappy, smooth).
 - `whimsy`: playful animations in the sidebar and toolbar (default `false`).
 - `panel`: the window's default size as a fraction of the screen (`widthFraction`, `heightFraction`),

@@ -100,6 +100,9 @@ export interface CreateOptions {
   scope?: string
   scopeName?: string
   app?: string
+  /** The conversation, thread or project of the app it was opened in. */
+  context?: string
+  contextName?: string
   activate?: boolean
   /** A guest WebContents Chromium already created for window.open. */
   webContents?: WebContents
@@ -454,6 +457,8 @@ export class Tabs {
       scope: from ? from.scope : opts.scope,
       scopeName: from ? from.scopeName : opts.scopeName,
       app: from ? from.app : opts.app,
+      context: from ? from.context : opts.context,
+      contextName: from ? from.contextName : opts.contextName,
       url: opts.url ?? '',
       title: '',
       createdAt: from ? createdBeside(this.records, from, now) : now,
@@ -476,6 +481,8 @@ export class Tabs {
       cur.scope = opts.scope
       cur.scopeName = opts.scopeName
       cur.app = opts.app
+      cur.context = opts.context
+      cur.contextName = opts.contextName
       this.changed()
       return cur
     }
@@ -1341,10 +1348,23 @@ export class Tabs {
   }
 
   /** Keeps a tab (in `folder`, if there is one) or moves it out of Kept. */
-  move(id: string, kept: boolean, folder?: string) {
+  /**
+   * Puts a tab in Kept (in `folder`) or out of it. Out of Kept with `like`, it joins that tab's
+   * place in the sidebar: its app's section and the conversation, thread or project it was opened
+   * in, or Today for a tab of no app.
+   */
+  move(id: string, kept: boolean, folder?: string, like?: string) {
     const rec = this.get(id)
     if (!rec) return
     this.toThread(rec, kept, folder)
+    const to = !kept && like && like !== id ? this.get(like) : undefined
+    if (to) {
+      rec.scope = to.scope
+      rec.scopeName = to.scopeName
+      rec.app = to.app
+      rec.context = to.context
+      rec.contextName = to.contextName
+    }
     this.changed()
   }
 

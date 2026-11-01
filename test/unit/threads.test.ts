@@ -245,7 +245,7 @@ describe('folders', () => {
 describe('sections', () => {
   test('empty input', () => {
     const s = sections([], baseOpts)
-    assert.deepEqual(s, { pinned: [], folders: [], kept: [], top: [], today: [], apps: [], earlier: [] })
+    assert.deepEqual(s, { pinned: [], folders: [], kept: [], top: [], today: [], apps: [], earlier: [], contexts: [] })
   })
 
   test('Today lists the newest thread first by creation time, not by last seen', () => {
@@ -609,5 +609,52 @@ describe('createdBeside', () => {
   test('from the newest tab, or a kept one, it is just a new tab', () => {
     assert.equal(createdBeside(tabs, tabs[2], NOW), NOW)
     assert.equal(createdBeside(tabs, tabs[3], NOW), NOW)
+  })
+})
+
+describe('context groups', () => {
+  const slack = (id: string, context: string | undefined, over: Partial<TabRecord> = {}) =>
+    tab(id, { scope: 'slack', scopeName: 'Slack', context, contextName: context && context.toUpperCase(), ...over })
+  const tabs = [
+    slack('j1', 'jane', { createdAt: 1, lastSeen: NOW - 5 * HOUR }),
+    slack('d1', 'design', { createdAt: 2, lastSeen: NOW - HOUR }),
+    slack('j2', 'jane', { createdAt: 3, lastSeen: NOW - 4 * HOUR }),
+    slack('loose', undefined, { createdAt: 4 }),
+    slack('kept', 'jane', { kept: true, createdAt: 5 }),
+    tab('other', { createdAt: 6 }),
+  ]
+
+  test('showing one app, the context you came from goes first, then by when last seen', () => {
+    const s = sections(tabs, { ...baseOpts, scope: 'slack', context: 'jane' })
+    assert.deepEqual(s.contexts.map((g) => [g.key, g.name, roots(g.threads)]), [
+      ['jane', 'JANE', ['j2', 'j1']],
+      ['design', 'DESIGN', ['d1']],
+    ])
+    assert.deepEqual(roots(s.today), ['loose'])
+    assert.deepEqual(roots(s.kept), ['kept'])
+    const t = sections(tabs, { ...baseOpts, scope: 'slack', context: null })
+    assert.deepEqual(t.contexts.map((g) => g.key), ['design', 'jane'])
+  })
+
+  test("showing everything, each app's section has its groups", () => {
+    const s = sections(tabs, baseOpts)
+    assert.deepEqual(s.contexts, [])
+    const app = s.apps.find((a) => a.scope === 'slack')!
+    assert.deepEqual(app.contexts.map((g) => g.key), ['design', 'jane'])
+    assert.deepEqual(roots(app.threads), ['loose'])
+    assert.deepEqual(roots(s.today), ['other'])
+  })
+
+  test('⌘ numbers skip folded groups, and a lone group is never folded', () => {
+    const s = sections(tabs, { ...baseOpts, scope: 'slack', context: 'jane' })
+    assert.deepEqual(roots(numberedThreads(s, { from: 'today', openContexts: ['jane'] })), ['j2', 'j1', 'loose'])
+    assert.deepEqual(roots(numberedThreads(s, { from: 'today', openContexts: [] })), ['loose'])
+    const lone = sections([slack('j1', 'jane'), slack('j2', 'jane')], { ...baseOpts, scope: 'slack', context: 'jane' })
+    assert.deepEqual(roots(numberedThreads(lone, { from: 'today', openContexts: [] })), ['j2', 'j1'])
+  })
+
+  test('closing a tab in a group focuses its neighbour in the group', () => {
+    const s = sections(tabs, { ...baseOpts, scope: 'slack', context: 'jane' })
+    assert.equal(besideClosed(s, 'j1'), 'j2')
   })
 })
