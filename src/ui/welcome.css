@@ -204,6 +204,31 @@
 .wl-sidebar .f { display: flex; align-items: center; gap: 7px; padding: 5px 6px; font-weight: 500; }
 .wl-sidebar .f::before { content: ''; flex: none; width: 12px; height: 9px; border: 1.5px solid var(--muted); border-radius: 2px 3px 3px 3px; }
 .wl-sidebar .t.in { padding-left: 18px; }
+.wl-sidebar .f.ghost { color: var(--muted); }
+.wl-sidebar .f.ghost::before { border-style: dashed; }
+/* The video tab archiving into the folder, over and over: it leaves Today and turns up in the folder. */
+.wl-sidebar .yt-go, .wl-sidebar .yt-come { max-height: 24px; }
+.wl-sidebar .yt-go { animation: wl-yt-go 6s 1s infinite both; }
+.wl-sidebar .yt-come { animation: wl-yt-come 6s 1s infinite both; }
+@keyframes wl-yt-go {
+  0%, 30% { opacity: 1; transform: none; }
+  42% { opacity: 0; transform: translateY(-8px); max-height: 24px; padding-block: 5px; }
+  50%, 88% { opacity: 0; max-height: 0; padding-block: 0; }
+  100% { opacity: 1; transform: none; max-height: 24px; padding-block: 5px; }
+}
+@keyframes wl-yt-come {
+  0%, 38% { opacity: 0; max-height: 0; padding-block: 0; }
+  48% { opacity: 1; max-height: 24px; padding-block: 5px; background: var(--accent-soft); }
+  70%, 86% { opacity: 1; max-height: 24px; padding-block: 5px; background: transparent; }
+  96%, 100% { opacity: 0; max-height: 0; padding-block: 0; }
+}
+/* No archiving: the video stays in Today. Reduced motion: it's already in the folder. */
+.wl-sidebar.still .yt-go, .wl-sidebar.still .yt-come { animation: none; }
+.wl-sidebar.still .yt-come { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .wl-sidebar .yt-go, .wl-sidebar .yt-come { animation: none; }
+  .wl-sidebar:not(.still) .yt-go { display: none; }
+}
 .wl-row > .wl-btn { flex: none; }
 .wl-made { flex: none; color: var(--muted); font-weight: 500; }
 .wl-made::before { content: '✓ '; color: var(--accent); }

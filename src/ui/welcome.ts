@@ -412,6 +412,8 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
         `<div class="t on" style="--c:${esc(profileColor(0))}"><span>MDN · Popover API</span></div>`,
         `<div class="t" style="--c:${esc(profileColor(1))}"><span>Hacker News</span></div>`,
         `<div class="t sleep" style="--c:${esc(profileColor(0))}"><span>RFC 9110 <small>· ${p.summarizeAfterDays ? `${days(p.summarizeAfterDays)} ago` : 'open'}</small></span></div>`,
+        // The oldest tab, a video: when it archives it moves into the YouTube folder instead.
+        `<div class="t sleep yt-go" style="--c:${esc(profileColor(0))}"><span>Strange Loop <small>· youtube.com</small></span></div>`,
       ]
       const videos = videoFolder()
       return `
@@ -421,12 +423,13 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
         <p class="wl-lede">Pinned sites sit at the top and Kept tabs stay until you close them. Every other tab unloads and then archives after the days below. Archived tabs still turn up in search for 90 days.</p>
       </div>
       <div class="wl-tabs">
-        <div class="wl-sidebar" aria-hidden="true">
+        <div class="wl-sidebar${p.archiveAfterDays ? '' : ' still'}" aria-hidden="true">
           <div class="pins"><b>M</b><b>C</b><b>L</b><b>G</b></div>
           <div class="sec">Kept</div>
           <div class="t" style="--c:${esc(profileColor(0))}"><span>Sprint board</span></div>
           <div class="t" style="--c:${esc(profileColor(1))}"><span>Flat in Lisbon</span></div>
-          ${videos ? `<div class="f"><span>${esc(videos.name)}</span></div><div class="t in" style="--c:${esc(profileColor(0))}"><span>Strange Loop · Keynote</span></div>` : ''}
+          <div class="f${videos ? '' : ' ghost'}"><span>${esc(videos?.name ?? 'YouTube')}</span></div>
+          <div class="t in yt-come" style="--c:${esc(profileColor(0))}"><span>Strange Loop</span></div>
           <div class="sec">Today</div>
           ${p.newTabsAt === 'bottom' ? [...today].reverse().join('') : today.join('')}
           ${p.archiveAfterDays ? '<div class="arch"><span>Archived 3 tabs</span><b>Undo</b></div>' : ''}
@@ -436,7 +439,7 @@ export function initWelcome(el: HTMLElement, send: Send, changed: () => void): W
             ${seg('new-tabs-at', [['top', 'Top'], ['bottom', 'Bottom']], p.newTabsAt)}</div>
           ${stepper('summarizeAfterDays', 'Sleep after', 'The page unloads and the row says which site it was. Kept tabs never sleep.')}
           ${stepper('archiveAfterDays', 'Archive after', 'The tab leaves the sidebar. Undo puts it back where it was.')}
-          <div class="wl-row"><span class="txt"><span class="label">Save YouTube videos</span><span class="sub">A video you haven't got to moves into a ${videos ? `<b>${esc(videos.name)}</b>` : 'YouTube'} folder in Kept instead of archiving. Any folder can catch tabs this way: right-click it and choose Auto-file rules.</span></span>
+          <div class="wl-row"><span class="txt"><span class="label">Save YouTube videos</span><span class="sub">A video you haven't got to moves into a ${videos ? `<b>${esc(videos.name)}</b>` : 'YouTube'} folder in Kept instead of archiving. Any folder can catch tabs by their address this way: right-click it and choose Auto-file rules.</span></span>
             ${videos ? '<span class="wl-made">Folder in Kept</span>' : '<button id="wl-video-folder" class="wl-btn" data-act="video-folder">Make the folder</button>'}</div>
           ${toggle('quietLinks', p.quietLinks, 'Quiet links', 'Links an app opens on its own, without your click, wait in the background with a dot. The menu bar counts them: jb •2.')}
           ${toggle('miniOnHide', p.miniPlayer.onHide, 'Keep videos playing', 'A playing video moves to a picture-in-picture window when jbrow hides.')}

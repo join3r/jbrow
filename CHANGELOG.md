@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The mini player moves to another corner when you switch to a window it covers out of the box.
+- The welcome's Tabs step shows an old YouTube tab filing itself into the YouTube folder instead of
+  archiving.
+
 ## 0.2.0
 
 - Import from Chrome, Arc, Brave, Edge, Vivaldi, Chromium, Safari or Firefox: history, bookmarks,
