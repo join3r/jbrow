@@ -159,6 +159,8 @@ export interface UiState {
   accessibility: boolean | null
   /** Whether the claude and codex commands are installed; null until jbrow has looked. */
   restyleAgents: Record<RestyleAgent, boolean | null>
+  /** How the active tab shows its page: as on this Mac, or as a tablet or phone would. */
+  device: DeviceMode
   /** Sites with a zoom of their own, in percent. */
   zoomSites: { site: string; percent: number }[]
   nav: { canGoBack: boolean; canGoForward: boolean; loading: boolean }
@@ -167,6 +169,9 @@ export interface UiState {
   prefs: Prefs
   now: number
 }
+
+/** The screen a tab shows its page for, picked in the extensions menu. */
+export type DeviceMode = 'desktop' | 'tablet' | 'mobile'
 
 /** Color themes for jbrow's own screens. Each has a light and a dark look, see ui.css. */
 export const THEMES = [

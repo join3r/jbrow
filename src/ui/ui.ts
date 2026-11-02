@@ -178,6 +178,9 @@ function render() {
   $('pin').title = `${S.pinned ? 'Pinned: a regular window' : 'Pin: keep as a regular window'} with a Dock icon${keyHint('pin')}`
   if (!editing()) showAddress()
   $('extHead').textContent = `Extensions · ${p?.name ?? ''}`
+  for (const b of $('deviceMode').querySelectorAll<HTMLElement>('[data-device]')) b.setAttribute('aria-pressed', String(b.dataset.device === S.device))
+  // Not desktop: the puzzle shows it, so a page that looks odd has its reason in sight.
+  $('extButton').classList.toggle('device-on', S.device !== 'desktop')
   $('newTab').title = `New tab${S.filter !== 'all' ? ` in ${profile(S.filter)?.name ?? S.filter}` : ''}${keyHint('newTab')}, right-click for a profile`
   renderSettings()
   renderDownloadPop()
@@ -1876,6 +1879,11 @@ function setExtensions(open: boolean) {
 $('extButton').addEventListener('click', () => setExtensions(!!extPop.hidden))
 // An action opens its popup from where its button is; the popover can close right after.
 actions.addEventListener('click', () => setExtensions(false))
+// Stays open, to flip between the three and compare.
+$('deviceMode').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-device]')
+  if (b) send('device-mode', { mode: b.dataset.device })
+})
 $('addExtension').addEventListener('click', () => {
   setExtensions(false)
   send('add-extension')

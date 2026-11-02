@@ -8,9 +8,10 @@ import { addressUrl, forcedSearch } from '../shared/engines'
 import { urlMatcher } from '../shared/patterns'
 import { MAX_PANES, paneSpans, splitOf } from '../shared/split'
 import { byOrder, createdBeside, flatten, isAsleep, isInFolder, isRoot, parentFolder, samePage, subtree, threadsOf } from '../shared/threads'
-import type { CrashView, Folder, ImportedNode, ImportedPage, KeepLoaded, Profile, Split, TabRecord, UiTab } from '../shared/types'
+import type { CrashView, DeviceMode, Folder, ImportedNode, ImportedPage, KeepLoaded, Profile, Split, TabRecord, UiTab } from '../shared/types'
 import type { Certificates } from './certs'
 import type { DangerousSites } from './dangerous'
+import { deviceBounds, deviceUserAgent, emulate } from './device'
 import type { DeviceChooser } from './devices'
 import { faviconUrl } from './favicons'
 import type { Logins } from './logins'
@@ -24,6 +25,8 @@ interface LiveTab {
   /** The view's page, kept here because the view lets go of it once it's destroyed. */
   wc: WebContents
   loading: boolean
+  /** The page is laid out as a tablet or phone, or was and may still be. */
+  emulated?: boolean
 }
 
 export interface TabsDeps {
@@ -196,6 +199,8 @@ export class Tabs {
   private saveTimer: NodeJS.Timeout | null = null
   /** Most recently used first, for ⌃Tab. */
   private mru: string[] = []
+  /** Tabs showing their page as a tablet or phone would. Until jbrow quits. */
+  private deviceModes = new Map<string, DeviceMode>()
   /** Set while jbrow hands a new view to the extensions library, which marks every new tab active. */
   private addingView = false
   /** The tab that was in front before the active one, and when it stopped being. */
@@ -436,6 +441,35 @@ export class Tabs {
     wc.setAudioMuted(muted)
     this.deps.onChange()
   }
+  /** How the tab shows its page: as on this Mac, or as a tablet or phone would. */
+  deviceMode(id: string | null | undefined): DeviceMode {
+    return (id && this.deviceModes.get(id)) || 'desktop'
+  }
+  /** Shows the tab's page as a tablet or phone would, or as on this Mac again. Reloads it, so the site sees the new user agent. */
+  setDeviceMode(id: string, mode: DeviceMode) {
+    if (mode === this.deviceMode(id)) return
+    if (mode === 'desktop') this.deviceModes.delete(id)
+    else this.deviceModes.set(id, mode)
+    const wc = this.webContentsFor(id)
+    const rt = this.deps.runtime(this.get(id)?.profile ?? '')
+    if (wc && rt) {
+      wc.setUserAgent(deviceUserAgent(mode, rt.session.getUserAgent()))
+      this.layout()
+      this.fitDevice(id)
+      if (wc.getURL()) wc.reload()
+    }
+    this.deps.onChange()
+  }
+  /** Lays the page out for its tab's device at the size its view has now. */
+  private fitDevice(id: string) {
+    const live = this.live.get(id)
+    if (!live || live.wc.isDestroyed()) return
+    const mode = this.deviceMode(id)
+    // A page that was never emulated has nothing to undo.
+    if (mode === 'desktop' && !live.emulated) return
+    live.emulated = mode !== 'desktop'
+    emulate(live.wc, mode, live.view.getBounds())
+  }
   navState(id = this.activeId) {
     const wc = id ? this.webContentsFor(id) : null
     return {
@@ -525,6 +559,8 @@ export class Tabs {
     if (guest) return live
     // A tab that was asleep or archived comes back where it was, with back and forward. One you
     // just typed an address into goes there after, so that address is one step further.
+    // A tab put to sleep as a tablet or phone wakes as one.
+    if (this.deviceModes.has(rec.id)) view.webContents.setUserAgent(deviceUserAgent(this.deviceMode(rec.id), rt.session.getUserAgent()))
     const load = (url: string) => (url ? view.webContents.loadURL(url) : undefined)
     if (!history) void load(rec.url)?.catch(() => {})
     else {
@@ -539,7 +575,7 @@ export class Tabs {
       // headers, and no navigator.userAgentData in workers. To Cloudflare that's a fake Chrome, and
       // Turnstile never lets it through (bistro.sk's login). Setting the user agent again brings
       // them back for everything after. Not before restore resolves: that stalls the restore.
-      const hints = () => view.webContents.setUserAgent(rt.session.getUserAgent())
+      const hints = () => view.webContents.setUserAgent(deviceUserAgent(this.deviceMode(rec.id), rt.session.getUserAgent()))
       void view.webContents.navigationHistory
         .restore(history)
         .then(
@@ -592,6 +628,8 @@ export class Tabs {
       this.clearUpgrade(id)
       this.dropFailedUpgrade(id, wc, url)
       onNav(e, url)
+      // A page in a new renderer process starts out without the emulation.
+      this.fitDevice(id)
       this.deps.onVisit(rec()?.profile ?? rt.profile.id, url, id)
       this.deps.logins.loaded(id)
       this.deps.onNavigate(wc)
@@ -1031,7 +1069,9 @@ export class Tabs {
       if (on) {
         const y = area.y + (this.fullscreenId ? 0 : this.slideY)
         bounds = spans ? { x: area.x + spans[i].x, y, width: spans[i].width, height: area.height } : { ...area, y }
+        bounds = deviceBounds(this.deviceMode(id), bounds)
         live.view.setBounds(bounds)
+        this.fitDevice(id)
       }
       const visible = on && this.deps.contentVisible() && !this.covered(id)
       live.view.setVisible(visible)
@@ -1157,6 +1197,7 @@ export class Tabs {
     if (!rec) return
     this.clearUpgrade(id)
     this.fellBack.delete(id)
+    this.deviceModes.delete(id)
     const panes = this.panesOf(id)
     const beside = this.activeId === id && !rec.kept ? this.deps.besideClosed(id) : undefined
     if (rec.kept && rec.home && !remove) {

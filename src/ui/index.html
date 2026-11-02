@@ -76,6 +76,11 @@
           <div class="ext">
             <button id="extButton" class="icon" data-icon="puzzle" title="Extensions" aria-label="Extensions" aria-expanded="false"></button>
             <div id="extPop" class="pop" hidden>
+              <div id="deviceMode" class="seg device-seg" role="group" aria-label="Show the page as">
+                <button data-device="desktop" data-icon="monitor" title="Desktop" aria-label="Desktop"></button>
+                <button data-device="tablet" data-icon="tablet" title="Tablet" aria-label="Tablet"></button>
+                <button data-device="mobile" data-icon="phone" title="Mobile" aria-label="Mobile"></button>
+              </div>
               <div id="extHead" class="pop-head"></div>
               <browser-action-list id="actions" alignment="bottom left"></browser-action-list>
               <div id="extEmpty" class="pop-empty" hidden>No extensions in this profile yet.</div>

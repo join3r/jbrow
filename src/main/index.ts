@@ -4,7 +4,7 @@ import { ACTIONS, actionKeys, FIXED, isGlobal, shortcutFromKey, shortcutLabel, t
 import { siteProfile as matchSiteProfile, urlMatcher } from '../shared/patterns'
 import { awayFromHome, besideClosed, isInFolder, isPinned, keptThreads, numberedThreads, sections, unkeptThreads, type FolderView } from '../shared/threads'
 import { forcedSearch, isSearchUrl, looksLikeAddress, SEARCH_ENGINES, suggestUrlFor } from '../shared/engines'
-import { THEMES, URL_BAR_STYLES, type AppEntry, type AppLabel, type Folder, type ExtensionView, type HistoryQuery, type ImportKind, type ImportResult, type PaneBar, type Prefs, type Profile, type RestyleAgent, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
+import { THEMES, URL_BAR_STYLES, type AppEntry, type AppLabel, type DeviceMode, type Folder, type ExtensionView, type HistoryQuery, type ImportKind, type ImportResult, type PaneBar, type Prefs, type Profile, type RestyleAgent, type SearchReply, type SuggestReply, type TabRecord, type UiState } from '../shared/types'
 import { AppDirectory, bundleIdOf } from './apps'
 import { BACKGROUND } from './background'
 import { Certificates } from './certs'
@@ -239,6 +239,7 @@ function state(): UiState {
     styledSites: restyler.styledSites(),
     accessibility: process.platform === 'darwin' ? systemPreferences.isTrustedAccessibilityClient(false) : null,
     restyleAgents: restyler.agents(),
+    device: tabs.deviceMode(tabs.activeId),
     zoomSites: zoom.list(),
     nav: tabs.navState(),
     keys: actionKeys(settings.shortcuts),
@@ -2461,6 +2462,9 @@ function wireIpc() {
   })
   on<{ id: string }>('close', ({ id }) => void closeTab(id))
   on<{ id: string }>('go-home', ({ id }) => tabs.goHome(id))
+  on<{ mode: DeviceMode }>('device-mode', ({ mode }) => {
+    if (tabs.activeId && ['desktop', 'tablet', 'mobile'].includes(mode)) tabs.setDeviceMode(tabs.activeId, mode)
+  })
   on<{ id: string; muted: boolean }>('mute', ({ id, muted }) => tabs.setMuted(id, muted))
   on<{ id: string }>('thread-menu', ({ id }) => threadMenu(id))
   on<{ id: string }>('close-pane', ({ id }) => tabs.closePane(id))
