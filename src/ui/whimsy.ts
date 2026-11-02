@@ -2,7 +2,9 @@
  * Whimsical touches, off unless turned on under Animation in settings: tabs pop in and vanish in a
  * puff, rows glide to their new places, the tab you switch to hops, finished downloads wiggle.
  * All of it is Web Animations on elements the render already made, so nothing replays when the
- * sidebar redraws, and macOS's Reduce motion turns it all off. The page sliding in as you switch
+ * sidebar redraws, and macOS's Reduce motion turns it all off. A loading tab's icon has a firefly
+ * circling it in place of the plain pulse, a lantern glow drifts in its address bar and blooms away
+ * once the page is in, and a page with nothing to show yet has two fireflies round its icon. The page sliding in as you switch
  * tabs is main's (Tabs.slideIn), since pages aren't part of this document.
  */
 
@@ -19,6 +21,60 @@ document.body.append(layer)
 export function setWhimsy(enabled: boolean) {
   on = enabled
   document.documentElement.classList.toggle('whimsy', enabled)
+}
+
+/** One loop of a loading tab's firefly, in ms; FIREFLY_MS in ui.css. */
+const FIREFLY_MS = 1400
+
+/**
+ * The firefly for a loading row or pinned icon. ui.css only shows it with Whimsy on. Its loop
+ * starts where the clock says, so a redraw (and a loading sidebar redraws often) carries it on
+ * from where it was rather than throwing it back to the start.
+ */
+export const firefly = () =>
+  `<span class="firefly" aria-hidden="true" style="--ff-at:-${Math.round(performance.now() % FIREFLY_MS)}ms"></span>`
+
+/** Loops of the two fireflies round a page's icon while it opens; WAIT_MS in ui.css. */
+const WAIT_MS = [1800, 2300]
+
+/** The fireflies round the icon of a page that's opening, in step with the clock as above. */
+export const waitFly = () =>
+  `<span class="wait-fly" aria-hidden="true" style="${WAIT_MS.map((ms, i) => `--ff-at${i + 1}:-${Math.round(performance.now() % ms)}ms`).join(';')}"></span>`
+
+/** The tab whose load each address bar's lantern is lit for. */
+const lit = new WeakMap<HTMLElement, string>()
+
+/**
+ * A lantern glow drifts back and forth in an address bar while its tab loads. When that tab's
+ * page is in, the glow blooms across the bar and fades as the firefly flies up out of it. A bar
+ * that switches to another tab just goes dark: that tab didn't finish anything.
+ */
+export function lantern(bar: HTMLElement, tabId: string | null, loading: boolean) {
+  if (loading && tabId && live()) {
+    if (!bar.classList.contains('lantern-on')) {
+      bar.classList.remove('lantern-end')
+      bar.style.removeProperty('--lantern-x')
+      bar.classList.add('lantern-on')
+    }
+    lit.set(bar, tabId)
+    return
+  }
+  if (!bar.classList.contains('lantern-on')) return
+  const finished = lit.get(bar) === tabId && live()
+  // Where the glow had drifted to, so it blooms from there.
+  const x = getComputedStyle(bar).getPropertyValue('--lantern-x')
+  bar.classList.remove('lantern-on')
+  lit.delete(bar)
+  if (!finished) return
+  bar.style.setProperty('--lantern-x', x)
+  bar.classList.add('lantern-end')
+  const done = (e: AnimationEvent) => {
+    if (e.target !== bar || e.animationName !== 'lantern-bloom') return
+    bar.removeEventListener('animationend', done)
+    bar.classList.remove('lantern-end')
+    bar.style.removeProperty('--lantern-x')
+  }
+  bar.addEventListener('animationend', done)
 }
 
 const accent = () => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#1a7f8e'

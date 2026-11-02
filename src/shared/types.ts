@@ -81,6 +81,8 @@ export interface UiTab extends TabRecord {
   loaded: boolean
   /** Its page crashed and hasn't been reloaded. */
   crashed?: boolean
+  /** Its page is opening and has nothing to show yet; jbrow shows a firefly in its place (Whimsy only). */
+  waiting?: boolean
   /** ID of the extension working in its page now (its chrome.debugger is attached). */
   drivenBy?: string
   /** Its page is making sound right now. */

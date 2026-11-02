@@ -25,6 +25,11 @@ interface LiveTab {
   /** The view's page, kept here because the view lets go of it once it's destroyed. */
   wc: WebContents
   loading: boolean
+  /**
+   * The view is new and its page hasn't anything to show yet. With Whimsy on it stays hidden till
+   * then, so jbrow's firefly shows in its place rather than a white page.
+   */
+  waiting?: boolean
   /** The page is laid out as a tablet or phone, or was and may still be. */
   emulated?: boolean
 }
@@ -427,6 +432,7 @@ export class Tabs {
       return {
         ...t,
         loading: this.live.get(t.id)?.loading ?? false,
+        waiting: this.holdingBack(t.id) || undefined,
         loaded: this.live.has(t.id),
         crashed: this.crashed.get(t.id)?.reason ? true : undefined,
         audible: wc?.isCurrentlyAudible() || undefined,
@@ -542,7 +548,7 @@ export class Tabs {
     const win = this.deps.window()
     win.contentView.addChildView(view)
     this.deps.onViewAdded()
-    const live: LiveTab = { view, wc: view.webContents, loading: false }
+    const live: LiveTab = { view, wc: view.webContents, loading: false, waiting: !guest }
     this.live.set(rec.id, live)
     this.wire(rec.id, view.webContents, rt)
     this.colors.watch(rec.id, view.webContents)
@@ -677,6 +683,7 @@ export class Tabs {
       this.deps.logins.clear(id)
       this.deps.devices.cancel(id)
       this.setLoading(id, false)
+      this.stopWaiting(id)
       if (this.fullscreenId === id) this.setFullscreen(null)
       this.setCrashed(id, { reason: details.reason, hung: false })
     })
@@ -711,7 +718,11 @@ export class Tabs {
     // The sidebar shows which tabs make sound, so a page playing somewhere out of sight can be found.
     wc.on('audio-state-changed', () => this.deps.onChange())
     wc.on('did-start-loading', () => this.setLoading(id, true))
-    wc.on('did-stop-loading', () => this.setLoading(id, false))
+    wc.on('did-stop-loading', () => {
+      this.setLoading(id, false)
+      this.stopWaiting(id)
+    })
+    wc.on('dom-ready', () => this.stopWaiting(id))
     wc.on('input-event', (_e, input) => {
       if (input.type === 'mouseDown' || input.type === 'rawKeyDown' || input.type === 'keyDown' || input.type === 'gestureTap') this.deps.onPageInput(id)
     })
@@ -873,6 +884,22 @@ export class Tabs {
   /** Wait on a stuck page: shows it again, and asks again if it stays stuck. */
   wait(id: string) {
     if (this.crashed.get(id)?.hung) this.setCrashed(id, null)
+  }
+
+  /** Whether the tab's page is held back, as it hasn't anything to show yet. */
+  private holdingBack(id: string) {
+    return !!this.live.get(id)?.waiting && this.deps.whimsy()
+  }
+
+  /** The page has something to show, or never will: it stops being held back. */
+  private stopWaiting(id: string) {
+    const live = this.live.get(id)
+    if (!live?.waiting) return
+    const was = this.holdingBack(id)
+    live.waiting = false
+    if (!was) return
+    this.layout()
+    this.deps.onChange()
   }
 
   private setLoading(id: string, loading: boolean) {
@@ -1073,7 +1100,7 @@ export class Tabs {
         live.view.setBounds(bounds)
         this.fitDevice(id)
       }
-      const visible = on && this.deps.contentVisible() && !this.covered(id)
+      const visible = on && this.deps.contentVisible() && !this.covered(id) && !this.holdingBack(id)
       live.view.setVisible(visible)
       if (visible && bounds) this.places.set(id, bounds)
     })

@@ -12,7 +12,7 @@ import { isEmpty, suggestModel, type Item, type SuggestModel, type VisitItem } f
 import { initHistory } from './history'
 import { initWelcome } from './welcome'
 import { THEMES, type AnimMessage, type AppEntry, type CertInfo, type CompletionView, type DeviceKind, type DownloadInfo, type ExtensionShortcut, type HistoryReply, type ExtensionView, type ImportKind, type ImportResult, type ImportSource, type PaneBar, type Prefs, type Profile, type SearchReply, type SiteInfoReply, type SuggestReply, type TabRecord, type UiState, type UiTab, type UpdateView, type UrlBarStyle, type VisitView } from '../shared/types'
-import { afterRender, beforeRender, downloadsChanged, flourish, setWhimsy } from './whimsy'
+import { afterRender, beforeRender, downloadsChanged, firefly, flourish, lantern, setWhimsy, waitFly } from './whimsy'
 
 declare global {
   interface Window {
@@ -204,6 +204,8 @@ function render() {
   renderThreads()
   renderArchiveNotice()
 
+  renderWait(active)
+
   const blank = !active?.url
   $('blank').hidden = !blank
   if (blank) {
@@ -332,8 +334,10 @@ function renderPanes() {
   barEl.classList.toggle('grow-left', f.x + Math.max(f.width, SUGGEST_WIDTH) > contentEl.clientWidth)
   paneBgs.innerHTML = split.tabs
     .map((id, i) => {
-      const empty = i !== focused && !S!.tabs.find((t) => t.id === id)?.url
-      return `<div class="pane" data-pane="${esc(id)}" style="left:${spans[i].x}px;width:${spans[i].width}px">${empty ? '<span>New tab</span>' : ''}</div>`
+      const t = S!.tabs.find((x) => x.id === id)
+      const empty = i !== focused && !t?.url
+      const inner = empty ? '<span>New tab</span>' : i !== focused && t?.waiting ? waitHtml(t) : ''
+      return `<div class="pane" data-pane="${esc(id)}" style="left:${spans[i].x}px;width:${spans[i].width}px">${inner}</div>`
     })
     .join('')
   panesEl.innerHTML =
@@ -343,6 +347,26 @@ function renderPanes() {
       .map((s, i) => `<div class="pane-split${paneDrag?.i === i ? ' drag' : ''}" data-divider="${i}" style="left:${s.x - PANE_GAP}px" title="Drag to resize"></div>`)
       .join('')
   renderPaneBars(split.tabs, spans)
+}
+
+/** A page that's opening and has nothing to show yet: its icon with fireflies round it, and its site. */
+function waitHtml(t: UiTab) {
+  const site = hostOf(t.url) || t.url
+  const fav = t.favicon
+    ? `<img class="fav" src="${esc(t.favicon)}" alt="">`
+    : `<span class="fav letter">${esc(site.charAt(0).toUpperCase())}</span>`
+  return `<div class="wait"><span class="wait-icon">${fav}${waitFly()}</span><span class="wait-host">${esc(site)}</span></div>`
+}
+
+/** The active tab's opening screen; drawn again only when what it shows changes, so its fireflies fly on. */
+function renderWait(active: UiTab | undefined) {
+  const el = $('waitScreen')
+  const on = !!active?.waiting && !jbrowPageShown()
+  el.hidden = !on
+  const key = on ? `${active!.url}\n${active!.favicon ?? ''}` : ''
+  if (el.dataset.key === key) return
+  el.dataset.key = key
+  el.innerHTML = on ? waitHtml(active!) : ''
 }
 
 // ---------- address bars ----------
@@ -369,9 +393,10 @@ function paintBar(el: HTMLElement, color: string | null) {
   el.classList.toggle('tone-light', !!color && !isDark(color))
 }
 
-/** The active tab's bar: its color, and the × that takes it out of a split. */
+/** The active tab's bar: its color, its lantern while it loads, and the × that takes it out of a split. */
 function renderBar(split = activeSplit()) {
   paintBar(barEl, (S?.activeId && paneBar(S.activeId)?.color) || null)
+  lantern(barEl, S?.activeId ?? null, !!S?.nav.loading && !jbrowPageShown())
   $('paneClose').hidden = !split
   if (!split) barEl.classList.remove('grow-left')
 }
@@ -401,6 +426,7 @@ function renderPaneBars(ids: string[], spans: { x: number; width: number }[]) {
     el.style.left = `${spans[i].x}px`
     el.style.width = `${spans[i].width}px`
     paintBar(el, p.color)
+    lantern(el, id, p.loading)
     const prof = profile(t.profile)
     const named = !!prof && S.profiles.length > 1
     const masked = isPrivate(t.url)
@@ -921,7 +947,7 @@ function renderPins(pinned: ThreadView<UiTab>[], numbered: Map<string, number>) 
       return `<button class="${classes}" role="listitem" draggable="true" data-id="${t.id}" data-target="${open ? t.id : v.last.id}"${away ? ' data-away' : ''}
         title="${esc(title)}" aria-label="${esc(displayName(t))}" style="--pc:${esc(profile(t.profile)?.color ?? '')}">${
           fav ? `<img class="fav" src="${esc(fav)}" alt="">` : `<span class="fav letter">${letter}</span>`
-        }${snd ? `<span class="snd-badge${snd.muted ? ' muted' : ''}" data-mute="${snd.id}" title="${snd.muted ? 'Unmute' : 'Mute'}">${icon(snd.muted ? 'volumeX' : 'volume')}</span>` : ''}</button>`
+        }${v.all.some((x) => x.loading) ? firefly() : ''}${snd ? `<span class="snd-badge${snd.muted ? ' muted' : ''}" data-mute="${snd.id}" title="${snd.muted ? 'Unmute' : 'Mute'}">${icon(snd.muted ? 'volumeX' : 'volume')}</span>` : ''}</button>`
     })
     .join('')
   layoutPins()
@@ -1187,7 +1213,7 @@ function row(t: UiTab, thread: ThreadView<UiTab>, number?: number, showApp = tru
   const snd = soundOf(thread.all)
   const sound = snd ? `<button class="snd${snd.muted ? ' muted' : ''}" data-mute="${snd.id}" title="${snd.muted ? 'Unmute' : 'Mute'}" aria-label="${snd.muted ? 'Unmute' : 'Mute'}">${icon(snd.muted ? 'volumeX' : 'volume')}</button>` : ''
   return `<div class="${classes}" role="button" tabindex="0" draggable="true" data-id="${t.id}" data-target="${t.id}" style="--pc:${esc(color)}">
-    ${fav}${name}<span class="end">${sound}${mark}<span class="meta">${esc(meta || key)}</span>${closable ? `<button class="act" data-close="${t.id}" title="Close" aria-label="Close">${icon('close')}</button>` : ''}</span>
+    ${fav}${t.loading ? firefly() : ''}${name}<span class="end">${sound}${mark}<span class="meta">${esc(meta || key)}</span>${closable ? `<button class="act" data-close="${t.id}" title="Close" aria-label="Close">${icon('close')}</button>` : ''}</span>
     ${asleep ? `<span class="sum">${esc(sleepSummary(thread, S.now))}</span>` : ''}
   </div>`
 }
