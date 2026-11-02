@@ -187,6 +187,8 @@ export class SitePermissions {
   constructor(
     private window: () => BrowserWindow | null,
     private asker?: PermissionAsker,
+    /** A page that may use nothing yet, whatever its site was allowed (a page loaded ahead, see prerender.ts). Called before any grant. */
+    private refuse?: (wc: WebContents | null) => boolean,
   ) {
     if (!existsSync(storePath())) return
     try {
@@ -202,6 +204,7 @@ export class SitePermissions {
     const profileId = profile.id
     this.profiles.set(sess, profileId)
     sess.setPermissionRequestHandler((wc, permission, callback, details) => {
+      if (this.refuse?.(wc)) return callback(false)
       const origin = originOf(details.requestingUrl)
       const wanted = expand(permission, details as { mediaTypes?: string[]; externalURL?: string })
       if (ALWAYS.has(permission) || wanted.every((p) => listed(sess, origin, p))) return callback(true)
@@ -214,7 +217,10 @@ export class SitePermissions {
         callback(false)
       })
     })
-    sess.setPermissionCheckHandler((_wc, permission, requestingOrigin, details) => {
+    sess.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => {
+      // Checks only report what's allowed; using it goes through the request handler above. But
+      // a notification shows on the check alone, and a page loaded ahead mustn't show one.
+      if (permission === 'notifications' && this.refuse?.(wc)) return false
       const origin = originOf(requestingOrigin)
       if (ALWAYS.has(permission) || listed(sess, origin, permission)) return true
       if (STORAGE_ACCESS.has(permission)) return !thirdPartyCookiesBlocked()

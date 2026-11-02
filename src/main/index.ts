@@ -46,6 +46,8 @@ import { blockThirdPartyCookies, thirdPartyCookiesBlocked } from './third-party-
 import { UserScripts } from './user-scripts'
 import { topSiteCompletion } from './top-sites'
 import { BrowsingHistory, fetchSearchSuggestions } from './visits'
+import { Preconnector } from './preconnect'
+import { Prerenderer, type Base } from './prerender'
 import { takeUpdateRelaunch, Updates } from './updates'
 import { Zoom, ZOOM_STEPS, zoomSite } from './zoom'
 import { rm, writeFile } from 'node:fs/promises'
@@ -73,6 +75,24 @@ let downloads: Downloads
 let restyler: Restyler
 let certs: Certificates
 let siteInfo: SiteInfo
+/** Connects ahead to where you're likely going; see preconnect.ts. */
+const preconnect = new Preconnector(
+  (profile, url) => runtimes.get(profile)?.session.preconnect({ url, numSockets: 1 }),
+  () => settings.preconnect,
+  (url) => urlMatcher(settings.privateUrls)(url),
+)
+/** Loads the address bar's completion from your history ahead, while you type; see prerender.ts. */
+const prerender = new Prerenderer({
+  enabled: () => settings.prerender,
+  session: (profile) => runtimes.get(profile)?.session,
+  window: () => panel.win,
+  bounds: () => panel.contentBounds(),
+  onViewAdded: () => panel.keepOrder(),
+  isPrivate: (url) => urlMatcher(settings.privateUrls)(url),
+  dangerous: (profile, url) => !!dangerous.listed(profile, url),
+  siteProfile: (url) => siteProfile(url),
+  trusted: (profile, url, certificate) => certs.trusted(profile, url, certificate),
+})
 let dangerous: DangerousSites
 let logins: Logins
 let signIns: SignInSheets
@@ -279,6 +299,8 @@ function state(): UiState {
       zoom: { defaultPercent: settings.zoom.defaultPercent, remember: settings.zoom.remember },
       searchUrl: settings.searchUrl,
       searchSuggestions: settings.searchSuggestions,
+      preconnect: settings.preconnect,
+      prerender: settings.prerender,
       urlBarStyle: settings.urlBarStyle,
       autoUpdate: settings.autoUpdate,
     },
@@ -1105,6 +1127,11 @@ function updatePrefs(prefs: Partial<Prefs>) {
   if (prefs.blockThirdPartyCookies !== undefined) settings.blockThirdPartyCookies = prefs.blockThirdPartyCookies
   if (prefs.searchUrl !== undefined && isSearchUrl(prefs.searchUrl.trim())) settings.searchUrl = prefs.searchUrl.trim()
   if (prefs.searchSuggestions !== undefined) settings.searchSuggestions = prefs.searchSuggestions
+  if (prefs.preconnect !== undefined) settings.preconnect = prefs.preconnect
+  if (prefs.prerender !== undefined) {
+    settings.prerender = prefs.prerender
+    if (!settings.prerender) prerender.drop()
+  }
   if (prefs.urlBarStyle && URL_BAR_STYLES.includes(prefs.urlBarStyle)) settings.urlBarStyle = prefs.urlBarStyle
   if (prefs.autoUpdate !== undefined) settings.autoUpdate = prefs.autoUpdate
   // Only an agent that's installed, and restyling only turned on with one (see setRestyleEnabled).
@@ -1677,6 +1704,18 @@ function maySendToSearch(q: string, forced: boolean, visited: boolean, profile: 
   return !isPrivate(q) && !isPrivate(`https://${q}`)
 }
 
+/**
+ * Where a page loaded ahead for `url` would go if Return went there now: the active tab, when
+ * what's typed opens in its profile and it isn't on that page already.
+ */
+function prerenderBase(profile: string, url: string): Base | null {
+  const cur = tabs.active()
+  if (!cur || cur.profile !== profile || !panel.visible) return null
+  const wc = tabs.activeWebContents()
+  if (wc && wc.getURL() === url) return null
+  return tabs.prerenderBase(cur.id)
+}
+
 /** Stops waiting for search suggestions nobody needs any more. */
 function cancelSearchSuggestions() {
   if (searchTimer) clearTimeout(searchTimer)
@@ -1702,6 +1741,10 @@ function suggest({ input, profile, seq }: { input: string; profile?: string; seq
     completion: visited ?? topSiteCompletion(input, isPrivate),
   }
   panel.ui.send('suggestions', reply)
+  // Typing "git" connects to github.com before you press Return.
+  if (reply.completion) preconnect.to(p, reply.completion.url)
+  // A site from your own history loads ahead once typing pauses; popular sites you haven't been to don't.
+  prerender.consider(p, visited?.url ?? null, () => prerenderBase(p, visited!.url))
   cancelSearchSuggestions()
   const suggestUrl = suggestUrlFor(settings.searchUrl)
   const forced = forcedSearch(input)
@@ -2438,7 +2481,21 @@ function wireIpc() {
     tabs.navigate(input, search)
   })
   on<{ input: string; profile?: string; seq: number }>('suggest', (request) => suggest(request))
-  on('suggest-cancel', () => cancelSearchSuggestions())
+  on('suggest-cancel', () => {
+    cancelSearchSuggestions()
+    prerender.barClosed()
+  })
+  // Where the UI thinks you're about to go: a suggestion you highlighted, the search engine as the
+  // address bar opens, a tab without a page under the pointer. A tab that has its page needs nothing.
+  on<{ url?: string; profile?: string; tab?: string }>('preconnect', ({ url, profile, tab }) => {
+    if (tab) {
+      const rec = tabs.get(tab)
+      if (rec?.url && !tabs.isLoaded(rec.id)) preconnect.to(rec.profile, rec.url)
+      return
+    }
+    const p = profile && runtimes.has(profile) ? profile : (tabs.active()?.profile ?? settings.defaultProfile)
+    if (typeof url === 'string') preconnect.to(p, url)
+  })
   on<{ url: string; profile?: string; seq: number }>('site-info', ({ url, profile, seq }) => {
     const p = profile && settings.profiles.some((x) => x.id === profile) ? profile : (tabs.active()?.profile ?? settings.defaultProfile)
     void siteInfo.ask(url, p, seq)
@@ -2895,6 +2952,9 @@ app.whenReady().then(async () => {
   permissions = new SitePermissions(
     () => panel.win,
     (wc, question) => prompts.ask(wc, settings.profiles.length > 1 ? question : { ...question, profile: '' }),
+    // A page loaded ahead gets nothing, not even what its site was allowed: it goes, and loads
+    // again if you go there.
+    (wc) => prerender.refuse(wc, 'it asked for a permission'),
   )
   permissions.listen()
   restyler = new Restyler({
@@ -3016,11 +3076,13 @@ app.whenReady().then(async () => {
       return page.startsWith('chrome-extension://') || Date.now() - commands.lastRunAt < 2000
     },
     onLayout: () => prompts.layout(),
+    prerendered: (url, base) => prerender.take(url, base),
   })
 
   downloads = new Downloads({
     onChange: () => sendDownloads(),
     onStarted: (wc) => closeDownloadOnlyTab(wc),
+    refuse: (wc) => prerender.refuse(wc, 'it started a download'),
     visible: () => panel.visible,
     window: () => panel.win,
   })
@@ -3062,7 +3124,10 @@ app.whenReady().then(async () => {
   wireSwipes(panel.win, (wc) => (tabs.idForWebContents(wc) ? wc : null), () => tabs.activeWebContents())
   profileDeps = {
     hooks: tabHooks,
-    pickShareSource: (callback) => void pickShareSource(panel.win, callback),
+    pickShareSource: (wc, callback) => {
+      if (prerender.refuse(wc, 'it asked to share the screen')) return callback(null)
+      void pickShareSource(panel.win, callback)
+    },
     permissions,
     devices,
     attach: (rt) => {

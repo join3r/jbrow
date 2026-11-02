@@ -7,6 +7,8 @@ export function offline(web?: TestServer): Record<string, unknown> {
   return {
     searchUrl: `${web?.url ?? 'http://127.0.0.1:9'}/search?q=%s`,
     searchSuggestions: false,
+    preconnect: false,
+    prerender: false,
     dangerousSites: false,
   }
 }

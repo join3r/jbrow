@@ -1,4 +1,4 @@
-import { app, dialog, session, type BaseWindow, type Session, type WebContents } from 'electron'
+import { app, dialog, session, webContents, type BaseWindow, type Session, type WebContents } from 'electron'
 import { ElectronChromeExtensions, type ChromeExtensionOptions } from 'electron-chrome-extensions'
 import { installChromeWebStore, installExtension } from 'electron-chrome-web-store'
 import path from 'node:path'
@@ -53,7 +53,8 @@ function chromeLikeUserAgent(ua: string): string {
 
 export interface ProfileDeps {
   hooks: TabHooks
-  pickShareSource: (callback: (streams: Electron.Streams | null) => void) => void
+  /** `wc` is the page asking, when Electron says. */
+  pickShareSource: (wc: WebContents | null, callback: (streams: Electron.Streams | null) => void) => void
   permissions: SitePermissions
   devices: DeviceChooser
   /** Adds jbrow's own extension APIs (idle, sidePanel, userScripts) to a profile, before its extensions load and start. */
@@ -83,7 +84,7 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
   // Without a handler Electron rejects getDisplayMedia, so Meet and friends can't share the
   // screen. The macOS system picker (useSystemPicker) closes and reopens on the first click,
   // so jbrow asks with its own menu instead.
-  sess.setDisplayMediaRequestHandler((_request, callback) => pickShareSource(callback))
+  sess.setDisplayMediaRequestHandler((request, callback) => pickShareSource(request.frame ? webContents.fromFrame(request.frame) ?? null : null, callback))
   // Electron grants every permission unless told otherwise.
   permissions.attach(sess, profile)
   devices.attach(sess, profile.id)

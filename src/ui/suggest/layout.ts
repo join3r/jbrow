@@ -41,6 +41,8 @@ export interface SuggestLayout {
   key(e: KeyInput, model: SuggestModel): Outcome
   /** A click inside the box. */
   click(target: HTMLElement, model: SuggestModel): Outcome
+  /** The item the selection is on, or null while it's in the text. ui.ts connects ahead to its site. */
+  highlighted(model: SuggestModel): Item | null
   /** Main's answer to a LayoutHost.askSite. Returns whether to render again. */
   siteInfo?(reply: SiteInfoReply): boolean
 }

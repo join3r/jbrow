@@ -51,6 +51,10 @@ export interface Settings {
   searchUrl: string
   /** Ask the search engine for suggestions as you type in the address bar. Never for addresses or private ones. */
   searchSuggestions: boolean
+  /** Connect to a site ahead of time when you're likely to go there (see preconnect.ts). Never to private addresses. */
+  preconnect: boolean
+  /** Load the site the address bar completes to from your history while you type (see prerender.ts). Never private addresses. */
+  prerender: boolean
   /** How the address bar lays out its suggestions. */
   urlBarStyle: UrlBarStyle
   /** Unpacked extension folders to load, per profile ID. */
@@ -133,6 +137,8 @@ const DEFAULTS: Settings = {
   hideSidebar: false,
   searchUrl: 'https://www.google.com/search?q=%s',
   searchSuggestions: true,
+  preconnect: true,
+  prerender: true,
   urlBarStyle: 'columns',
   unpackedExtensions: {},
   disabledExtensions: {},

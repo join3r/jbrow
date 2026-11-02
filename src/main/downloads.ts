@@ -58,6 +58,8 @@ export interface DownloadHooks {
   visible: () => boolean
   /** For the question a page's second download asks. */
   window: () => BrowserWindow
+  /** A download from a page that may not start one (a page loaded ahead): it's cancelled. */
+  refuse?: (wc: WebContents | null) => boolean
 }
 
 /** A tab that has downloaded from a site, as Chrome counts it: after the first, you're asked. */
@@ -89,7 +91,10 @@ export class Downloads {
   constructor(private hooks: DownloadHooks) {}
 
   attach(sess: Session, profileId: string) {
-    sess.on('will-download', (_event, item, wc) => this.add(sess, profileId, item, wc))
+    sess.on('will-download', (event, item, wc) => {
+      if (this.hooks.refuse?.(wc)) return event.preventDefault()
+      this.add(sess, profileId, item, wc)
+    })
   }
 
   list(): DownloadInfo[] {

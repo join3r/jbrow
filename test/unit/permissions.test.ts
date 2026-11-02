@@ -22,7 +22,7 @@ type DeviceHandler = (details: Record<string, unknown>) => boolean
 const MAPS = 'abcdefghijklmnopabcdefghijklmnop'
 
 /** A session that keeps the handlers jbrow sets, and a page to ask from. */
-function setup(profile = { id: 'p', name: 'Personal', color: '#000' }) {
+function setup(profile = { id: 'p', name: 'Personal', color: '#000' }, refuse?: (wc: WebContents | null) => boolean) {
   const handlers = {} as { request: RequestHandler; check: CheckHandler; device: DeviceHandler }
   const installed: Record<string, { name: string; manifest: Record<string, unknown> }> = {
     [MAPS]: { name: 'Maps Helper', manifest: { permissions: ['storage', 'geolocation', 'notifications'] } },
@@ -33,7 +33,7 @@ function setup(profile = { id: 'p', name: 'Personal', color: '#000' }) {
     setDevicePermissionHandler: (h: DeviceHandler) => void (handlers.device = h),
     extensions: { getExtension: (id: string) => installed[id] ?? null },
   }
-  const perms = new SitePermissions(() => null)
+  const perms = new SitePermissions(() => null, undefined, refuse)
   perms.attach(sess as unknown as Session, profile)
   let nextId = 1
   const page = () => ({ id: nextId++, session: sess }) as unknown as WebContents
@@ -405,4 +405,26 @@ test('pages in tabs are asked in the window, and dismissing refuses once without
   // A page outside tabs gets the dialog.
   assert.equal(await request(outside, 'geolocation', { requestingUrl: 'https://maps.example/' }), true)
   assert.equal(dialogs.length, 1)
+})
+
+test('a page loaded ahead gets nothing, not even what its site was allowed', async (t) => {
+  answer(t, true)
+  let hidden: WebContents | null = null
+  const refused: unknown[] = []
+  const { request, check, page, wc } = setup(undefined, (x) => {
+    if (x !== hidden || !x) return false
+    refused.push(x)
+    return true
+  })
+  // Allowed and remembered for the site, from a page you were on.
+  assert.equal(await request('media', { requestingUrl: 'https://meet.example/', mediaTypes: ['audio'] }, wc), true)
+  assert.equal(await request('notifications', { requestingUrl: 'https://meet.example/' }, wc), true)
+  // The same site, loading ahead: neither the saved grant nor an always-granted one applies.
+  hidden = page()
+  assert.equal(await request('media', { requestingUrl: 'https://meet.example/', mediaTypes: ['audio'] }, hidden), false)
+  assert.equal(await request('fullscreen', { requestingUrl: 'https://meet.example/' }, hidden), false)
+  assert.equal(refused.length, 2)
+  // Pages you're on still have what you allowed.
+  assert.equal(await request('media', { requestingUrl: 'https://meet.example/', mediaTypes: ['audio'] }, wc), true)
+  assert.equal(check('notifications', 'https://meet.example'), true)
 })

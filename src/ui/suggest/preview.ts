@@ -264,6 +264,7 @@ export function previewLayout(host?: LayoutHost): SuggestLayout & { selection():
       site = reply
       return true
     },
+    highlighted: selected,
     selection: () => ({ zone, at, tool: TOOLS[tool] }),
   }
 }

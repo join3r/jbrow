@@ -136,6 +136,7 @@ export function columnsLayout(): SuggestLayout & { selection(): { zone: Zone; at
       const item = sectionItems(m, el.dataset.zone as Section)[Number(el.dataset.i)]
       return item ? { do: 'pick', item } : none
     },
+    highlighted: selected,
     selection: () => ({ zone, at }),
   }
 }

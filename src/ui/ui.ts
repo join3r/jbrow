@@ -953,6 +953,28 @@ function renderPins(pinned: ThreadView<UiTab>[], numbered: Map<string, number>) 
   layoutPins()
 }
 
+/**
+ * A tab under the pointer in the sidebar may be clicked next. One without its page (asleep, kept,
+ * not opened since launch) would load cold, so once the pointer rests on it, main connects ahead
+ * to its site. Main does nothing for a tab that has its page.
+ */
+let hoverTimer: ReturnType<typeof setTimeout> | undefined
+let hovered: string | undefined
+function preconnectHovered(e: MouseEvent) {
+  const id = (e.target as HTMLElement).closest<HTMLElement>('.row[data-target], .pin-tile[data-target]')?.dataset.target
+  if (id === hovered) return
+  hovered = id
+  clearTimeout(hoverTimer)
+  if (id) hoverTimer = setTimeout(() => send('preconnect', { tab: id }), 100)
+}
+for (const el of [pinsEl, threadsEl]) {
+  el.addEventListener('mouseover', preconnectHovered)
+  el.addEventListener('mouseleave', () => {
+    hovered = undefined
+    clearTimeout(hoverTimer)
+  })
+}
+
 pinsEl.addEventListener('click', (e) => {
   const mute = (e.target as HTMLElement).closest<HTMLElement>('[data-mute]')
   if (mute) return toggleMute(mute.dataset.mute!)
@@ -1295,8 +1317,30 @@ function showSuggestions() {
   const l = suggestLayout()
   suggest.dataset.layout = layoutId!
   l.render(suggest, model)
+  preconnectHighlighted()
   suggest.hidden = false
   syncOverlay()
+}
+/** The suggestion last connected ahead to, so a render that leaves the selection alone doesn't ask again. */
+let preconnected = ''
+let preconnectTimer: ReturnType<typeof setTimeout> | undefined
+/**
+ * Connects ahead to the site of the highlighted suggestion, once the selection rests on it a
+ * moment, so arrowing through the list doesn't connect to each. An open tab asks by ID, and main
+ * leaves it alone if it has its page. Main also leaves out private addresses.
+ */
+function preconnectHighlighted() {
+  const item = model && layout?.highlighted(model)
+  const key = item ? `${item.key} ${typedIn() ?? ''}` : ''
+  if (key === preconnected) return
+  preconnected = key
+  clearTimeout(preconnectTimer)
+  if (!item) return
+  const profile = typedIn()
+  preconnectTimer = setTimeout(() => {
+    if (item.kind === 'tab') send('preconnect', { tab: item.id })
+    else if (item.kind !== 'archived') send('preconnect', { url: item.url, profile })
+  }, 80)
 }
 function hideSuggestions() {
   suggest.hidden = true
@@ -1424,7 +1468,10 @@ function pick(item: Item | null, open?: OpenIn) {
 }
 /** Acts on what the layout made of a key or a click. */
 function suggestOutcome(out: Outcome) {
-  if (out.do === 'moved' && model) layout?.render(suggest, model)
+  if (out.do === 'moved' && model) {
+    layout?.render(suggest, model)
+    preconnectHighlighted()
+  }
   else if (out.do === 'pick') pick(out.item, out.open)
   else if (out.do === 'forget') forgetVisit(out.item)
   else if (out.do === 'copy') {
@@ -1453,6 +1500,8 @@ omnibox.addEventListener('focus', (e) => {
   suggestLayout().reset()
   requestSuggestions()
   showSuggestions()
+  // Most of what's typed and not completed is a search: the connection is ready by the time it's sent.
+  if (S) send('preconnect', { url: S.prefs.searchUrl, profile: typedIn() })
 })
 omnibox.addEventListener('input', (e) => {
   const ie = e as InputEvent
@@ -2993,6 +3042,8 @@ $('clearData').addEventListener('click', () =>
 
 const searchCustom = $<HTMLInputElement>('searchCustom')
 const searchSuggestionsBox = $<HTMLInputElement>('searchSuggestions')
+const preconnectBox = $<HTMLInputElement>('preconnect')
+const prerenderBox = $<HTMLInputElement>('prerender')
 /** Custom was picked but no address saved yet, so the field shows even though the engine is still a listed one. */
 let searchCustomOpen = false
 
@@ -3008,6 +3059,8 @@ function renderSearchEngine(all: boolean) {
   $('searchCustomField').hidden = !custom
   if (all || document.activeElement !== searchCustom) searchCustom.value = engine ? '' : url
   searchSuggestionsBox.checked = S.prefs.searchSuggestions
+  preconnectBox.checked = S.prefs.preconnect
+  prerenderBox.checked = S.prefs.prerender
   const suggests = !!suggestUrlFor(url)
   $('searchEngineName').textContent = engine?.name ?? (suggests ? 'that site' : 'the search engine')
   searchSuggestionsBox.disabled = !suggests
@@ -3033,6 +3086,8 @@ searchCustom.addEventListener('change', () => {
   sendPrefs({ searchUrl: url })
 })
 searchSuggestionsBox.addEventListener('change', () => sendPrefs({ searchSuggestions: searchSuggestionsBox.checked }))
+preconnectBox.addEventListener('change', () => sendPrefs({ preconnect: preconnectBox.checked }))
+prerenderBox.addEventListener('change', () => sendPrefs({ prerender: prerenderBox.checked }))
 
 /** The address bar's layouts as pictures to pick from. */
 function renderUrlBarStyle() {

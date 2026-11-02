@@ -10,6 +10,7 @@ import { MAX_PANES, paneSpans, splitOf } from '../shared/split'
 import { byOrder, createdBeside, flatten, isAsleep, isInFolder, isRoot, parentFolder, samePage, subtree, threadsOf } from '../shared/threads'
 import type { CrashView, DeviceMode, Folder, ImportedNode, ImportedPage, KeepLoaded, Profile, Split, TabRecord, UiTab } from '../shared/types'
 import type { Certificates } from './certs'
+import type { Ahead, Base } from './prerender'
 import type { DangerousSites } from './dangerous'
 import { deviceBounds, deviceUserAgent, emulate } from './device'
 import type { DeviceChooser } from './devices'
@@ -91,6 +92,20 @@ export interface TabsDeps {
   extensionInUse: () => boolean
   /** layout() put the pages where they now are; what floats over them follows. */
   onLayout: () => void
+  /** The page loaded ahead for `url` (see prerender.ts), if there's one for this tab as it is. */
+  prerendered?: (url: string, base: Base) => Ahead | null
+}
+
+/**
+ * Whether a key going to a page writes something: a character, or Backspace or Delete. Shortcuts
+ * (⌘L to the address bar, ⌃Tab) and moving around (arrows, Tab, Page Down) don't.
+ */
+function typing(input: Electron.InputEvent): boolean {
+  if (input.modifiers?.some((m) => m === 'meta' || m === 'control' || m === 'ctrl' || m === 'cmd' || m === 'command')) return false
+  if (input.type === 'char') return true
+  if (input.type !== 'keyDown' && input.type !== 'rawKeyDown') return false
+  const key = (input as { key?: string }).key ?? ''
+  return [...key].length === 1 || key === 'Backspace' || key === 'Delete'
 }
 
 /** What a page asking to stay would be left for: another page, the same one again, or nothing. */
@@ -242,6 +257,11 @@ export class Tabs {
   private sentAt = new Map<string, number>()
   /** Tabs that fell back to http, with the https address whose error page is left in their history. */
   private fellBack = new Map<string, string>()
+  /**
+   * Tabs whose page you've typed into since it loaded. A page loaded ahead never stands in for
+   * one: it may hold what you typed and want to ask before it goes, which only leaving it can do.
+   */
+  private typedInto = new Set<string>()
 
   /** How far above (less than 0) or below its place the shown page is while it slides in. */
   private slideY = 0
@@ -395,6 +415,10 @@ export class Tabs {
   active() {
     return this.get(this.activeId)
   }
+  /** Whether the tab has its page, rather than being asleep, archived or not opened since launch. */
+  isLoaded(id: string) {
+    return this.live.has(id)
+  }
   activeWebContents(): WebContents | null {
     const live = this.activeId ? this.live.get(this.activeId) : undefined
     return live && !live.wc.isDestroyed() ? live.wc : null
@@ -529,7 +553,7 @@ export class Tabs {
     return this.create(opts)
   }
 
-  private ensureView(rec: TabRecord, guest?: WebContents): LiveTab | undefined {
+  private ensureView(rec: TabRecord, guest?: WebContents, adopted?: WebContentsView): LiveTab | undefined {
     const existing = this.live.get(rec.id)
     if (existing) return existing
     const rt = this.deps.runtime(rec.profile)
@@ -537,9 +561,11 @@ export class Tabs {
       console.error(`[tabs] no profile "${rec.profile}" for tab ${rec.id}`)
       return undefined
     }
-    const view = guest
-      ? new WebContentsView({ webContents: guest })
-      : new WebContentsView({ webPreferences: { session: rt.session, sandbox: true, contextIsolation: true } })
+    const view =
+      adopted ??
+      (guest
+        ? new WebContentsView({ webContents: guest })
+        : new WebContentsView({ webPreferences: { session: rt.session, sandbox: true, contextIsolation: true } }))
     view.setVisible(false)
     // A tab opened in the background is laid out at the page area's size, as in Chrome, not at
     // 0×0 until it's first shown: its page measures a real viewport, and a debugger can capture it.
@@ -548,7 +574,7 @@ export class Tabs {
     const win = this.deps.window()
     win.contentView.addChildView(view)
     this.deps.onViewAdded()
-    const live: LiveTab = { view, wc: view.webContents, loading: false, waiting: !guest }
+    const live: LiveTab = { view, wc: view.webContents, loading: false, waiting: !guest && !adopted }
     this.live.set(rec.id, live)
     this.wire(rec.id, view.webContents, rt)
     this.colors.watch(rec.id, view.webContents)
@@ -562,7 +588,7 @@ export class Tabs {
       this.addingView = false
     }
     const history = this.histories.get(rec.id)
-    if (guest) return live
+    if (guest || adopted) return live
     // A tab that was asleep or archived comes back where it was, with back and forward. One you
     // just typed an address into goes there after, so that address is one step further.
     // A tab put to sleep as a tablet or phone wakes as one.
@@ -630,6 +656,7 @@ export class Tabs {
       this.saveHistory()
     }
     wc.on('did-navigate', (e, url) => {
+      if (this.live.get(id)?.wc === wc) this.typedInto.delete(id)
       // The site answered, over https or after falling back: nothing left to wait for.
       this.clearUpgrade(id)
       this.dropFailedUpgrade(id, wc, url)
@@ -725,6 +752,7 @@ export class Tabs {
     wc.on('dom-ready', () => this.stopWaiting(id))
     wc.on('input-event', (_e, input) => {
       if (input.type === 'mouseDown' || input.type === 'rawKeyDown' || input.type === 'keyDown' || input.type === 'gestureTap') this.deps.onPageInput(id)
+      if (typing(input) && this.live.get(id)?.wc === wc) this.typedInto.add(id)
     })
     wc.on('before-input-event', (event, input) => {
       // Esc leaves fullscreen, as in Chrome; the page doesn't get it.
@@ -1134,6 +1162,9 @@ export class Tabs {
     const url = toUrl(input, this.deps.searchUrl(), search)
     const rec = this.active()
     if (!rec) return
+    const base = this.prerenderBase(rec.id)
+    const ahead = base && this.deps.prerendered?.(url, base)
+    if (ahead) return this.adopt(rec, ahead)
     rec.url = url
     this.clearUpgrade(rec.id)
     const text = input.trim()
@@ -1152,6 +1183,53 @@ export class Tabs {
     // The same address again loads it again, as in Chrome: it may have failed (offline) the first time.
     else live.wc.reload()
     this.activate(rec.id)
+  }
+
+  /**
+   * Where a page loaded ahead for the tab would go (see prerender.ts): its profile and its back list
+   * up to its current page. Null when one can't stand in for the tab's own: you typed into its page,
+   * it's restoring, crashed, closing, fullscreen or showing as a tablet or phone.
+   */
+  prerenderBase(id: string): Base | null {
+    const rec = this.get(id)
+    if (!rec || this.typedInto.has(id) || this.restoring.has(id) || this.crashed.has(id) || this.closing.has(id) || this.fullscreenId === id) return null
+    if (this.deviceMode(id) !== 'desktop') return null
+    const history = this.historyOf(id)
+    return { tab: id, profile: rec.profile, entries: history ? history.entries.slice(0, history.index + 1) : [] }
+  }
+
+  /**
+   * Puts a page loaded ahead in place of the tab's own, as if the tab had gone there: it has the
+   * tab's back list already. Its arrival happened before the tab listened, so it's told here.
+   */
+  private adopt(rec: TabRecord, ahead: Ahead) {
+    this.clearUpgrade(rec.id)
+    this.dropView(rec)
+    // dropView kept the old page's back list for a view made later; this one has it already.
+    this.histories.delete(rec.id)
+    const live = this.ensureView(rec, undefined, ahead.view)
+    if (!live) return
+    const wc = live.wc
+    ahead.view.setVisible(false)
+    // A hidden page stays asleep until macOS says it's on screen, up to a second after it's shown
+    // (see Panel.wakePage). Unthrottled, it draws from the first frame.
+    wc.setBackgroundThrottling(false)
+    setTimeout(() => !wc.isDestroyed() && wc.setBackgroundThrottling(true), 1500)
+    const url = wc.getURL()
+    rec.url = url
+    rec.title = wc.getTitle() || rec.title
+    if (ahead.favicon) rec.favicon = faviconUrl(rec.profile, ahead.favicon)
+    if (rec.kept && !rec.home) this.setHome(rec)
+    if (wc.isLoading()) this.setLoading(rec.id, true)
+    this.deps.onVisit(rec.profile, url, rec.id)
+    if (rec.title) this.deps.onTitle(rec.profile, url, rec.title)
+    this.deps.logins.loaded(rec.id)
+    this.deps.onNavigate(wc)
+    this.saveHistory()
+    this.activate(rec.id)
+    this.deps.runtime(rec.profile)?.extensions.selectTab(wc)
+    this.layout()
+    this.changed()
   }
 
   /** A tab's page started a load: the https one an upgrade waits on, or something else instead. */
@@ -1314,6 +1392,7 @@ export class Tabs {
   private dropView(rec: TabRecord) {
     const live = this.live.get(rec.id)
     if (!live) return
+    this.typedInto.delete(rec.id)
     this.captureHistory(rec.id)
     this.deps.window().contentView.removeChildView(live.view)
     this.live.delete(rec.id)

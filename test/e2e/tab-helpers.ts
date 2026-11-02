@@ -6,6 +6,8 @@ import { waitFor, type Jbrow, type TestServer } from './harness'
 export const offline = (web: TestServer) => ({
   dangerousSites: false,
   searchSuggestions: false,
+  preconnect: false,
+  prerender: false,
   searchUrl: `${web.url}/search?q=%s`,
 })
 

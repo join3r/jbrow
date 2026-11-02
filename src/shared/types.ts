@@ -256,6 +256,10 @@ export interface Prefs {
   searchUrl: string
   /** Ask the search engine for suggestions while you type in the address bar. */
   searchSuggestions: boolean
+  /** Connect to sites ahead of time when you're likely to go there. */
+  preconnect: boolean
+  /** Load the site the address bar completes to from your history while you type. */
+  prerender: boolean
   /** How the address bar lays out its suggestions (see URL_BAR_STYLES). */
   urlBarStyle: UrlBarStyle
   /** Check for, download and install new releases on its own. */
