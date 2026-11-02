@@ -44,6 +44,8 @@ export interface PrerenderDeps {
   siteProfile: (url: string) => string | undefined
   /** A certificate you told jbrow to trust for the site. */
   trusted: (profile: string, url: string, certificate: Certificate) => boolean
+  /** The hidden page took the keyboard, which it must not: hand it back. */
+  refocus: () => void
 }
 
 /** What Return gets: the page, and its favicon, which it reported before any tab listened. */
@@ -58,6 +60,8 @@ interface Hidden {
   view: WebContentsView
   favicon?: string
   bornAt: number
+  /** Gives focus back when the hidden page takes it; the tab that adopts the page has its own. */
+  onFocus: () => void
 }
 
 /** A back list as a string, to tell whether the tab moved on since its page started loading ahead. */
@@ -133,6 +137,7 @@ export class Prerenderer {
     const wc = h.view.webContents
     wc.removeAllListeners('certificate-error')
     wc.removeAllListeners('login')
+    wc.removeListener('focus', h.onFocus)
     wc.setAudioMuted(false)
     // The tab sets its own (see Tabs.wire).
     wc.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -182,11 +187,13 @@ export class Prerenderer {
     view.setBorderRadius(9)
     win.contentView.addChildView(view)
     this.deps.onViewAdded()
-    const h: Hidden = { base, url, view, bornAt: Date.now() }
+    const h: Hidden = { base, url, view, bornAt: Date.now(), onFocus: () => this.hidden === h && this.deps.refocus() }
     this.hidden = h
     this.dropTimer = setTimeout(() => this.drop(), KEEP_MS)
     const wc = view.webContents
     wc.setAudioMuted(true)
+    // Hidden, it must never have the keyboard: it was taken from the address bar you're typing in.
+    wc.on('focus', h.onFocus)
     this.watch(h, wc)
     const load = () => wc.loadURL(url).catch(() => {})
     if (!base.entries.length) return void load()

@@ -91,6 +91,32 @@ test('typing a site from your history loads it ahead, and Return shows that page
   await jb.waitForState((s) => s.nav.canGoForward, 'forward to alpha.test')
 })
 
+test('the page loading ahead leaves the keyboard with the address bar', async () => {
+  const ui = await jb.ui()
+  // In a tab with a page (its back list restored) and in a new tab (an address loaded).
+  for (const fresh of [false, true]) {
+    if (fresh) {
+      await jb.send('new')
+      await jb.waitForState((s) => !activeTab(s)?.url, 'a new tab')
+    }
+    await focusOmnibox(ui)
+    const s = await jb.state()
+    await ui.type('alph')
+    await waitFor(hiddenAlpha, 'a hidden page for alpha.test')
+    // A new page takes the keyboard as it starts up, and the keys you type go to it. The UI's own
+    // document.hasFocus() stays true then, so ask the hidden page.
+    await sleep(1000)
+    const hidden = await jb.page((t) => t.url === `${alphaUrl}/` && t.url !== activeTab(s)?.url)
+    assert.equal(await hidden.eval('document.hasFocus()'), false, fresh ? 'new tab' : 'tab with a page')
+    hidden.close()
+    assert.equal(await focusedId(ui), 'omnibox')
+    await ui.eval('omnibox.blur()')
+    await waitFor(async () => !(await hiddenAlpha()), 'no page loaded ahead', 6000)
+  }
+  await jb.send('close-tab')
+  await jb.navigate(`${web.url}/`)
+})
+
 test('closing the address bar without Return drops the page loaded ahead', async () => {
   const ui = await jb.ui()
   await focusOmnibox(ui)

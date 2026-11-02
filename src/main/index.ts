@@ -92,6 +92,7 @@ const prerender = new Prerenderer({
   dangerous: (profile, url) => !!dangerous.listed(profile, url),
   siteProfile: (url) => siteProfile(url),
   trusted: (profile, url, certificate) => certs.trusted(profile, url, certificate),
+  refocus: () => refocusStray(),
 })
 let dangerous: DangerousSites
 let logins: Logins
@@ -502,6 +503,19 @@ function focusActive() {
   if (rec && wc && tabs.covered(rec.id)) panel.ui.focus()
   else if (wc && rec?.url) wc.focus()
   else focusAddressBar()
+}
+
+/** You're typing in the address bar: from the first suggestions it asks for until it closes. */
+let typingInBar = false
+
+/**
+ * A page that isn't on screen took the keyboard: a tab opened in the background or the page
+ * loading ahead, as it starts up. It goes back to the address bar if you're typing there, as
+ * leaving the bar even for a moment closes it and drops what you typed; otherwise to what's in front.
+ */
+function refocusStray() {
+  if (typingInBar && panel.visible && !panel.win.isDestroyed()) return void panel.ui.focus()
+  focusActive()
 }
 
 function sendDownloads() {
@@ -1741,6 +1755,7 @@ function suggest({ input, profile, seq }: { input: string; profile?: string; seq
     completion: visited ?? topSiteCompletion(input, isPrivate),
   }
   panel.ui.send('suggestions', reply)
+  typingInBar = true
   // Typing "git" connects to github.com before you press Return.
   if (reply.completion) preconnect.to(p, reply.completion.url)
   // A site from your own history loads ahead once typing pauses; popular sites you haven't been to don't.
@@ -2482,6 +2497,7 @@ function wireIpc() {
   })
   on<{ input: string; profile?: string; seq: number }>('suggest', (request) => suggest(request))
   on('suggest-cancel', () => {
+    typingInBar = false
     cancelSearchSuggestions()
     prerender.barClosed()
   })
@@ -2934,6 +2950,8 @@ app.whenReady().then(async () => {
     if (onKey(input)) event.preventDefault()
   })
   app.on('web-contents-created', (_e, wc) => {
+    // Who has the keyboard, for chasing something that takes it.
+    if (process.env.JBROW_DEBUG) wc.on('focus', () => console.log('[focus]', wc.getType(), wc === panel.ui ? 'jbrow UI' : wc.getURL(), prerender.owns(wc) ? '(loading ahead)' : ''))
     if (wc.getType() !== 'window') return
     wc.on('before-input-event', (event, input) => {
       if (onWindowKey(wc, input)) event.preventDefault()
@@ -3030,7 +3048,7 @@ app.whenReady().then(async () => {
       focusActive()
       tabSwitched()
     },
-    refocus: focusActive,
+    refocus: refocusStray,
     onKey,
     searchUrl: () => settings.searchUrl,
     permissions,
