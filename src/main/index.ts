@@ -498,6 +498,8 @@ function focusAddressBar() {
  */
 function focusActive() {
   if (!panel.visible || panel.win.isDestroyed()) return
+  // jbrow handing the keyboard on means you're done in the address bar, even before it says so.
+  typingInBar = false
   const wc = tabs.activeWebContents()
   const rec = tabs.active()
   if (rec && wc && tabs.covered(rec.id)) panel.ui.focus()
@@ -516,6 +518,26 @@ let typingInBar = false
 function refocusStray() {
   if (typingInBar && panel.visible && !panel.win.isDestroyed()) return void panel.ui.focus()
   focusActive()
+}
+
+/** When each page last had a mouse button pressed in it: clicking a page is how you mean to give it the keyboard. */
+const pressedAt = new WeakMap<Electron.WebContents, number>()
+
+/**
+ * Any page jbrow puts up takes the keyboard as it starts: a permission prompt, a sign-in sheet,
+ * a side panel, a device chooser, a page loading ahead. While you type in the address bar, the
+ * keys you go on typing would land there, so the bar gets it straight back unless you clicked the page.
+ */
+function guardAddressBar(wc: Electron.WebContents) {
+  wc.on('before-mouse-event', (_e, mouse) => {
+    if (mouse.type === 'mouseDown') pressedAt.set(wc, Date.now())
+  })
+  wc.on('focus', () => {
+    if (!typingInBar || wc === panel.ui || !panel.visible || panel.win.isDestroyed()) return
+    if (Date.now() - (pressedAt.get(wc) ?? 0) < 1000) return
+    if (process.env.JBROW_DEBUG) console.log('[focus] back to the address bar from', wc.getURL())
+    panel.ui.focus()
+  })
 }
 
 function sendDownloads() {
@@ -2952,6 +2974,7 @@ app.whenReady().then(async () => {
   app.on('web-contents-created', (_e, wc) => {
     // Who has the keyboard, for chasing something that takes it.
     if (process.env.JBROW_DEBUG) wc.on('focus', () => console.log('[focus]', wc.getType(), wc === panel.ui ? 'jbrow UI' : wc.getURL(), prerender.owns(wc) ? '(loading ahead)' : ''))
+    guardAddressBar(wc)
     if (wc.getType() !== 'window') return
     wc.on('before-input-event', (event, input) => {
       if (onWindowKey(wc, input)) event.preventDefault()
@@ -2964,7 +2987,7 @@ app.whenReady().then(async () => {
     float: (view, on) => panel.floatView(view, on),
     theme: () => settings.theme,
     onKey: (input) => onKey(input),
-    refocus: () => focusActive(),
+    refocus: () => refocusStray(),
   })
   // The profile is named only when there's more than one, as in the address bar.
   permissions = new SitePermissions(
@@ -3024,7 +3047,7 @@ app.whenReady().then(async () => {
     onChange: (tabId) => {
       pushState()
       // The chooser takes the keyboard while it's open; once it's answered, the page gets it back.
-      if (tabId === tabs.activeId && !devices.view(tabId)) focusActive()
+      if (tabId === tabs.activeId && !devices.view(tabId)) refocusStray()
     },
   })
   tabs = new Tabs({
