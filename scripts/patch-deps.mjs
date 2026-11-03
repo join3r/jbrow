@@ -17,6 +17,8 @@ const patches = [
   {
     file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
     why: 'native messaging: buffer stdout so messages split across chunks, or several in one chunk, still parse',
+    // A later patch inserts a line into this one's output, so its replace never matches whole again
+    applied: `      this.inbox = this.inbox ? Buffer.concat([this.inbox, data]) : data;`,
     find: `    this.receive = (data) => {
       const length = data.readUInt32LE(0);
       const message = JSON.parse(data.subarray(4, 4 + length).toString());
@@ -228,6 +230,8 @@ const patches = [
   {
     file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
     why: "native messaging: an open host keeps the service worker that opened it running, as in Chrome, and ends when its extension unloads. Electron stopped the worker after 30 idle seconds, the patch above then ended its host, and nothing woke the worker again, so Stem lost the browser for good. A worker kept running never reports stopped, even after a reload, hence the unload",
+    // Later patches change lines of this one's output, so its replace never matches whole again
+    applied: `/* jbrow: an open host keeps its service worker running, see scripts/patch-deps.mjs */`,
     find: `      const destroy = host.destroy.bind(host);
       host.destroy = () => {`,
     replace: `      /* jbrow: an open host keeps its service worker running, see scripts/patch-deps.mjs */
@@ -411,6 +415,140 @@ const patches = [
   void updateExtensions(session);`,
     replace: `  lastUpdateCheck = Date.now();
   updateExtensions(session).catch((error) => console.warn("[extensions] update check failed:", error?.cause?.code ?? error?.message ?? error));`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'native messaging: report what goes through a host (src/main/native-watch.ts). On 2026-11-03 Stem\'s worker in the Personal profile went quiet while its host stayed connected, and no log said why',
+    find: `        d7("receive: %s", message);
+        if (this.keepAlive && this.sender) {`,
+    replace: `        d7("receive: %s", message);
+        /* jbrow: native host traffic is watched, see scripts/patch-deps.mjs */
+        this.onTraffic?.("in", message);
+        if (this.keepAlive && this.sender) {`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'native messaging: report what the extension sends its host (see the patch above)',
+    find: `  send(json) {
+    d7("send", json);`,
+    replace: `  send(json) {
+    d7("send", json);
+    /* jbrow: native host traffic is watched, see scripts/patch-deps.mjs */
+    this.onTraffic?.("out", json);`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'native messaging: report when a host starts and how it ends (see the patches above)',
+    find: `    this.process.on("exit", (code) => {
+      d7("exited %d", code);
+      this.destroy();
+    });
+    this.connected = true;`,
+    replace: `    this.process.on("exit", (code, signal) => {
+      d7("exited %d", code);
+      /* jbrow: native host traffic is watched, see scripts/patch-deps.mjs */
+      this.onTraffic?.("exit", { code, signal });
+      this.destroy();
+    });
+    this.connected = true;
+    this.onTraffic?.("spawn", { pid: this.process.pid });`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'native messaging: tell jbrow when a host opens and closes, and why it closed (see the patches above)',
+    find: `      const workers = this.ctx.session.serviceWorkers;
+      const gone = () => {
+        try {`,
+    replace: `      const workers = this.ctx.session.serviceWorkers;
+      /* jbrow: native host traffic is watched, see scripts/patch-deps.mjs */
+      const info = {
+        extensionId: event.extension.id,
+        connectionId,
+        application,
+        opener: event.type,
+        versionId: event.type === "frame" ? void 0 : sender.versionId
+      };
+      let closeReason = "the extension disconnected";
+      let closed = false;
+      host.onTraffic = (kind, data) => {
+        if (kind === "exit") closeReason = data.signal ? \`the host was killed (\${data.signal})\` : \`the host exited (code \${data.code})\`;
+        if (kind === "fail") closeReason = \`the host could not start: \${data.reason}\`;
+        this.ctx.emit("jbrow-native-host", { kind, ...info, data });
+      };
+      this.ctx.emit("jbrow-native-host", { kind: "open", ...info });
+      const gone = (reason) => {
+        if (typeof reason === "string") closeReason = reason;
+        try {`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'native messaging: name why a host closed (see the patches above)',
+    find: `        if (versionId === sender.versionId && runningStatus === "stopped") gone();
+      };
+      if (event.type === "frame") sender.once("destroyed", gone);`,
+    replace: `        if (versionId === sender.versionId && runningStatus === "stopped") gone("its service worker stopped");
+      };
+      const pageGone = () => gone("its page closed");
+      if (event.type === "frame") sender.once("destroyed", pageGone);`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'native messaging: name why a host closed (see the patches above)',
+    find: `        if (extension.id === event.extension.id) gone();`,
+    replace: `        if (extension.id === event.extension.id) gone("the extension unloaded");`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'native messaging: report a closed host once (see the patches above)',
+    find: `        task?.end();
+        task = undefined;
+        if (event.type === "frame") sender.off("destroyed", gone);`,
+    replace: `        task?.end();
+        task = undefined;
+        if (!closed) {
+          closed = true;
+          this.ctx.emit("jbrow-native-host", { kind: "close", ...info, data: { reason: closeReason } });
+        }
+        if (event.type === "frame") sender.off("destroyed", pageGone);`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'native messaging: say why a host could not start (see the patches above)',
+    find: `    if (!config) {
+      d7("launch: unable to find %s for %s", application, extensionId);
+      this.destroy();`,
+    replace: `    if (!config) {
+      d7("launch: unable to find %s for %s", application, extensionId);
+      /* jbrow: native host traffic is watched, see scripts/patch-deps.mjs */
+      this.onTraffic?.("fail", { reason: \`no manifest for \${application} was found\` });
+      this.destroy();`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'native messaging: say why a host could not start (see the patches above)',
+    find: `      d7("launch: %s not in allowed origins", extensionId);
+      this.destroy();`,
+    replace: `      d7("launch: %s not in allowed origins", extensionId);
+      this.onTraffic?.("fail", { reason: \`\${extensionUrl} is not in its allowed_origins\` });
+      this.destroy();`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'native messaging: say why a host could not start (see the patches above)',
+    find: `    if (!isFile) {
+      this.destroy();`,
+    replace: `    if (!isFile) {
+      this.onTraffic?.("fail", { reason: \`its program \${config.path} is not a file\` });
+      this.destroy();`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: 'native messaging: say why a host could not start (see the patches above)',
+    find: `      d7("error: %s", err);
+      this.destroy();`,
+    replace: `      d7("error: %s", err);
+      this.onTraffic?.("fail", { reason: \`its program failed: \${err?.message ?? err}\` });
+      this.destroy();`,
   },
 ]
 

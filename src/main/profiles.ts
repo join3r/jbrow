@@ -8,6 +8,7 @@ import { installedFolders } from './extension-files'
 import { trackInstalls } from './installed'
 import type { DeviceChooser } from './devices'
 import { writeJbrowExtension } from './jbrow-extension'
+import { watchNativeHosts } from './native-watch'
 import type { SitePermissions } from './permissions'
 import type { Settings } from './settings'
 
@@ -114,6 +115,8 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
   const extensionsPath = path.join(app.getPath('userData'), 'Extensions', profile.id)
   const rt: ProfileRuntime = { profile, partition, session: sess, extensions, extensionsPath }
   attach(rt)
+  // Logs native hosts (Stem's browser control) and the workers holding them; see native-watch.ts.
+  watchNativeHosts(profile.id, sess, extensions)
   if (!process.env.JBROW_NO_SHIMS) shimContentScripts(sess, extensionsPath)
   await installChromeWebStore({
     session: sess,

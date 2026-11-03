@@ -26,6 +26,7 @@ import { FindInPage } from './find'
 import { frontmostApp, type FrontApp } from './frontmost'
 import { contextOf } from './window-context'
 import { ExtensionDebugger } from './debugger'
+import { forgetNativeWatch } from './native-watch'
 import { libraryOf } from './library'
 import { IdleWatcher } from './idle'
 import { secondsSinceInput } from './input'
@@ -2063,6 +2064,7 @@ async function deleteProfile(id: string) {
   sidePanels.forgetProfile(id)
   idle.forgetProfile(id)
   extensionDebugger.forgetProfile(id)
+  forgetNativeWatch(id)
   userScripts.forgetProfile(id)
   visits.clear(id)
   historyLog.clear(id)
