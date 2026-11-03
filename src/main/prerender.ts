@@ -1,4 +1,4 @@
-import { WebContentsView, type BrowserWindow, type Certificate, type NavigationEntry, type Rectangle, type Session, type WebContents } from 'electron'
+import { WebContentsView, type Certificate, type NavigationEntry, type Rectangle, type Session, type WebContents } from 'electron'
 
 /**
  * Loads the site the address bar completes to from your history in a hidden page while you type,
@@ -10,16 +10,23 @@ import { WebContentsView, type BrowserWindow, type Certificate, type NavigationE
  * as a sleeping tab wakes), so Back after Return goes where it would have. If the tab moved on in
  * the meantime, Return loads the usual way.
  *
- * Until Return the page is muted, opens no windows and isn't in the history. Anything that would
- * need you drops it instead of waiting, and Return then loads the usual way: a permission, a
- * download, a sign-in, a certificate jbrow doesn't trust, a phishing warning, a failed load, or a
- * redirect to a site that opens in another profile. Private addresses are never loaded ahead.
+ * Until Return the page is muted, opens no windows, isn't in the history and isn't on the window
+ * at all: Electron gives a page on a window the keyboard each time it navigates, hidden or not,
+ * which took it from the address bar you were typing in. Anything that would need you drops it
+ * instead of waiting, and Return then loads the usual way: a permission, a download, a sign-in, a
+ * dialog, a certificate jbrow doesn't trust, a phishing warning, a failed load, or a redirect to a
+ * site that opens in another profile. Private addresses are never loaded ahead.
  */
 
 /** How long typing has to pause on a completion before its site loads. */
 export const WAIT_MS = 300
 /** A page loaded ahead and not wanted in this long goes. */
 export const KEEP_MS = 60_000
+/**
+ * Electron's own event for alert() and confirm(), which it answers with a message box. Not public
+ * API: a page off the window has no window to show it on, and a box of its own would stop jbrow.
+ */
+const RUN_DIALOG = '-run-dialog'
 /** How long after the address bar closes the page waits for the Return that may have closed it. */
 export const CLOSE_GRACE_MS = 3000
 
@@ -34,9 +41,7 @@ export interface Base {
 export interface PrerenderDeps {
   enabled: () => boolean
   session: (profile: string) => Session | undefined
-  window: () => BrowserWindow
   bounds: () => Rectangle
-  onViewAdded: () => void
   isPrivate: (url: string) => boolean
   /** Whether jbrow would stop at a phishing or malware warning. */
   dangerous: (profile: string, url: string) => boolean
@@ -44,8 +49,6 @@ export interface PrerenderDeps {
   siteProfile: (url: string) => string | undefined
   /** A certificate you told jbrow to trust for the site. */
   trusted: (profile: string, url: string, certificate: Certificate) => boolean
-  /** The hidden page took the keyboard, which it must not: hand it back. */
-  refocus: () => void
 }
 
 /** What Return gets: the page, and its favicon, which it reported before any tab listened. */
@@ -60,8 +63,8 @@ interface Hidden {
   view: WebContentsView
   favicon?: string
   bornAt: number
-  /** Gives focus back when the hidden page takes it; the tab that adopts the page has its own. */
-  onFocus: () => void
+  /** Electron's listeners for dialogs, put back on Return (see RUN_DIALOG). */
+  dialogs: Function[]
 }
 
 /** A back list as a string, to tell whether the tab moved on since its page started loading ahead. */
@@ -137,7 +140,9 @@ export class Prerenderer {
     const wc = h.view.webContents
     wc.removeAllListeners('certificate-error')
     wc.removeAllListeners('login')
-    wc.removeListener('focus', h.onFocus)
+    const events = wc as NodeJS.EventEmitter
+    events.removeAllListeners(RUN_DIALOG)
+    for (const fn of h.dialogs) events.on(RUN_DIALOG, fn as (...args: unknown[]) => void)
     wc.setAudioMuted(false)
     // The tab sets its own (see Tabs.wire).
     wc.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -163,8 +168,6 @@ export class Prerenderer {
     this.clearDrop()
     if (!h) return
     if (why) console.log(`[prerender] dropped ${hostOf(h.url)}: ${why}`)
-    const win = this.deps.window()
-    if (!win.isDestroyed()) win.contentView.removeChildView(h.view)
     if (!h.view.webContents.isDestroyed()) h.view.webContents.close()
   }
 
@@ -178,22 +181,18 @@ export class Prerenderer {
   private start(base: Base, url: string) {
     this.drop()
     const sess = this.deps.session(base.profile)
-    const win = this.deps.window()
-    if (!sess || win.isDestroyed()) return
+    if (!sess) return
+    // Off the window until Return puts it in the tab (Tabs.ensureView), where it lays out at the
+    // page area's size all the same.
     const view = new WebContentsView({ webPreferences: { session: sess, sandbox: true, contextIsolation: true } })
     view.setVisible(false)
-    // At the page area's size, so the page lays out as it will be shown.
     view.setBounds(this.deps.bounds())
     view.setBorderRadius(9)
-    win.contentView.addChildView(view)
-    this.deps.onViewAdded()
-    const h: Hidden = { base, url, view, bornAt: Date.now(), onFocus: () => this.hidden === h && this.deps.refocus() }
+    const wc = view.webContents
+    const h: Hidden = { base, url, view, bornAt: Date.now(), dialogs: wc.listeners(RUN_DIALOG) }
     this.hidden = h
     this.dropTimer = setTimeout(() => this.drop(), KEEP_MS)
-    const wc = view.webContents
     wc.setAudioMuted(true)
-    // Hidden, it must never have the keyboard: it was taken from the address bar you're typing in.
-    wc.on('focus', h.onFocus)
     this.watch(h, wc)
     const load = () => wc.loadURL(url).catch(() => {})
     if (!base.entries.length) return void load()
@@ -239,6 +238,13 @@ export class Prerenderer {
       event.preventDefault()
       callback()
       gone('it asked to sign in')
+    })
+    // As if you'd pressed Cancel; it shows again after Return, when the page loads in the tab.
+    const events = wc as NodeJS.EventEmitter
+    events.removeAllListeners(RUN_DIALOG)
+    events.on(RUN_DIALOG, (_info: unknown, callback: (ok: boolean, text: string) => void) => {
+      callback(false, '')
+      gone('it opened a dialog')
     })
     wc.on('page-favicon-updated', (_e, favicons) => {
       if (favicons[0]) h.favicon = favicons[0]

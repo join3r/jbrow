@@ -8,6 +8,8 @@
 - Load ahead: while you type, the site the address bar completes to from your history loads in a
   hidden page, and Return shows it at once, with Back where it was. Never for private addresses or
   a page you've typed into; turn it off under Settings → Address bar.
+- The address bar keeps the keyboard and what you typed when a page navigates on its own, in front
+  or in a background tab, or a permission prompt comes up.
 - The mini player moves to another corner when you switch to a window it covers out of the box.
 - The welcome's Tabs step shows an old YouTube tab filing itself into the YouTube folder instead of
   archiving.

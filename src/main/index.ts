@@ -85,14 +85,11 @@ const preconnect = new Preconnector(
 const prerender = new Prerenderer({
   enabled: () => settings.prerender,
   session: (profile) => runtimes.get(profile)?.session,
-  window: () => panel.win,
   bounds: () => panel.contentBounds(),
-  onViewAdded: () => panel.keepOrder(),
   isPrivate: (url) => urlMatcher(settings.privateUrls)(url),
   dangerous: (profile, url) => !!dangerous.listed(profile, url),
   siteProfile: (url) => siteProfile(url),
   trusted: (profile, url, certificate) => certs.trusted(profile, url, certificate),
-  refocus: () => refocusStray(),
 })
 let dangerous: DangerousSites
 let logins: Logins
@@ -511,9 +508,8 @@ function focusActive() {
 let typingInBar = false
 
 /**
- * A page that isn't on screen took the keyboard: a tab opened in the background or the page
- * loading ahead, as it starts up. It goes back to the address bar if you're typing there, as
- * leaving the bar even for a moment closes it and drops what you typed; otherwise to what's in front.
+ * A page that isn't on screen took the keyboard: a tab in the background, as it starts up or
+ * navigates. It goes back to the address bar if you're typing there; otherwise to what's in front.
  */
 function refocusStray() {
   if (typingInBar && panel.visible && !panel.win.isDestroyed()) return void panel.ui.focus()
@@ -525,8 +521,10 @@ const pressedAt = new WeakMap<Electron.WebContents, number>()
 
 /**
  * Any page jbrow puts up takes the keyboard as it starts: a permission prompt, a sign-in sheet,
- * a side panel, a device chooser, a page loading ahead. While you type in the address bar, the
- * keys you go on typing would land there, so the bar gets it straight back unless you clicked the page.
+ * a side panel, a device chooser. So does a page each time it navigates (Electron focuses it), in
+ * front or in a background tab. While you type in the address bar, the keys you go on typing would
+ * land there, so the bar gets it straight back unless you clicked the page. The bar waits a moment
+ * before it takes the loss for you leaving it (leftBar in the UI), so it carries on as it was.
  */
 function guardAddressBar(wc: Electron.WebContents) {
   wc.on('before-mouse-event', (_e, mouse) => {

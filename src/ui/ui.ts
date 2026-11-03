@@ -1285,16 +1285,44 @@ const layoutHost: LayoutHost = {
   askSite: (url, profile, seq) => send('site-info', { url, profile: profile ?? typedIn(), seq }),
   focusText: () => omnibox.focus(),
 }
+/** How long the address bar waits for the keyboard to come back before it closes; see leftBar. */
+const BAR_AWAY_MS = 150
+/** Set while the address bar waits to close; see leftBar. */
+let barAway: number | undefined
 /** The keyboard is in the address bar: its text, or a field of the layout's own in the suggestions. */
 const barFocused = () => document.activeElement === omnibox || suggest.contains(document.activeElement)
 /**
- * The address bar is being edited: it has the keyboard and jbrow's UI has it. A page that takes the
- * keyboard (clicked, or made active when a pane closes) leaves the address bar the UI's focused
- * element all the same, though nothing is typed there until the UI has the keyboard back.
+ * The address bar is being edited: it has the keyboard and jbrow's UI has it, or had it a moment
+ * ago (see leftBar). A page that takes the keyboard (clicked, or made active when a pane closes)
+ * leaves the address bar the UI's focused element all the same, though nothing is typed there
+ * until the UI has the keyboard back.
  */
-const editing = () => document.hasFocus() && barFocused()
+const editing = () => (document.hasFocus() || barAway !== undefined) && barFocused()
 /** Focus moving between the text and the suggestions' own fields, which keeps the address bar open. */
 const withinBar = (to: EventTarget | null) => to instanceof Node && (to === omnibox || suggest.contains(to))
+/**
+ * The keyboard left the address bar's text or a field of its suggestions for `to`. Within jbrow's
+ * UI (Escape, Return, a click elsewhere in it) the bar closes. A page taking the keyboard from the
+ * UI may be one starting up or navigating on its own, and jbrow hands it straight back while you
+ * type here (guardAddressBar in the main process), so the bar waits a moment: back by then, it
+ * carries on with what you typed, where closing would have dropped it.
+ */
+function leftBar(to: EventTarget | null) {
+  if (withinBar(to)) return
+  if (document.hasFocus()) return closeBar()
+  clearTimeout(barAway)
+  barAway = window.setTimeout(() => {
+    barAway = undefined
+    if (!editing()) closeBar()
+  }, BAR_AWAY_MS)
+}
+/** Whether the keyboard is back in the address bar before it closed (see leftBar). */
+function backInBar(): boolean {
+  if (barAway === undefined) return false
+  clearTimeout(barAway)
+  barAway = undefined
+  return true
+}
 
 /** Draws the suggestions for what's there now. The layout keeps its selection on the same item where it can. */
 function showSuggestions() {
@@ -1482,8 +1510,9 @@ function suggestOutcome(out: Outcome) {
 }
 
 omnibox.addEventListener('focus', (e) => {
-  // Back from a field in the suggestions: everything stays as it was.
-  if (withinBar(e.relatedTarget)) return
+  // Back from a field in the suggestions, or from a page that took the keyboard for a moment:
+  // everything stays as it was.
+  if (withinBar(e.relatedTarget) || backInBar()) return
   // Clicking the address bar is how a private address is revealed.
   omnibox.value = activeUrl()
   omnibox.placeholder = 'Search or type a tab name'
@@ -1515,9 +1544,7 @@ omnibox.addEventListener('input', (e) => {
   requestSuggestions()
   showSuggestions()
 })
-omnibox.addEventListener('blur', (e) => {
-  if (!withinBar(e.relatedTarget)) closeBar()
-})
+omnibox.addEventListener('blur', (e) => leftBar(e.relatedTarget))
 /** The keyboard left the address bar: the suggestions go, and it shows the page's address again. */
 function closeBar() {
   send('suggest-cancel')
@@ -1564,9 +1591,8 @@ suggest.addEventListener('keydown', (e) => {
     suggestOutcome(out)
   }
 })
-suggest.addEventListener('focusout', (e) => {
-  if (!withinBar(e.relatedTarget)) closeBar()
-})
+suggest.addEventListener('focusout', (e) => leftBar(e.relatedTarget))
+suggest.addEventListener('focusin', () => backInBar())
 
 // ---------- sidebar interaction ----------
 
