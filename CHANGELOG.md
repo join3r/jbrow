@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Always open a site in a profile from the address bar: the lock's menu has a row of profiles for
+  the page's domain, and ⌥Return opens what you typed and keeps its domain in the profile it opens
+  in. A pin after the profile's name shows a page is there by its site.
 - Sites open sooner: jbrow connects ahead to the site the address bar completes to or you
   highlight, to the search engine as the address bar opens, and to a sleeping tab under the pointer.
   Never to private addresses; turn it off under Settings → Address bar → Connect ahead.

@@ -20,6 +20,10 @@
 .sx-does { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sx-keys { margin-left: auto; display: inline-flex; gap: 12px; flex: none; }
 .sx-keys kbd + kbd { margin-left: -2px; }
+/* The ⌥Return hint is the longest, so it goes first. */
+@container (max-width: 720px) {
+  .sx-keys > .sx-remember { display: none; }
+}
 @container (max-width: 520px) {
   .sx-keys > span:not(:last-child) { display: none; }
 }

@@ -1,6 +1,6 @@
 import { cssEase } from '../shared/ease'
 import { engineOf, isSearchUrl, SEARCH_ENGINES, suggestUrlFor } from '../shared/engines'
-import { urlMatcher } from '../shared/patterns'
+import { bareSite, domainProfile, siteDomain, siteRule, urlMatcher, withDomain } from '../shared/patterns'
 import { awayFromHome, displayName, folderThreads, headless, isAsleep, isFolder, isPinned, keptThreads, numberedThreads, sections, shownContexts, threadsOf, unkeptThreads, type AppView, type ContextView, type FolderView, type KeptItem, type ThreadView } from '../shared/threads'
 import { ACTIONS, shortcutFromKey, shortcutLabel, type ActionId } from '../shared/shortcuts'
 import { dragDivider, MAX_PANES, PANE_GAP, paneSpans, splitOf } from '../shared/split'
@@ -192,6 +192,7 @@ function render() {
   renderPinnedActions()
   renderRestyle()
   renderCert()
+  renderSiteProfile()
   renderDanger()
   renderLogin()
   renderCrash()
@@ -435,7 +436,7 @@ function renderPaneBars(ids: string[], spans: { x: number; width: number }[]) {
       `<div class="profile-band${named ? ' on' : ''}" style="--pc:${esc(prof?.color || '#8a93a1')}">` +
       `<div class="nav"><button class="icon sm" data-nav="back" title="Back" aria-label="Back"${p.canGoBack ? '' : ' disabled'}>${icon('back')}</button>` +
       `<button class="icon sm reload" data-nav="${p.loading ? 'stop' : 'reload'}" title="${p.loading ? 'Stop' : 'Reload'}" aria-label="${p.loading ? 'Stop' : 'Reload'}">${icon(p.loading ? 'close' : 'reload')}</button></div>` +
-      (named ? `<span class="profile-name">${esc(prof.name)}</span>` : '') +
+      (named ? `<span class="profile-name"${pinnedBy(t) ? ` title="${esc(`${pinnedBy(t)} always opens in ${prof.name}`)}"` : ''}>${esc(prof.name)}${pinnedBy(t) ? `<span class="site-pin">${icon('pin')}</span>` : ''}</span>` : '') +
       `</div>` +
       (p.lock && !masked ? `<span class="lock${p.lock === 'warn' ? ' warn' : ''}" title="${lockTitle}" aria-label="${lockTitle}">${icon(p.lock === 'warn' ? 'warn' : 'lock')}</span>` : '') +
       `<button class="pane-url" data-focus-bar title="${esc(masked ? 'Private' : t.url)}">${
@@ -664,6 +665,12 @@ document.addEventListener('mousedown', (e) => {
   if (!filterPop.hidden && !(e.target as HTMLElement).closest('#filterPop, .filter-menu')) setFilterPop(false)
 })
 
+/** The site a tab's page always opens in its profile by, for the pin after the profile's name, or ''. */
+function pinnedBy(t: { url: string; profile: string }): string {
+  const rule = S && t.url && !isPrivate(t.url) ? siteRule(S.prefs.profileSites, t.url) : undefined
+  return rule?.profile === t.profile ? rule.pattern : ''
+}
+
 function renderProfileBand() {
   const active = activeTab()
   const p = active && profile(typedProfile ?? active.profile)
@@ -674,13 +681,15 @@ function renderProfileBand() {
   name.hidden = !shown
   if (!p) return
   const other = !!typedProfile && typedProfile !== active.profile && !!active.url
-  name.textContent = p.name
+  // While typing, the band is about where what's typed opens, not the page.
+  const pinned = document.activeElement !== omnibox && pinnedBy(active)
+  name.innerHTML = esc(p.name) + (pinned ? `<span class="site-pin">${icon('pin')}</span>` : '')
   band.style.setProperty('--pc', p.color || '#8a93a1')
   band.classList.toggle('typed', other)
   const others = S!.profiles.filter((x) => x.id !== p.id)
   const pick = others.length === 1 ? others[0].name : 'another profile'
   name.title =
-    document.activeElement !== omnibox ? `This tab is in the ${p.name} profile. Click to reload it in ${pick}`
+    document.activeElement !== omnibox ? `This tab is in the ${p.name} profile${pinned ? `, where ${pinned} always opens` : ''}. Click to reload it in ${pick}`
     : other ? `Opens in a new tab in ${p.name} (Tab to switch)`
     : `Opens in ${p.name} (Tab to switch)`
   if (!profilePop.hidden) renderProfilePop()
@@ -1335,6 +1344,7 @@ function showSuggestions() {
     archived,
     profiles: S.profiles,
     opensIn: typedIn(),
+    profileSites: S.prefs.profileSites,
     visits: visitHits,
     searchReply: searchHits,
     searchSuggestions: S.prefs.searchSuggestions,
@@ -1566,7 +1576,14 @@ omnibox.addEventListener('keydown', (e) => {
     e.preventDefault()
     return suggestOutcome(out)
   }
-  if (e.key === 'Enter') {
+  if (e.key === 'Enter' && e.altKey && !e.metaKey && !e.ctrlKey && model?.remember && !suggest.hidden && !suggestLayout().highlighted(model)) {
+    // ⌥Return: the goal opens, and its domain always opens in that profile from now on.
+    e.preventDefault()
+    const { domain, profile: p } = model.remember
+    const goal = model.goal
+    rememberDomain(domain, p.id)
+    pick(goal)
+  } else if (e.key === 'Enter') {
     e.preventDefault()
     pick(null)
   } else if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey && (S?.profiles.length ?? 0) > 1) {
@@ -4035,6 +4052,7 @@ function setCert(open: boolean) {
   if (open) {
     setExtensions(false)
     renderCert()
+    renderSiteProfile()
     focusUi()
   } else certPopShown = ''
   syncOverlay()
@@ -4054,6 +4072,73 @@ $('certProceed').addEventListener('click', () => send('cert', { action: 'proceed
 document.addEventListener('mousedown', (e) => {
   if (!certPop.hidden && !(e.target as HTMLElement).closest('#certPop, #certButton')) setCert(false)
 })
+
+// ---------- site's profile ----------
+
+/**
+ * The lock menu's "Always open <domain> in" row: the profile the domain is saved to in Settings →
+ * Profiles → Sites, or Any profile. Picking one moves the domain's line to that profile's list;
+ * the tab itself stays where it is, with a button to reload it there.
+ */
+function renderSiteProfile() {
+  const row = $('siteProfileRow')
+  const active = activeTab()
+  const domain = active && !S?.cert?.blocked ? siteDomain(active.url) : ''
+  row.hidden = certPop.hidden || !S || S.profiles.length < 2 || !domain || isPrivate(active!.url)
+  if (row.hidden || !S || !active) return
+  const sites = S.prefs.profileSites
+  const own = domainProfile(sites, domain)
+  // Another line may decide the page: a wider site, a path or a wildcard written in settings.
+  const rule = siteRule(sites, active.url)
+  const decides = rule ?? (own ? { profile: own, pattern: domain } : undefined)
+  const chosen = decides && profile(decides.profile) ? decides.profile : ''
+  $('siteProfileHead').textContent = `Always open ${domain} in`
+  const seg = $('siteProfileSeg')
+  seg.setAttribute('aria-label', `Always open ${domain} in`)
+  const key = JSON.stringify([domain, chosen, S.profiles])
+  if (seg.dataset.key !== key) {
+    seg.dataset.key = key
+    seg.innerHTML =
+      `<button data-site-profile="" aria-pressed="${!chosen}" title="Opens in the profile you open it from">Any profile</button>` +
+      S.profiles
+        .map((p) => `<button data-site-profile="${esc(p.id)}" aria-pressed="${p.id === chosen}" style="--pc:${esc(p.color || '#8a93a1')}"><span class="dot"></span>${esc(p.name)}</button>`)
+        .join('')
+  }
+  const note = $('siteProfileNote')
+  const byHand = rule && bareSite(rule.pattern) !== domain
+  note.hidden = !byHand
+  if (byHand) note.innerHTML = `By <code>${esc(rule.pattern)}</code> in ${esc(profile(rule.profile)?.name ?? '')}'s sites in Settings.`
+  const move = $('siteProfileMove')
+  const target = chosen && chosen !== active.profile ? profile(chosen) : undefined
+  move.hidden = !target
+  if (target) move.querySelector('.label')!.textContent = `Reload this tab in ${target.name}`
+}
+
+$('siteProfileSeg').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-site-profile]')
+  const active = activeTab()
+  const domain = active ? siteDomain(active.url) : ''
+  if (!b || !S || !domain) return
+  rememberDomain(domain, b.dataset.siteProfile || null)
+})
+$('siteProfileMove').addEventListener('click', () => {
+  const active = activeTab()
+  const rule = active && S ? siteRule(S.prefs.profileSites, active.url) : undefined
+  setCert(false)
+  if (rule) send('set-profile', { profile: rule.profile })
+})
+
+/** Saves `domain` to `profile`'s sites, out of every other profile's, or out of all of them with null. */
+function rememberDomain(domain: string, id: string | null) {
+  if (!S) return
+  const sites = withDomain(S.prefs.profileSites, domain, id)
+  // Drawn at once, before main's state comes back, so the chips don't lag the click.
+  S.prefs.profileSites = sites
+  sendPrefs({ profileSites: sites })
+  renderSiteProfile()
+  renderProfileBand()
+  renderProfileSites()
+}
 
 // ---------- device chooser ----------
 

@@ -32,6 +32,16 @@ function input(over: Partial<ModelInput> = {}): ModelInput {
 }
 
 describe('suggestModel', () => {
+  test('⌥Return offers to keep a typed site in the profile it opens in', () => {
+    const m = suggestModel(input({ typed: 'you', completion: { text: 'youtube.com', url: 'https://www.youtube.com/' }, opensIn: 'work' }))
+    assert.deepEqual(m.remember && { domain: m.remember.domain, profile: m.remember.profile.id }, { domain: 'youtube.com', profile: 'work' })
+    // Already saved there, a search, or a single profile: nothing to offer.
+    assert.equal(suggestModel(input({ typed: 'you', completion: { text: 'youtube.com', url: 'https://youtube.com/' }, profileSites: { personal: ['youtube.com'] } })).remember, null)
+    assert.equal(suggestModel(input({ typed: 'hello world' })).remember, null)
+    assert.equal(suggestModel(input({ typed: 'example.com', profiles: [profiles[0]] })).remember, null)
+    assert.equal(suggestModel(input({ typed: 'example.com', isPrivate: () => true })).remember, null)
+  })
+
   test('a completion is the goal, and the typed text is the first search', () => {
     const m = suggestModel(input({ typed: 'you', completion: { text: 'youtube.com', url: 'https://youtube.com/' } }))
     assert.equal(m.goal?.kind, 'site')

@@ -36,7 +36,14 @@
             </div>
             <div id="profilePop" class="pop profile-pop" hidden role="menu" aria-label="Profile"></div>
             <button id="certButton" class="icon sm cert-button" hidden aria-expanded="false"></button>
-            <div id="certPop" class="pop cert-pop" hidden role="dialog" aria-label="Certificate">
+            <div id="certPop" class="pop cert-pop" hidden role="dialog" aria-label="Site">
+              <div id="siteProfileRow" class="site-profile" hidden>
+                <div id="siteProfileHead" class="pop-head"></div>
+                <div id="siteProfileSeg" class="site-profile-seg" role="group"></div>
+                <p id="siteProfileNote" class="pop-help" hidden></p>
+                <button id="siteProfileMove" class="pop-item" hidden><span data-icon="reload"></span><span class="label"></span></button>
+                <div class="pop-sep"></div>
+              </div>
               <div id="certHead" class="pop-head"></div>
               <p id="certStatus" class="pop-help"></p>
               <div id="certChain"></div>
@@ -591,7 +598,7 @@
                   Links to these sites always open in their profile: from other apps, from the address bar and from pages in
                   another profile. One site per line; <code>youtube.com</code> covers every YouTube page, <code>*.corp.example</code>
                   the sites under corp.example, and <code>github.com/acme</code> only that part of GitHub. Pick another profile
-                  with Tab in the address bar, or from a link's menu, to open one elsewhere.
+                  with Tab in the address bar, or from a link's menu, to open one elsewhere. To add the site you're on, pick its profile in the menu behind the lock in the address bar, or open it with ⌥Return.
                 </p>
                 <div id="profileSites" class="profile-sites"></div>
               </div>

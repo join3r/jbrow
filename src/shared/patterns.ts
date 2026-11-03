@@ -20,6 +20,11 @@ export function urlMatcher(patterns: string[]): (url: string) => boolean {
  * `github.com`.
  */
 export function siteProfile(sites: Record<string, string[]>, url: string): string | undefined {
+  return siteRule(sites, url)?.profile
+}
+
+/** The profile an address belongs in, as siteProfile, with the site in its list that decided it. */
+export function siteRule(sites: Record<string, string[]>, url: string): { profile: string; pattern: string } | undefined {
   let target: string
   let withPort: string
   try {
@@ -31,15 +36,47 @@ export function siteProfile(sites: Record<string, string[]>, url: string): strin
   } catch {
     return undefined
   }
-  let best: { profile: string; length: number } | undefined
+  let best: { profile: string; pattern: string; length: number } | undefined
   for (const [profile, patterns] of Object.entries(sites)) {
     for (const raw of patterns) {
       const p = raw.trim().replace(/^[a-z]+:\/\//i, '')
       if (!p || (best && p.length <= best.length) || !siteRegExp(p).test(/^[^/]*:/.test(p) ? withPort : target)) continue
-      best = { profile, length: p.length }
+      best = { profile, pattern: raw.trim(), length: p.length }
     }
   }
-  return best?.profile
+  return best && { profile: best.profile, pattern: best.pattern }
+}
+
+/** The domain a web address is on, as the URL bar saves it to a profile's sites: its host without www. '' for anything else. */
+export function siteDomain(url: string): string {
+  try {
+    const u = new URL(url)
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.hostname.toLowerCase().replace(/^www\./, '') : ''
+  } catch {
+    return ''
+  }
+}
+
+/** A site as written in a list, reduced to compare with a domain: no scheme, no www, no trailing slash. */
+export const bareSite = (p: string) => p.trim().toLowerCase().replace(/^[a-z]+:\/\//, '').replace(/^www\./, '').replace(/\/+$/, '')
+
+/** The profile whose sites list has exactly this domain. */
+export function domainProfile(sites: Record<string, string[]>, domain: string): string | undefined {
+  return Object.entries(sites).find(([, list]) => list.some((p) => bareSite(p) === domain))?.[0]
+}
+
+/**
+ * The sites lists with `domain` in `profile`'s list only, or in nobody's with null. Every other
+ * line stays as it was, so what was written by hand in settings is kept.
+ */
+export function withDomain(sites: Record<string, string[]>, domain: string, profile: string | null): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const [id, list] of Object.entries(sites)) {
+    const kept = list.filter((p) => bareSite(p) !== domain)
+    if (kept.length) out[id] = kept
+  }
+  if (profile) out[profile] = [...(out[profile] ?? []), domain]
+  return out
 }
 
 const escape = (s: string, star: string) => s.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join(star)

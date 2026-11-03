@@ -1,4 +1,5 @@
 import { addressUrl, engineOf, forcedSearch } from '../../shared/engines'
+import { domainProfile, siteDomain } from '../../shared/patterns'
 import { displayName, samePage } from '../../shared/threads'
 import type { CompletionView, Profile, SearchReply, TabRecord, VisitView } from '../../shared/types'
 import { since } from '../markup'
@@ -79,6 +80,11 @@ export interface SuggestModel {
   archived: ArchivedItem[]
   /** With more than one profile, the one Tab in the text sends what's typed to next. */
   nextProfile: Profile | null
+  /**
+   * What ⌥Return in the text saves as it opens the goal: its domain, always to open in the profile
+   * it's opening in. Null when the goal isn't a web address, or the domain is already saved there.
+   */
+  remember: { domain: string; profile: Profile } | null
 }
 
 /** What the UI knows when it builds the model. */
@@ -94,6 +100,8 @@ export interface ModelInput {
   profiles: Profile[]
   /** The profile what's typed opens in. */
   opensIn: string | undefined
+  /** Each profile's sites (prefs.profileSites). */
+  profileSites?: Record<string, string[]>
   visits: VisitView[]
   searchReply: SearchReply | null
   searchSuggestions: boolean
@@ -220,7 +228,10 @@ export function suggestModel(m: ModelInput): SuggestModel {
   const ids = m.profiles.map((p) => p.id)
   const from = m.opensIn
   const nextProfile = ids.length > 1 && from ? (m.profiles[(ids.indexOf(from) + 1) % ids.length] ?? null) : null
-  return { text, engine, goal, searches, visits, tabs, archived, nextProfile }
+  const domain = goal?.kind === 'site' || goal?.kind === 'address' ? siteDomain(goal.url) : ''
+  const into = multi && from ? m.profiles.find((p) => p.id === from) : undefined
+  const remember = domain && into && !m.isPrivate(goal!.url) && domainProfile(m.profileSites ?? {}, domain) !== into.id ? { domain, profile: into } : null
+  return { text, engine, goal, searches, visits, tabs, archived, nextProfile, remember }
 }
 
 /** Nothing to show at all. */

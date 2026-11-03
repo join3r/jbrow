@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { siteProfile, urlMatcher } from '../../src/shared/patterns'
+import { domainProfile, siteDomain, siteProfile, siteRule, urlMatcher, withDomain } from '../../src/shared/patterns'
 
 describe('urlMatcher', () => {
   test('no patterns match nothing', () => {
@@ -103,5 +103,38 @@ describe('siteProfile', () => {
     assert.equal(siteProfile({ p: ['*'] }, 'about:blank'), undefined)
     assert.equal(siteProfile({ p: ['*'] }, 'not a url'), undefined)
     assert.equal(siteProfile({ p: ['', '  '] }, 'https://a.example/'), undefined)
+  })
+})
+
+describe('domains saved from the URL bar', () => {
+  test("a page's domain is its host without www, for web addresses only", () => {
+    assert.equal(siteDomain('https://www.GitHub.com/acme/app'), 'github.com')
+    assert.equal(siteDomain('https://gist.github.com/x'), 'gist.github.com')
+    assert.equal(siteDomain('http://localhost:3000/'), 'localhost')
+    assert.equal(siteDomain('about:blank'), '')
+    assert.equal(siteDomain('file:///tmp/a.html'), '')
+    assert.equal(siteDomain(''), '')
+  })
+
+  test('the profile with exactly this domain, however it was written', () => {
+    const sites = { work: ['https://www.github.com/', 'github.com/acme'], personal: ['youtube.com'] }
+    assert.equal(domainProfile(sites, 'github.com'), 'work')
+    assert.equal(domainProfile(sites, 'youtube.com'), 'personal')
+    assert.equal(domainProfile(sites, 'gist.github.com'), undefined)
+  })
+
+  test("saving a domain moves its line and keeps everyone else's", () => {
+    const sites = { work: ['github.com', 'github.com/acme'], personal: ['youtube.com'] }
+    assert.deepEqual(withDomain(sites, 'github.com', 'personal'), { work: ['github.com/acme'], personal: ['youtube.com', 'github.com'] })
+    assert.deepEqual(withDomain(sites, 'youtube.com', null), { work: ['github.com', 'github.com/acme'] })
+    assert.deepEqual(withDomain({}, 'a.example', 'work'), { work: ['a.example'] })
+    assert.deepEqual(withDomain({ work: ['a.example'] }, 'a.example', 'work'), { work: ['a.example'] })
+  })
+
+  test('siteRule names the line that decided', () => {
+    const sites = { work: ['github.com'], personal: ['github.com/acme'] }
+    assert.deepEqual(siteRule(sites, 'https://github.com/acme/app'), { profile: 'personal', pattern: 'github.com/acme' })
+    assert.deepEqual(siteRule(sites, 'https://github.com/other'), { profile: 'work', pattern: 'github.com' })
+    assert.equal(siteRule(sites, 'https://gitlab.com/'), undefined)
   })
 })

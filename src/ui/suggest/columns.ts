@@ -223,6 +223,7 @@ function footer(m: SuggestModel, zone: Zone, sections: number, sel: Item | null)
   if (zone === 'none') {
     if (sections) keys.push('<span><kbd>↓</kbd>to choose</span>')
     const p = m.nextProfile
+    if (m.remember) keys.push(`<span class="sx-remember"><kbd>⌥↵</kbd>to always open ${esc(m.remember.domain)} in ${m.remember.profile.color ? `<span class="dot" style="background:${esc(m.remember.profile.color)}"></span>` : ''}${esc(m.remember.profile.name)}</span>`)
     if (p) keys.push(`<span><kbd>Tab</kbd>to open in ${p.color ? `<span class="dot" style="background:${esc(p.color)}"></span>` : ''}${esc(p.name)}</span>`)
   } else {
     keys.push('<span><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd>to move</span>')
