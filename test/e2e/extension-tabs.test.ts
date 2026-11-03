@@ -16,9 +16,24 @@ let extDir: string
 const BACKGROUND = `chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg.do === 'front' && sender.tab) chrome.tabs.update(sender.tab.id, { active: true })
   if (msg.do === 'get-all') chrome.tabs.query({}).then((all) => Promise.all(all.map((t) => chrome.tabs.get(t.id)))).then(reply)
-  if (msg.do === 'attach') chrome.tabs.query({ url: msg.url }).then(([t]) => chrome.debugger.attach({ tabId: t.id }, '1.3')).then(() => reply(true))
+  if (msg.do === 'attach') attachAndUse(msg.url).then(reply, (e) => reply({ error: String(e?.message ?? e) }))
   return true
-})`
+})
+let replaced = null
+chrome.tabs.onReplaced.addListener((added, removed) => { replaced = { added, removed } })
+const message = (p) => p.then(() => 'ok', (e) => String(e?.message ?? e))
+async function attachAndUse(url) {
+  const [t] = await chrome.tabs.query({ url })
+  await chrome.debugger.attach({ tabId: t.id }, '1.3')
+  // tabs.onReplaced may land just after the attach answers.
+  for (let i = 0; i < 40 && replaced?.removed !== t.id; i++) await new Promise((r) => setTimeout(r, 50))
+  const now = replaced?.removed === t.id ? replaced.added : t.id
+  const { result } = await chrome.debugger.sendCommand({ tabId: now }, 'Runtime.evaluate', { expression: '1 + 1', returnByValue: true })
+  const byOldId = await message(chrome.debugger.sendCommand({ tabId: t.id }, 'Runtime.evaluate', { expression: '2' }))
+  const again = await message(chrome.debugger.attach({ tabId: now }, '1.3'))
+  const detached = await message(chrome.debugger.detach({ tabId: now }))
+  return { asked: t.id, now, value: result.value, byOldId, again, detached }
+}`
 // The extension's worker needs electron-chrome-extensions' chrome.tabs, which only a sandboxed jbrow gives it.
 const skip = !SANDBOXED && 'no sandbox here (Linux as root, or without user namespaces), so no tabs API in service workers'
 const CONTENT = `window.addEventListener('message', (e) => {
@@ -87,8 +102,15 @@ test('looking up a sleeping tab leaves it asleep; attaching the debugger loads i
   assert.ok(all.some((t) => t.url === `${web.url}/kept` && t.discarded), 'tabs.get answers for the sleeping tab')
   await sleep(1000)
   assert.equal((await kept()).loaded, false)
-  await ask(`${web.url}/one`, { do: 'attach', url: `${web.url}/kept` })
+  const used = (await ask(`${web.url}/one`, { do: 'attach', url: `${web.url}/kept` })) as Record<string, unknown>
   await jb.waitForState((s) => s.tabs.find((t) => t.id === 'kept')?.loaded, 'the kept tab to load')
+  // Woken, the tab has a new ID (tabs.onReplaced), and the attachment goes by it; the old ID
+  // still reaches it, and attaching again by the new one meets the extension's own debugger.
+  assert.notEqual(used.now, used.asked, 'the woken tab has a new ID')
+  assert.equal(used.value, 2)
+  assert.equal(used.byOldId, 'ok')
+  assert.match(String(used.again), /already attached/)
+  assert.equal(used.detached, 'ok')
 })
 
 test('a background page an extension brings to the front stays where it is', { skip }, async () => {

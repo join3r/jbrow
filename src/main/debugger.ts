@@ -8,6 +8,8 @@ interface Target {
 }
 
 interface Attached {
+  /** The tab's ID now: a pageless tab woken for the debugger has a new one. */
+  tabId: number
   profile: string
   extensionId: string
   wc: WebContents
@@ -46,8 +48,13 @@ export class ExtensionDebugger {
       if (!wc || wc.isDestroyed()) throw new Error(`No tab with given id ${target.tabId}.`)
       return wc
     }
+    // A tab's earlier ID (it had none of its page then) reaches the same page, and the attachment.
+    const currentId = (tabId: number) => {
+      const wc = lib.store.getTabById(tabId)
+      return wc && !wc.isDestroyed() ? wc.id : tabId
+    }
     const mine = (extensionId: string, target: Target = {}) => {
-      const a = target.tabId === undefined ? undefined : this.attached.get(target.tabId)
+      const a = target.tabId === undefined ? undefined : this.attached.get(currentId(target.tabId))
       if (!a || a.extensionId !== extensionId || a.profile !== profile) {
         throw new Error(`Debugger is not attached to the tab with id: ${target.tabId}.`)
       }
@@ -58,7 +65,10 @@ export class ExtensionDebugger {
       'debugger.attach',
       ({ extension }, target: Target, version?: string) => {
         const wc = tabOf(target, true)
-        const tabId = target.tabId!
+        // A pageless tab woken here has a new ID (tabs.onReplaced said so): the attachment, its
+        // events and its detach go by that one. Kept under the old ID, the extension's next
+        // attach by the new one met its own debugger and was refused (Stem, 2026-11-03).
+        const tabId = wc.id
         // An extension that went away lets go of its tabs, as in Chrome.
         const held = this.attached.get(tabId)
         if (held && !rt.session.extensions.getExtension(held.extensionId)) {
@@ -101,6 +111,7 @@ export class ExtensionDebugger {
         wc.on('did-redirect-navigation', onNavigate)
         wc.on('did-navigate', onNavigated)
         this.attached.set(tabId, {
+          tabId,
           profile,
           extensionId: extension.id,
           wc,
@@ -123,7 +134,7 @@ export class ExtensionDebugger {
       'debugger.detach',
       ({ extension }, target: Target) => {
         const a = mine(extension.id, target)
-        this.forget(target.tabId!)
+        this.forget(a.tabId)
         if (!a.wc.isDestroyed() && a.wc.debugger.isAttached()) a.wc.debugger.detach()
       },
       opts,
@@ -137,9 +148,9 @@ export class ExtensionDebugger {
         refuseCommand(method, params, extension.id, hasFileAccess(rt, extension))
         // Navigation events can be missed (a redirect, a renderer swap); the tab's address is checked too.
         if (!a.wc.isDestroyed() && !mayDebugPage(a.wc, extension.id)) {
-          this.forget(target.tabId!)
+          this.forget(a.tabId)
           if (a.wc.debugger.isAttached()) a.wc.debugger.detach()
-          lib.router.sendEvent(extension.id, 'debugger.onDetach', { tabId: target.tabId }, 'target_closed')
+          lib.router.sendEvent(extension.id, 'debugger.onDetach', { tabId: a.tabId }, 'target_closed')
           throw new Error(`Cannot access contents of url "${a.wc.getURL()}".`)
         }
         try {
