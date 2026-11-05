@@ -104,3 +104,46 @@ test('span', () => {
   assert.equal(span(12 * 60_000), '12 min')
   assert.equal(span(185 * 60_000), '3 h 5 min')
 })
+
+function restartable() {
+  let now = 1_000_000
+  const lines: string[] = []
+  const restarted: string[] = []
+  const watch = new NativeWatch('personal', {
+    now: () => now,
+    log: (l) => lines.push(l),
+    name: () => 'Stem',
+    workerRunning: () => false,
+    restartWorker: async (id) => void restarted.push(id),
+  })
+  const base = { extensionId: 'x', application: 'com.stem.browser', opener: 'service-worker' as const, versionId: 7 }
+  const cycle = (n: number, reason = 'its service worker stopped') => {
+    watch.host({ ...base, connectionId: `c${n}`, kind: 'open' })
+    watch.host({ ...base, connectionId: `c${n}`, kind: 'close', data: { reason } })
+  }
+  return { lines, restarted, cycle, tick: (ms: number) => void (now += ms) }
+}
+
+test('a worker that stopped while holding a host is started again', () => {
+  const { lines, restarted, cycle } = restartable()
+  cycle(1)
+  assert.deepEqual(restarted, ['x'])
+  assert.match(lines.at(-1)!, /stopped while holding com.stem.browser; starting it again/)
+})
+
+test('a host closed for any other reason starts nothing', () => {
+  const { restarted, cycle } = restartable()
+  cycle(1, 'the extension disconnected')
+  cycle(2, 'the extension unloaded')
+  assert.deepEqual(restarted, [])
+})
+
+test('a worker that keeps crashing is started at most three times in ten minutes', () => {
+  const { lines, restarted, cycle, tick } = restartable()
+  for (let i = 0; i < 4; i++) cycle(i)
+  assert.equal(restarted.length, 3)
+  assert.match(lines.at(-1)!, /stopped 4 times in 10 min; not starting it again/)
+  tick(10 * 60_000)
+  cycle(9)
+  assert.equal(restarted.length, 4)
+})

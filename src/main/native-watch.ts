@@ -30,6 +30,8 @@ export interface NativeWatchDeps {
   name(extensionId: string): string
   /** Whether a service worker of this version is running and can take a message. */
   workerRunning(versionId: number): boolean
+  /** Starts the extension's service worker again. */
+  restartWorker?(extensionId: string): Promise<void>
 }
 
 /** A request with no answer after this long is logged. Stem's own deadline is 60 s at most. */
@@ -38,6 +40,9 @@ export const UNANSWERED_MS = 60_000
 const ERRORS_PER_MINUTE = 10
 /** Requests remembered per host, so a host that never gets answers can't grow without bound. */
 const MAX_WAITING = 200
+/** A worker that keeps crashing is restarted at most this many times in RESTART_WINDOW_MS. */
+const MAX_RESTARTS = 3
+const RESTART_WINDOW_MS = 10 * 60_000
 
 interface Waiting {
   at: number
@@ -59,6 +64,7 @@ export class NativeWatch {
   private hosts = new Map<string, Host>()
   private statuses = new Map<number, string>()
   private errors = new Map<string, { since: number; count: number; muted: number }>()
+  private restarts = new Map<string, number[]>()
 
   constructor(
     private profile: string,
@@ -88,6 +94,7 @@ export class NativeWatch {
         const open = h ? ` after ${span(now - h.openedAt)}` : ''
         const unanswered = h ? h.waiting.size : 0
         this.log(`${who}: closed${open}: ${reason}${unanswered ? `, ${unanswered} request(s) unanswered` : ''}`)
+        if (e.opener === 'service-worker' && reason === WORKER_STOPPED) this.restart(e)
         return
       }
       case 'in': {
@@ -168,6 +175,29 @@ export class NativeWatch {
     }
   }
 
+  /**
+   * An open host keeps its worker running, so a worker that stopped under one crashed (2026-11-02,
+   * -03 and -05: a V8 fatal error on Stem's service worker thread). Nothing else wakes it: its
+   * alarms don't, and Stem's messages had nowhere to go, so browser control was gone until the
+   * user happened to wake the extension. Started again, the worker opens a new host and Stem is
+   * back within a second or two.
+   */
+  private restart(e: NativeHostEvent) {
+    const restartWorker = this.deps.restartWorker
+    if (!restartWorker) return
+    const now = this.deps.now()
+    const recent = (this.restarts.get(e.extensionId) ?? []).filter((t) => now - t < RESTART_WINDOW_MS)
+    const name = this.deps.name(e.extensionId)
+    if (recent.length >= MAX_RESTARTS) {
+      this.log(`${name}: its service worker stopped ${recent.length + 1} times in ${span(RESTART_WINDOW_MS)}; not starting it again`)
+      return
+    }
+    recent.push(now)
+    this.restarts.set(e.extensionId, recent)
+    this.log(`${name}: its service worker stopped while holding ${e.application}; starting it again`)
+    restartWorker(e.extensionId).catch((error) => this.log(`${name}: its service worker did not start again: ${(error as Error)?.message ?? error}`))
+  }
+
   private statusOf(versionId: number) {
     return `last status ${this.statuses.get(versionId) ?? 'unknown'}`
   }
@@ -176,6 +206,9 @@ export class NativeWatch {
     this.deps.log(`[native] ${this.profile}: ${line}`)
   }
 }
+
+/** The close reason the patched library gives when the worker holding a host stopped. */
+export const WORKER_STOPPED = 'its service worker stopped'
 
 function idOf(message: unknown): string | null {
   const id = (message as { id?: unknown } | null)?.id
@@ -227,6 +260,11 @@ export function watchNativeHosts(profileId: string, sess: Electron.Session, exte
     workerRunning: (versionId) => {
       const w = workers.getWorkerFromVersionID(versionId)
       return !!w && !w.isDestroyed()
+    },
+    restartWorker: async (id) => {
+      const ext = sess.extensions.getExtension(id)
+      if (!ext) return
+      await workers.startWorkerForScope(ext.url)
     },
   })
   watches.set(profileId, watch)

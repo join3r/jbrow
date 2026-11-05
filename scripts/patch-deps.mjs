@@ -483,6 +483,8 @@ const patches = [
   {
     file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
     why: 'native messaging: name why a host closed (see the patches above)',
+    // A later patch changes a line of this one's output, so its replace never matches whole again
+    applied: `      const pageGone = () => gone("its page closed");`,
     find: `        if (versionId === sender.versionId && runningStatus === "stopped") gone();
       };
       if (event.type === "frame") sender.once("destroyed", gone);`,
@@ -500,6 +502,8 @@ const patches = [
   {
     file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
     why: 'native messaging: report a closed host once (see the patches above)',
+    // A later patch changes a line of this one's output, so its replace never matches whole again
+    applied: `          this.ctx.emit("jbrow-native-host", { kind: "close", ...info, data: { reason: closeReason } });`,
     find: `        task?.end();
         task = undefined;
         if (event.type === "frame") sender.off("destroyed", gone);`,
@@ -549,6 +553,27 @@ const patches = [
     replace: `      d7("error: %s", err);
       this.onTraffic?.("fail", { reason: \`its program failed: \${err?.message ?? err}\` });
       this.destroy();`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: "native messaging: a host ends when its service worker stops, matched by the version it opened with. A crashed worker's ServiceWorkerMain is destroyed and no longer reports its versionId, so the host stayed open, and every message Stem sent it was lost until something woke the worker again (2026-11-05, seven minutes)",
+    find: `        if (versionId === sender.versionId && runningStatus === "stopped") gone("its service worker stopped");`,
+    replace: `        /* jbrow: matched by the version the host opened with, see scripts/patch-deps.mjs */
+        if (versionId === info.versionId && runningStatus === "stopped") gone("its service worker stopped");`,
+  },
+  {
+    file: 'node_modules/electron-chrome-extensions/dist/cjs/index.js',
+    why: "native messaging: ending the keep-alive task of a crashed worker throws (\"ServiceWorkerMain is destroyed\"); that must not keep the host from closing",
+    find: `        task?.end();
+        task = undefined;
+        if (!closed) {`,
+    replace: `        /* jbrow: a crashed worker's task can't be ended, see scripts/patch-deps.mjs */
+        try {
+          task?.end();
+        } catch {
+        }
+        task = undefined;
+        if (!closed) {`,
   },
 ]
 
