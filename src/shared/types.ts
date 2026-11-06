@@ -129,6 +129,8 @@ export interface UiState {
   /** Names and icons of the extensions in tabs' openedBy and drivenBy, by ID. */
   tabExtensions: Record<string, { name: string; icon?: string }>
   profiles: Profile[]
+  /** Your home folder, what ~ means in the address bar. */
+  home: string
   filter: string
   /** Showing one app's tabs, with `context` the conversation, thread or project you came from in it. */
   scope: { key: string; name: string; context?: { key: string; name: string } } | null

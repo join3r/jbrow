@@ -344,7 +344,18 @@ export function isAsleep(all: TabRecord[], opts: { now: number; afterMs: number;
 /** A pinned thread's root. Pinning keeps a thread, so one that somehow lost `kept` isn't pinned either. */
 export const isPinned = (t: TabRecord) => !!t.pinned && !!t.kept
 
-export const displayName = (t: TabRecord) => t.name || t.title || (t.url ? t.url : 'New tab')
+export const displayName = (t: TabRecord) => t.name || t.title || (t.url ? fileName(t.url) || t.url : 'New tab')
+
+/** The last part of a file:// URL's path (a file's or folder's name), '' for other addresses. */
+function fileName(url: string): string {
+  if (!/^file:/i.test(url)) return ''
+  const last = url.replace(/[?#].*$/, '').replace(/\/+$/, '').split('/').pop() ?? ''
+  try {
+    return decodeURIComponent(last)
+  } catch {
+    return last
+  }
+}
 
 /** For telling the same page apart from another: no #fragment or trailing slash. */
 export const samePage = (url: string) => url.replace(/#.*$/, '').replace(/\/$/, '')

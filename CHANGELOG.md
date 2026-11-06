@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Open files and folders on your computer: type a path in the address bar (/Users/…, ~/Downloads)
+  or pick files with File → Open File… (⌘O). A folder opens as a list of what's in it; click to go
+  in, ⌘-click to open in a new tab.
 - Always open a site in a profile from the address bar: the lock's menu has a row of profiles for
   the page's domain, and ⌥Return opens what you typed and keeps its domain in the profile it opens
   in. A pin after the profile's name shows a page is there by its site.

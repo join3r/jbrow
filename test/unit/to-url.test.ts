@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { homedir } from 'node:os'
 import { describe, test } from 'node:test'
 import { toUrl } from '../../src/main/tabs'
 
@@ -63,5 +64,19 @@ describe('toUrl', () => {
     assert.equal(toUrl('example.com is down', SEARCH), 'https://search.example/?q=example.com%20is%20down')
     assert.equal(toUrl('日本語', SEARCH), `https://search.example/?q=${encodeURIComponent('日本語')}`)
     assert.equal(toUrl('a&b=c', SEARCH), 'https://search.example/?q=a%26b%3Dc')
+  })
+
+  test('a path on this computer opens as a file', () => {
+    assert.equal(toUrl('/Users/me/notes.txt', SEARCH), 'file:///Users/me/notes.txt')
+    assert.equal(toUrl('  /tmp/  ', SEARCH), 'file:///tmp/')
+    assert.equal(toUrl('/', SEARCH), 'file:///')
+    // Spaces, # and ? are part of the name.
+    assert.equal(toUrl('/Users/me/My Docs/a #1?.pdf', SEARCH), 'file:///Users/me/My%20Docs/a%20%231%3F.pdf')
+    assert.equal(toUrl('~/Downloads', SEARCH), `file://${homedir()}/Downloads`)
+    assert.equal(toUrl('~', SEARCH), `file://${homedir()}`)
+    assert.equal(toUrl('C:\\Users\\me\\a.txt', SEARCH), 'file:///C:/Users/me/a.txt')
+    // A ? in front still searches, and //host isn't a path.
+    assert.equal(toUrl('?/tmp', SEARCH), 'https://search.example/?q=%2Ftmp')
+    assert.equal(toUrl('~user', SEARCH), 'https://search.example/?q=~user')
   })
 })

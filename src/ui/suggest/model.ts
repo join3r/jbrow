@@ -106,6 +106,8 @@ export interface ModelInput {
   searchReply: SearchReply | null
   searchSuggestions: boolean
   searchUrl: string
+  /** Your home folder, for ~ in what's typed. */
+  home?: string
   isPrivate: (url: string) => boolean
 }
 
@@ -155,7 +157,7 @@ export function suggestModel(m: ModelInput): SuggestModel {
   // Asks what Return will do with the text, so nothing says search where it navigates.
   const forced = forcedSearch(text)
   const query = forced ?? text
-  const address = forced === undefined && !!addressUrl(text)
+  const address = forced === undefined && !!addressUrl(text, m.home)
   const searchFor = (s: string, typed: boolean): SearchItem => {
     const url = m.searchUrl.replace('%s', encodeURIComponent(s))
     return { kind: 'search', key: `search:${s}`, query: s, typed, title: s, sub: '', url, shownUrl: shown(url) }
@@ -165,7 +167,7 @@ export function suggestModel(m: ModelInput): SuggestModel {
     const host = hostOf(comp.url)
     goal = { kind: 'site', key: `site:${comp.url}`, url: comp.url, shownUrl: shown(comp.url), host, title: comp.text, sub: 'Homepage', favicon: favicons.get(host) }
   } else if (address) {
-    const url = addressUrl(text)!
+    const url = addressUrl(text, m.home)!
     const host = hostOf(url)
     goal = { kind: 'address', key: `address:${text}`, input: text, url, shownUrl: shown(url), host, title: text, sub: 'Go to this address', favicon: favicons.get(host) }
   } else if (q && forced === undefined && openTabs.length) goal = tabItem(openTabs[0])

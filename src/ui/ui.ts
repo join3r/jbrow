@@ -1349,6 +1349,7 @@ function showSuggestions() {
     searchReply: searchHits,
     searchSuggestions: S.prefs.searchSuggestions,
     searchUrl: S.prefs.searchUrl,
+    home: S.home,
     isPrivate,
   })
   if (isEmpty(model)) return hideSuggestions()

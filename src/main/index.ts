@@ -53,6 +53,7 @@ import { takeUpdateRelaunch, Updates } from './updates'
 import { Zoom, ZOOM_STEPS, zoomSite } from './zoom'
 import { rm, writeFile } from 'node:fs/promises'
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net'
+import { homedir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -241,6 +242,7 @@ function state(): UiState {
     activeExtensions: actionExtensions(active?.profile),
     tabExtensions: tabExtensions(),
     profiles: settings.profiles,
+    home: homedir(),
     filter,
     scope,
     apps: appLabels(),
@@ -869,6 +871,8 @@ function runAction(id: ActionId) {
       tabs.create({ profile: ids[(ids.indexOf(cur) + 1) % ids.length], ...scopeFields() })
       return focusAddressBar()
     }
+    case 'openFile':
+      return void openFiles()
     case 'closeTab':
       if (settingsShown) panel.ui.send('settings', { open: false })
       else if (historyShown) panel.ui.send('history', { open: false })
@@ -2325,6 +2329,20 @@ function removeApp(key: string) {
   setLinkedApps(settings.linkedApps.map((g) => g.filter((id) => !ids.includes(id))))
 }
 
+/** ⌘O: files from this computer, each in a tab of its own, in the profile new tabs use. */
+async function openFiles() {
+  const { canceled, filePaths } = await dialog.showOpenDialog(panel.win, {
+    title: 'Open a file',
+    buttonLabel: 'Open',
+    properties: ['openFile', 'multiSelections'],
+  })
+  if (canceled) return
+  for (const file of filePaths) {
+    tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
+    tabs.navigate(pathToFileURL(file).href)
+  }
+}
+
 async function addApp() {
   const { canceled, filePaths } = await dialog.showOpenDialog(panel.win, {
     title: 'Add an app',
@@ -2836,6 +2854,7 @@ function buildAppMenu() {
           item('newTabNextProfile', 'New Tab in Next Profile'),
           { label: 'New Folder', click: () => newFolder() },
           item('reopenTab', 'Reopen Closed Tab'),
+          item('openFile', 'Open File…'),
           item('history', 'Show History'),
           { type: 'separator' },
           item('closeTab', 'Close Tab'),

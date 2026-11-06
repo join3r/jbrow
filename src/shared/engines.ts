@@ -74,10 +74,13 @@ export function forcedSearch(text: string): string | undefined {
  * Return does what the suggestions say it will, so both ask this. A dotted host whose last label
  * has a letter (example.com, münchen.de, not v1.2.3) gets https://. Hosts that are usually on your
  * own machine or network get http://, since they rarely have a certificate: localhost, IP
- * addresses, and a bare name with a port or path (nas:5000, router/).
+ * addresses, and a bare name with a port or path (nas:5000, router/). A path on this computer
+ * (/Users/me/a.pdf, ~/Downloads, C:\notes.txt) opens as a file:// URL; `home` is the folder ~ means.
  */
-export function addressUrl(input: string): string | undefined {
+export function addressUrl(input: string, home = ''): string | undefined {
   const t = input.trim()
+  const file = fileUrl(t, home)
+  if (file) return file
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t) || /^(about|chrome-extension|file):/i.test(t)) return t
   const m = /^(\[[\da-f:.]+\]|[\p{L}\p{N}_.-]+)(:\d+)?(\/\S*)?$/iu.exec(t)
   if (!m) return undefined
@@ -91,4 +94,18 @@ export function addressUrl(input: string): string | undefined {
   const labels = host.split('.')
   if (labels.length > 1 && labels.every(Boolean) && /\p{L}/u.test(labels.at(-1)!)) return `https://${t}`
   return undefined
+}
+
+/**
+ * A path on this computer as a file:// URL, or undefined for what isn't one. Spaces and # stay
+ * part of the name. `~` only counts with a home folder to put in its place.
+ */
+export function fileUrl(text: string, home = ''): string | undefined {
+  let p = text.trim()
+  if (home && (p === '~' || p.startsWith('~/'))) p = home.replace(/\/+$/, '') + p.slice(1)
+  const drive = /^[a-z]:[\\/]/i.test(p)
+  if (drive) p = '/' + p.replace(/\\/g, '/')
+  // One leading slash: //host is a network address.
+  if (!/^\/(?!\/)/.test(p)) return undefined
+  return 'file://' + p.split('/').map((seg, i) => (drive && i === 1 ? seg : encodeURIComponent(seg))).join('/')
 }

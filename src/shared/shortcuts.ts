@@ -69,6 +69,7 @@ export const ACTIONS = [
   { id: 'newTabNextProfile', label: 'New tab in the next profile', key: 'Command+Shift+N' },
   { id: 'closeTab', label: 'Close tab', key: 'Command+W' },
   { id: 'reopenTab', label: 'Reopen closed tab', key: 'Command+Shift+T' },
+  { id: 'openFile', label: 'Open a file', key: 'Command+O' },
   { id: 'previousTab', label: 'Previous tab', key: 'Control+Tab' },
   { id: 'splitView', label: 'Split view', key: 'Command+D' },
   { id: 'paneLeft', label: 'Focus the pane on the left', key: 'Command+Control+Left' },

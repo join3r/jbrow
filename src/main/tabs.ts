@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, WebContentsView, clipboard, shell, type Rectangle, type WebContents } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { bezier } from '../shared/ease'
@@ -15,6 +16,7 @@ import type { DangerousSites } from './dangerous'
 import { deviceBounds, deviceUserAgent, emulate } from './device'
 import type { DeviceChooser } from './devices'
 import { faviconUrl } from './favicons'
+import { listFolders } from './folder-listing'
 import type { Logins } from './logins'
 import type { SitePermissions } from './permissions'
 import type { ProfileRuntime } from './profiles'
@@ -648,6 +650,8 @@ export class Tabs {
     const onNav = (_e: unknown, url: string) => {
       const r = rec()
       if (r) {
+        // A file may have no title, and Chromium then sends none: the last page's would stay.
+        if (/^file:/i.test(url) && url.split('#')[0] !== r.url.split('#')[0]) r.title = ''
         r.url = url
         // A kept tab that had no page yet (a new pane split from one) is kept on its first.
         if (r.kept && !r.home) this.setHome(r)
@@ -655,6 +659,13 @@ export class Tabs {
       }
       this.saveHistory()
     }
+    listFolders(wc, {
+      shown: (url) => {
+        if (rec()?.url !== url) onNav(null, url)
+        this.deps.onVisit(rec()?.profile ?? rt.profile.id, url, id)
+      },
+      openTab: (url) => this.create({ profile: rec()?.profile ?? rt.profile.id, opener: id, url, activate: false, unread: true }),
+    })
     wc.on('did-navigate', (e, url) => {
       if (this.live.get(id)?.wc === wc) this.typedInto.delete(id)
       // The site answered, over https or after falling back: nothing left to wait for.
@@ -2000,6 +2011,6 @@ const hasPages = (node: ImportedNode): boolean => 'url' in node || node.children
 export function toUrl(input: string, searchUrl: string, search = false): string {
   const text = input.trim()
   const query = search ? text : forcedSearch(text)
-  const url = query === undefined ? addressUrl(text) : undefined
+  const url = query === undefined ? addressUrl(text, homedir()) : undefined
   return url ?? searchUrl.replace('%s', encodeURIComponent(query ?? text))
 }
