@@ -322,6 +322,7 @@ function renderPanes() {
     paneBgs.innerHTML = ''
     root.style.removeProperty('--fx')
     root.style.removeProperty('--fw')
+    barEl.classList.add('first')
     renderPaneBars([], [])
     return
   }
@@ -331,6 +332,7 @@ function renderPanes() {
   const f = spans[focused]
   root.style.setProperty('--fx', `${f.x}px`)
   root.style.setProperty('--fw', `${f.width}px`)
+  barEl.classList.toggle('first', f.x === 0)
   // The suggestions are at least SUGGEST_WIDTH wide; with no room for that right of the pane they grow leftward.
   barEl.classList.toggle('grow-left', f.x + Math.max(f.width, SUGGEST_WIDTH) > contentEl.clientWidth)
   paneBgs.innerHTML = split.tabs
@@ -426,6 +428,7 @@ function renderPaneBars(ids: string[], spans: { x: number; width: number }[]) {
     }
     el.style.left = `${spans[i].x}px`
     el.style.width = `${spans[i].width}px`
+    el.classList.toggle('first', spans[i].x === 0)
     paintBar(el, p.color)
     lantern(el, id, p.loading)
     const prof = profile(t.profile)

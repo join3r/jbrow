@@ -20,6 +20,11 @@ export const SIDE_HEADER = 32
 /** The smallest you can drag the window to: the sidebar and a usable page. */
 const MIN_SIZE = [SIDEBAR_WIDTH + 360, TOOLBAR_HEIGHT + 300] as const
 /**
+ * The traffic lights' top-left corner, centered on the row above the sidebar (and, with the
+ * sidebar hidden, at the start of the first address bar, which leaves them room: --lights in ui.css).
+ */
+const TRAFFIC_LIGHTS = { x: 16, y: GUTTER + BAR_HEIGHT / 2 - 7 }
+/**
  * The unpinned panel's level: one below floating, still over every normal window. Chromium's
  * picture-in-picture window is on the floating level itself, so it stays on top of jbrow, as do
  * extension popups and sign-in windows. On the same level, focusing the panel would cover it.
@@ -135,7 +140,10 @@ export class Panel {
       // apps and takes keyboard focus without pulling the whole app forward.
       type: 'panel',
       show: false,
-      frame: false,
+      // A titled window with its title bar hidden: no frame of its own, but the traffic lights.
+      // Close hides jbrow; minimize and zoom are off, as the panel has neither.
+      titleBarStyle: 'hidden',
+      trafficLightPosition: TRAFFIC_LIGHTS,
       transparent: true,
       backgroundColor: '#00000000',
       vibrancy: 'under-window',
@@ -183,6 +191,14 @@ export class Panel {
       this.remember()
     })
     this.win.on('move', () => this.remember())
+    // The red light hides jbrow, like the hotkey. Quitting still closes the window.
+    let quitting = false
+    app.on('before-quit', () => (quitting = true))
+    this.win.on('close', (e) => {
+      if (quitting) return
+      e.preventDefault()
+      void this.hide()
+    })
     // A panel never activates jbrow on its own, so a pinned one does it when clicked.
     this.win.on('focus', () => this.pinned && !BACKGROUND && app.focus({ steal: true }))
   }
@@ -225,10 +241,12 @@ export class Panel {
       this.beforeFullscreen = this.win.getBounds()
       const { bounds } = screen.getDisplayMatching(this.beforeFullscreen)
       this.win.setAlwaysOnTop(true, 'screen-saver')
+      this.win.setWindowButtonVisibility(false)
       this.setFrame(BACKGROUND ? { ...offScreen(), width: bounds.width, height: bounds.height } : bounds)
       this.showNotice(site, bounds.width)
     } else {
       this.win.setAlwaysOnTop(!this.pinned, ...LEVEL)
+      this.win.setWindowButtonVisibility(true)
       if (this.beforeFullscreen) this.setFrame(this.beforeFullscreen)
       this.beforeFullscreen = null
     }
