@@ -191,6 +191,8 @@ export class Panel {
       this.remember()
     })
     this.win.on('move', () => this.remember())
+    // The traffic lights only show pinned, when jbrow is a regular window (setPinned).
+    this.win.setWindowButtonVisibility(false)
     // The red light hides jbrow, like the hotkey. Quitting still closes the window.
     let quitting = false
     app.on('before-quit', () => (quitting = true))
@@ -217,6 +219,8 @@ export class Panel {
     if (this.visible && !this.animating && !this.pageFullscreen) this.savePlace()
     this.win.setAlwaysOnTop(!on, ...LEVEL)
     this.win.setVisibleOnAllWorkspaces(!on, { visibleOnFullScreen: !on })
+    // A regular window has traffic lights; the ethereal panel comes and goes on its hotkey without them.
+    if (!this.pageFullscreen) this.win.setWindowButtonVisibility(on)
     if (BACKGROUND) return
     if (on) {
       void app.dock?.show().then(() => {
@@ -246,7 +250,7 @@ export class Panel {
       this.showNotice(site, bounds.width)
     } else {
       this.win.setAlwaysOnTop(!this.pinned, ...LEVEL)
-      this.win.setWindowButtonVisibility(true)
+      this.win.setWindowButtonVisibility(this.pinned)
       if (this.beforeFullscreen) this.setFrame(this.beforeFullscreen)
       this.beforeFullscreen = null
     }

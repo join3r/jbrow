@@ -4267,6 +4267,8 @@ window.jbrow.on('state', (state: UiState) => {
   if (S && !S.pinned && state.pinned) flourish($('pin').querySelector('svg'), 'wiggle')
   setWhimsy(state.prefs.whimsy)
   root.classList.toggle('sidebar-hidden', state.prefs.hideSidebar)
+  // Only the pinned window has traffic lights; unpinned, nothing makes room for them.
+  root.classList.toggle('lights', state.pinned)
   if (!state.prefs.hideSidebar) setPeek(false)
   S = state
   historyPage.setProfiles(state.profiles)
