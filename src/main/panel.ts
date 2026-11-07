@@ -3,9 +3,27 @@ import path from 'node:path'
 import { bezier, cssEase, EASE } from '../shared/ease'
 import type { AnimMessage } from '../shared/types'
 import { BACKGROUND } from './background'
+import { lastInput, type LastInput } from './input'
 import type { AnimationStyle, Settings } from './settings'
 
 const debug = (...args: unknown[]) => process.env.JBROW_DEBUG && console.log('[panel]', ...args)
+
+/**
+ * How recent a click or key press must be to count as the cause of a lost focus. The check comes
+ * 90 ms after the blur, and asking macOS takes about 50 ms more.
+ */
+const CLICK_AWAY_S = 0.6
+
+/**
+ * Whether a click or key press took the focus from the panel. Some apps take the focus back by
+ * themselves (a game, for example, does it some times a second): with no click or key press since
+ * jbrow showed, the panel stays. A click on the panel itself doesn't count, as that app can take
+ * the focus right after it. `shownFor` is the time since the panel started to show, in seconds.
+ */
+export function isClickAway(input: LastInput, shownFor: number, pointerOnPanel: boolean): boolean {
+  const recent = (s: number) => s <= CLICK_AWAY_S && s < shownFor
+  return recent(input.key) || (recent(input.click) && !pointerOnPanel)
+}
 
 /** Sidebar and toolbar sizes; must match src/ui/ui.css. */
 export const SIDEBAR_WIDTH = 256
@@ -104,6 +122,8 @@ export class Panel {
   private endTween: (() => void) | null = null
   /** Bumped by every show and hide, so an interrupted one knows to stop. */
   private run = 0
+  /** When the last show started (performance.now()). */
+  private shownAt = 0
   private overlay = false
   /** Where the window is, or is going while it animates. */
   private target: Rectangle = { x: 0, y: 0, width: 0, height: 0 }
@@ -700,6 +720,7 @@ export class Panel {
     const run = ++this.run
     this.visible = true
     this.animating = true
+    this.shownAt = performance.now()
     this.target = this.place()
     this.wakeUi(true)
     // The live page is in the window from the start, while the window is still transparent.
@@ -760,7 +781,8 @@ export class Panel {
   /**
    * Hide on click-away. Called whenever one of jbrow's windows loses focus. Focus moving
    * to another jbrow window (an extension popup, a sign-in popup, devtools) or to a
-   * system sheet jbrow opened (file picker, permission dialog) doesn't count.
+   * system sheet jbrow opened (file picker, permission dialog) doesn't count, and nor does an
+   * app that takes the focus without a click or key press (see isClickAway).
    */
   checkClickAway(isOwnModalFront: () => Promise<boolean>) {
     setTimeout(async () => {
@@ -769,6 +791,16 @@ export class Panel {
       if (BrowserWindow.getFocusedWindow()) return
       if (await isOwnModalFront()) return debug('blur ignored: jbrow is the frontmost app')
       if (!this.visible || BrowserWindow.getFocusedWindow()) return
+      const input = await lastInput()
+      if (!this.visible || this.animating || BrowserWindow.getFocusedWindow() || this.win.isDestroyed()) return
+      const shownFor = (performance.now() - this.shownAt) / 1000
+      const point = screen.getCursorScreenPoint()
+      const b = this.win.getBounds()
+      const onPanel = point.x >= b.x && point.x < b.x + b.width && point.y >= b.y && point.y < b.y + b.height
+      // If macOS can't say, a lost focus hides the panel, as before.
+      if (input && !isClickAway(input, shownFor, onPanel)) {
+        return console.log('[panel] another app took the focus without a click or key press; the panel stays', input)
+      }
       await this.hide()
     }, 90)
   }
