@@ -3,7 +3,7 @@
 // popup and a redirect.
 import assert from 'node:assert/strict'
 import { after, before, beforeEach, test } from 'node:test'
-import { ALT, html, launch, serve, waitFor, type Jbrow, type TestServer } from './harness'
+import { ALT, html, launch, serve, sleep, waitFor, type Jbrow, type TestServer } from './harness'
 import { activeTab, offline, realClick, shownPage, tabById, waitLoaded } from './tab-helpers'
 
 let jb: Jbrow
@@ -72,6 +72,26 @@ test('typed over a page of another profile, it opens next to it and the page sta
   assert.equal(opened.profile, 'personal')
   assert.equal(activeTab(s)!.id, opened.id)
   assert.ok(tabById(s, id)!.url.startsWith(`${web.url}/links`))
+})
+
+test('Return on a site of another profile closes the address bar, and it stays closed', async () => {
+  const { page } = await workLinks()
+  page.close()
+  const ui = await jb.ui()
+  await jb.send('focus-ui')
+  await ui.eval('omnibox.focus()')
+  await waitFor(() => ui.eval<boolean>("document.activeElement?.id === 'omnibox'"), 'the address bar to have focus')
+  await ui.eval("omnibox.value = ''")
+  await ui.type(`${home}/home`)
+  await ui.eval("window.__barOpened = 0; omnibox.addEventListener('focus', () => window.__barOpened++)")
+  await ui.press('Enter')
+  const s = await homeTab(jb)
+  assert.equal(activeTab(s)!.profile, 'personal')
+  // The new tab was empty for a moment before it got the page; that mustn't open the bar again.
+  await sleep(300)
+  assert.equal(await ui.eval<number>('window.__barOpened'), 0)
+  assert.equal(await ui.eval<boolean>("document.getElementById('suggest').hidden"), true)
+  assert.notEqual(await ui.eval<string>('document.activeElement?.id'), 'omnibox')
 })
 
 test('a profile picked with Tab wins', async () => {

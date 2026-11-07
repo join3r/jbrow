@@ -504,8 +504,15 @@ function focusActive() {
   const rec = tabs.active()
   if (rec && wc && tabs.covered(rec.id)) panel.ui.focus()
   else if (wc && rec?.url) wc.focus()
-  else focusAddressBar()
+  else if (!openingFromBar) focusAddressBar()
 }
+
+/**
+ * Set while the address bar opens what you typed. A tab it makes for that (in another profile, a
+ * new tab, a new pane) is empty for a moment before it gets the page, and focusing the address bar
+ * for it then opened the bar again over the page you just went to.
+ */
+let openingFromBar = false
 
 /** You're typing in the address bar: from the first suggestions it asks for until it closes. */
 let typingInBar = false
@@ -2516,7 +2523,15 @@ function wireIpc() {
     tabs.newTab({ profile: newTabProfile(), ...scopeFields() })
     focusAddressBar()
   })
-  on<{ input: string; profile?: string; search?: boolean; open?: 'tab' | 'split' }>('navigate', ({ input, profile, search, open }) => {
+  on<{ input: string; profile?: string; search?: boolean; open?: 'tab' | 'split' }>('navigate', (request) => {
+    openingFromBar = true
+    try {
+      navigateFromBar(request)
+    } finally {
+      openingFromBar = false
+    }
+  })
+  function navigateFromBar({ input, profile, search, open }: { input: string; profile?: string; search?: boolean; open?: 'tab' | 'split' }) {
     // A site with a profile of its own opens there, unless you picked one with Tab.
     if (!profile && open !== 'split') profile = siteProfile(toUrl(input, settings.searchUrl, search))
     const cur = tabs.active()
@@ -2534,7 +2549,7 @@ function wireIpc() {
     }
     if (tabs.activeId) historyLog.intend(tabs.activeId, 'typed')
     tabs.navigate(input, search)
-  })
+  }
   on<{ input: string; profile?: string; seq: number }>('suggest', (request) => suggest(request))
   on('suggest-cancel', () => {
     typingInBar = false
