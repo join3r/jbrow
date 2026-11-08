@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A page that fails to load says what went wrong, with Try again, instead of a white tab.
+- Sites on your local network (Home Assistant, a router, a printer) load again: macOS now asks to
+  let jbrow reach them. If you turned it off, the error page opens System Settings → Local Network.
 - Open files and folders on your computer: type a path in the address bar (/Users/…, ~/Downloads)
   or pick files with File → Open File… (⌘O). A folder opens as a list of what's in it; click to go
   in, ⌘-click to open in a new tab.

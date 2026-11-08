@@ -17,6 +17,7 @@ import { deviceBounds, deviceUserAgent, emulate } from './device'
 import type { DeviceChooser } from './devices'
 import { faviconUrl } from './favicons'
 import { listFolders } from './folder-listing'
+import { showLoadErrors } from './load-error'
 import type { Logins } from './logins'
 import type { SitePermissions } from './permissions'
 import type { ProfileRuntime } from './profiles'
@@ -666,6 +667,8 @@ export class Tabs {
       },
       openTab: (url) => this.create({ profile: rec()?.profile ?? rt.profile.id, opener: id, url, activate: false, unread: true }),
     })
+    // A failed https that jbrow added falls back to http instead; jbrow's own screens cover the rest.
+    showLoadErrors(wc, (url, code) => (url === this.upgrades.get(id)?.https && !UPGRADE_KEEP_ERRORS.has(code)) || this.covered(id))
     wc.on('did-navigate', (e, url) => {
       if (this.live.get(id)?.wc === wc) this.typedInto.delete(id)
       // The site answered, over https or after falling back: nothing left to wait for.

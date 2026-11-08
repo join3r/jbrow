@@ -76,7 +76,8 @@
         "NSMicrophoneUsageDescription": "A site you visit wants to use the microphone. jbrow asks you first.",
         "NSLocationUsageDescription": "A site you visit wants your location. jbrow asks you first.",
         "NSLocationWhenInUseUsageDescription": "A site you visit wants your location. jbrow asks you first.",
-        "NSBluetoothAlwaysUsageDescription": "A site you visit wants to use a Bluetooth device."
+        "NSBluetoothAlwaysUsageDescription": "A site you visit wants to use a Bluetooth device.",
+      "NSLocalNetworkUsageDescription": "Sites on your local network, such as a router, printer or Home Assistant, open in jbrow."
       }
     },
     "win": {
