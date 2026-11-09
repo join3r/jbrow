@@ -529,11 +529,12 @@ function refocusStray() {
 /**
  * Gives the keyboard back to the address bar you're typing in, and tells the UI so, as the bar
  * waits for it a little longer then (leftBar in ui.ts). On Linux a focus asked for while a page
- * takes the keyboard has no effect, so it's asked for again once that's done.
+ * takes the keyboard has no effect, so it's asked for again once that's done. macOS gives it at once.
  */
 function refocusBar() {
   panel.ui.focus()
   panel.ui.send('bar-refocus')
+  if (process.platform === 'darwin') return
   setTimeout(() => {
     if (!typingInBar || !panel.visible || panel.win.isDestroyed() || panel.ui.isFocused()) return
     if (process.env.JBROW_DEBUG) console.log('[focus] the address bar again')
