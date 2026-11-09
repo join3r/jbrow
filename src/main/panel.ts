@@ -247,17 +247,29 @@ export class Panel {
     this.win.setAlwaysOnTop(!on, ...LEVEL)
     this.win.setVisibleOnAllWorkspaces(!on, { visibleOnFullScreen: !on })
     // A regular window has traffic lights; the ethereal panel comes and goes on its hotkey without them.
-    if (!this.pageFullscreen) this.win.setWindowButtonVisibility(on)
+    if (!this.pageFullscreen) this.showLights(on)
     if (BACKGROUND) return
     if (on) {
       void app.dock?.show().then(() => {
-        if (this.visible && !this.win.isDestroyed()) app.focus({ steal: true })
+        if (this.win.isDestroyed()) return
+        // Joining the Dock lays the title bar out again, with the lights at their default place.
+        if (!this.pageFullscreen) this.showLights(true)
+        if (this.visible) app.focus({ steal: true })
       })
     } else {
       app.dock?.hide()
       // Leaving the Dock deactivates jbrow; keep the panel in front and focused.
       if (this.visible) this.win.focus()
     }
+  }
+
+  /**
+   * Shows or hides the traffic lights. macOS puts lights that come back at their default place,
+   * high in the corner, so they go back to TRAFFIC_LIGHTS each time.
+   */
+  private showLights(on: boolean) {
+    this.win.setWindowButtonVisibility(on)
+    if (on) this.win.setWindowButtonPosition(TRAFFIC_LIGHTS)
   }
 
   /**
@@ -277,7 +289,7 @@ export class Panel {
       this.showNotice(site, bounds.width)
     } else {
       this.win.setAlwaysOnTop(!this.pinned, ...LEVEL)
-      this.win.setWindowButtonVisibility(this.pinned)
+      this.showLights(this.pinned)
       if (this.beforeFullscreen) this.setFrame(this.beforeFullscreen)
       this.beforeFullscreen = null
     }
