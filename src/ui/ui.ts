@@ -1301,6 +1301,13 @@ const layoutHost: LayoutHost = {
 }
 /** How long the address bar waits for the keyboard to come back before it closes; see leftBar. */
 const BAR_AWAY_MS = 150
+/**
+ * How long it waits when jbrow says it gives the keyboard back (bar-refocus): Windows and Linux
+ * can take half a second to hand it to the UI.
+ */
+const BAR_REFOCUS_MS = 1500
+/** When jbrow last said it gives the keyboard back to the address bar. */
+let barRefocusAt = -Infinity
 /** Set while the address bar waits to close; see leftBar. */
 let barAway: number | undefined
 /** The keyboard is in the address bar: its text, or a field of the layout's own in the suggestions. */
@@ -1323,13 +1330,25 @@ const withinBar = (to: EventTarget | null) => to instanceof Node && (to === omni
  */
 function leftBar(to: EventTarget | null) {
   if (withinBar(to)) return
-  if (document.hasFocus()) return closeBar()
+  // The keyboard moved within the UI (Escape, a click elsewhere), even while the UI waits for the
+  // window's focus. A page that takes the keyboard leaves the address bar the UI's focused element.
+  if (document.hasFocus() || !barFocused()) return closeBar()
+  waitForBar(performance.now() - barRefocusAt < BAR_REFOCUS_MS ? BAR_REFOCUS_MS : BAR_AWAY_MS)
+}
+/** The address bar closes in `ms` unless the keyboard comes back to it first (backInBar). */
+function waitForBar(ms: number) {
   clearTimeout(barAway)
   barAway = window.setTimeout(() => {
     barAway = undefined
     if (!editing()) closeBar()
-  }, BAR_AWAY_MS)
+  }, ms)
 }
+// jbrow gives the keyboard back to the address bar: a page took it while you typed. Its message
+// can come before or after the UI loses the keyboard, so the bar waits longer either way.
+window.jbrow.on('bar-refocus', () => {
+  barRefocusAt = performance.now()
+  if (barAway !== undefined) waitForBar(BAR_REFOCUS_MS)
+})
 /** Whether the keyboard is back in the address bar before it closed (see leftBar). */
 function backInBar(): boolean {
   if (barAway === undefined) return false

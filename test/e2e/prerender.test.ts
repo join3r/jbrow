@@ -130,9 +130,7 @@ test('the page loading ahead leaves the keyboard with the address bar', async ()
   await jb.navigate(`${web.url}/`)
 })
 
-// On Windows and Linux the page loaded ahead or a reload of the page in front still takes the
-// address bar's keyboard and text (to do).
-test('the address bar keeps what you typed while a page loads ahead, or the page in front takes the keyboard', { skip: process.platform !== 'darwin' && 'the address bar keeps the keyboard only on macOS yet' }, async () => {
+test('the address bar keeps what you typed while a page loads ahead, or the page in front takes the keyboard', async () => {
   // The tests' focus emulation keeps the UI from ever losing the keyboard, which hides this; it's
   // off here. Another jbrow coming up takes the keyboard too, for longer, and then it's tried again.
   const ui = await jb.ui()
@@ -163,10 +161,14 @@ test('the address bar keeps what you typed while a page loads ahead, or the page
       const away = await ui.eval<{ blurs: number; long: boolean }>('__away')
       const focused = await ui.eval<boolean>('document.hasFocus()')
       if ((away.long || !focused) && attempt < 3) {
+        // A blur while the UI waits for the window's focus doesn't reach the address bar.
+        await waitFor(() => ui.eval<boolean>('document.hasFocus()'), 'the UI to have the keyboard')
         await ui.eval('omnibox.blur()')
         continue
       }
-      assert.equal(ahead.blurs, 0, 'the page loading ahead took the keyboard')
+      // On Windows the hidden page takes the keyboard for a moment as it starts, and jbrow gives it
+      // straight back; what you typed stays all the same.
+      if (process.platform === 'darwin') assert.equal(ahead.blurs, 0, 'the page loading ahead took the keyboard')
       assert.equal(await ui.eval('omnibox.value'), host)
       assert.equal(await ui.eval('suggest.hidden'), false)
       assert.equal(await focusedId(ui), 'omnibox')

@@ -522,8 +522,23 @@ let typingInBar = false
  * navigates. It goes back to the address bar if you're typing there; otherwise to what's in front.
  */
 function refocusStray() {
-  if (typingInBar && panel.visible && !panel.win.isDestroyed()) return void panel.ui.focus()
+  if (typingInBar && panel.visible && !panel.win.isDestroyed()) return refocusBar()
   focusActive()
+}
+
+/**
+ * Gives the keyboard back to the address bar you're typing in, and tells the UI so, as the bar
+ * waits for it a little longer then (leftBar in ui.ts). On Linux a focus asked for while a page
+ * takes the keyboard has no effect, so it's asked for again once that's done.
+ */
+function refocusBar() {
+  panel.ui.focus()
+  panel.ui.send('bar-refocus')
+  setTimeout(() => {
+    if (!typingInBar || !panel.visible || panel.win.isDestroyed() || panel.ui.isFocused()) return
+    if (process.env.JBROW_DEBUG) console.log('[focus] the address bar again')
+    panel.ui.focus()
+  }, 0)
 }
 
 /** When each page last had a mouse button pressed in it: clicking a page is how you mean to give it the keyboard. */
@@ -544,7 +559,7 @@ function guardAddressBar(wc: Electron.WebContents) {
     if (!typingInBar || wc === panel.ui || !panel.visible || panel.win.isDestroyed()) return
     if (Date.now() - (pressedAt.get(wc) ?? 0) < 1000) return
     if (process.env.JBROW_DEBUG) console.log('[focus] back to the address bar from', wc.getURL())
-    panel.ui.focus()
+    refocusBar()
   })
 }
 
