@@ -47,6 +47,8 @@ test('a refused connection shows an error page, and Try again loads the site onc
     await page.eval('document.querySelector("[data-act=reload]").click()')
     await jb.waitForState((s) => activeTab(s)?.title === 'Back up', 'the site after Try again')
   } finally {
+    // An open keep-alive connection would keep close() waiting for ever.
+    site.closeAllConnections()
     await new Promise<void>((r) => site.close(() => r()))
   }
 })
