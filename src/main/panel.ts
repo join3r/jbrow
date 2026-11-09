@@ -42,6 +42,8 @@ const MIN_SIZE = [SIDEBAR_WIDTH + 360, TOOLBAR_HEIGHT + 300] as const
  * sidebar hidden, at the start of the first address bar, which leaves them room: --lights in ui.css).
  */
 const TRAFFIC_LIGHTS = { x: 16, y: GUTTER + BAR_HEIGHT / 2 - 7 }
+/** Only macOS has traffic lights. On Windows and Linux the window has no frame and no buttons. */
+const LIGHTS = process.platform === 'darwin'
 /**
  * The unpinned panel's level: one below floating, still over every normal window. Chromium's
  * picture-in-picture window is on the floating level itself, so it stays on top of jbrow, as do
@@ -169,8 +171,7 @@ export class Panel {
       show: false,
       // A titled window with its title bar hidden: no frame of its own, but the traffic lights.
       // Close hides jbrow; minimize and zoom are off, as the panel has neither.
-      titleBarStyle: 'hidden',
-      trafficLightPosition: TRAFFIC_LIGHTS,
+      ...(LIGHTS ? { titleBarStyle: 'hidden' as const, trafficLightPosition: TRAFFIC_LIGHTS } : { frame: false }),
       transparent: true,
       backgroundColor: '#00000000',
       vibrancy: 'under-window',
@@ -219,15 +220,17 @@ export class Panel {
     })
     this.win.on('move', () => this.remember())
     // The traffic lights only show pinned, when jbrow is a regular window (setPinned).
-    this.win.setWindowButtonVisibility(false)
-    // The red light hides jbrow, like the hotkey. Quitting still closes the window.
-    let quitting = false
-    app.on('before-quit', () => (quitting = true))
-    this.win.on('close', (e) => {
-      if (quitting) return
-      e.preventDefault()
-      void this.hide()
-    })
+    if (LIGHTS) {
+      this.win.setWindowButtonVisibility(false)
+      // The red light hides jbrow, like the hotkey. Quitting still closes the window.
+      let quitting = false
+      app.on('before-quit', () => (quitting = true))
+      this.win.on('close', (e) => {
+        if (quitting) return
+        e.preventDefault()
+        void this.hide()
+      })
+    }
     // A panel never activates jbrow on its own, so a pinned one does it when clicked.
     this.win.on('focus', () => this.pinned && !BACKGROUND && app.focus({ steal: true }))
   }
@@ -268,6 +271,7 @@ export class Panel {
    * high in the corner, so they go back to TRAFFIC_LIGHTS each time.
    */
   private showLights(on: boolean) {
+    if (!LIGHTS) return
     this.win.setWindowButtonVisibility(on)
     if (on) this.win.setWindowButtonPosition(TRAFFIC_LIGHTS)
   }
@@ -284,7 +288,7 @@ export class Panel {
       this.beforeFullscreen = this.win.getBounds()
       const { bounds } = screen.getDisplayMatching(this.beforeFullscreen)
       this.win.setAlwaysOnTop(true, 'screen-saver')
-      this.win.setWindowButtonVisibility(false)
+      this.showLights(false)
       this.setFrame(BACKGROUND ? { ...offScreen(), width: bounds.width, height: bounds.height } : bounds)
       this.showNotice(site, bounds.width)
     } else {

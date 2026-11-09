@@ -7,7 +7,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto'
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { after, before, test } from 'node:test'
-import { Cdp, launch, removeDir, tempDir, waitFor, type Jbrow } from './harness'
+import { Cdp, launch, removeDir, SANDBOXED, tempDir, waitFor, type Jbrow } from './harness'
 
 const HOST = 'com.jbrow.e2e_host'
 let jb: Jbrow
@@ -57,7 +57,10 @@ after(async () => {
   if (dir) await removeDir(dir)
 })
 
-test('a service worker that crashed while holding a native host is started again and reconnects', async () => {
+// Without the sandbox, workers get Chromium's connectNative, which turns native hosts away.
+const skip = !SANDBOXED && 'no sandbox here (Linux as root, or without user namespaces), so no native messaging in service workers'
+
+test('a service worker that crashed while holding a native host is started again and reconnects', { skip }, async () => {
   await waitFor(() => connections() === 1, 'the extension to open its host', 20_000)
   const worker = await waitFor(
     async () => (await jb.targets()).find((t) => t.type === 'service_worker' && t.url.endsWith('/sw.js')),

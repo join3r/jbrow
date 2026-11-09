@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { homedir } from 'node:os'
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { describe, test } from 'node:test'
 import { toUrl } from '../../src/main/tabs'
 
@@ -72,8 +74,9 @@ describe('toUrl', () => {
     assert.equal(toUrl('/', SEARCH), 'file:///')
     // Spaces, # and ? are part of the name.
     assert.equal(toUrl('/Users/me/My Docs/a #1?.pdf', SEARCH), 'file:///Users/me/My%20Docs/a%20%231%3F.pdf')
-    assert.equal(toUrl('~/Downloads', SEARCH), `file://${homedir()}/Downloads`)
-    assert.equal(toUrl('~', SEARCH), `file://${homedir()}`)
+    // The home folder is C:\Users\… on Windows.
+    assert.equal(toUrl('~/Downloads', SEARCH), pathToFileURL(path.join(homedir(), 'Downloads')).href)
+    assert.equal(toUrl('~', SEARCH), pathToFileURL(homedir()).href)
     assert.equal(toUrl('C:\\Users\\me\\a.txt', SEARCH), 'file:///C:/Users/me/a.txt')
     // A ? in front still searches, and //host isn't a path.
     assert.equal(toUrl('?/tmp', SEARCH), 'https://search.example/?q=%2Ftmp')
