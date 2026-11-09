@@ -99,8 +99,9 @@ Electron. End-to-end tests (`test/e2e`) start the built app with `JBROW_BACKGROU
 own user data folder, and drive it over CDP (`test/e2e/harness.ts`), so they run next to the jbrow
 you use. They never touch the internet: pages come from a local server. On Linux each jbrow gets
 its own Xvfb display, since X11 hands keyboard focus to whichever window asked last. CI runs it all
-on macOS, Windows and Linux (`.github/workflows/test.yml`); run that workflow by hand with
-**repeat** set to run every test several times.
+on Windows and Linux (`.github/workflows/test.yml`); run that workflow by hand with **repeat** set
+to run every test several times. macOS is tested on the Mac that builds the release
+(`scripts/release.sh` runs `npm test`), as each platform is tested where it is built.
 
 ## Build and install it
 
@@ -145,8 +146,9 @@ jbrow can't read other files on your Mac. That's also why the UI lives outside `
 npm run release
 ```
 
-`scripts/release.sh` checks that the tree is clean and pushed, that the test workflow passed on it,
-that the version has no release yet and that CHANGELOG.md has its section. It makes a draft release
+`scripts/release.sh` checks that the tree is clean and pushed, that the test workflow passed on it
+(Windows and Linux), that the version has no release yet and that CHANGELOG.md has its section, and
+runs all the tests on this Mac. It makes a draft release
 with those notes and pushes the tag `v<version>`, which starts `.github/workflows/release.yml`: that
 builds the Windows installer and `latest.yml`, and the AppImage, `.deb` and `latest-linux.yml`, on
 GitHub's runners, and uploads them to the draft. Meanwhile the script builds with `JBROW_RELEASE=1`

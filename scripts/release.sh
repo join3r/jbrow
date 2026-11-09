@@ -7,6 +7,8 @@
 # is published once all three are on it, so nobody downloads or updates to half a release. Only
 # builds made here and in that workflow update themselves.
 #
+# The Mac build is tested here before it is built, as Windows and Linux are tested on GitHub.
+#
 # Needs: a clean tree pushed to GitHub with the test workflow green on it, a version that has no
 # release yet and its section in CHANGELOG.md ("## <version>", which becomes the release notes),
 # the Developer ID identity in your keychain, Apple credentials for notarizing (an App Store
@@ -27,6 +29,7 @@ fail() { echo "release: $*" >&2; exit 1 }
 git fetch --quiet origin
 [[ -n $(git branch -r --contains HEAD) ]] || fail "push $(git rev-parse --short HEAD) to GitHub first"
 # Windows and Linux are built where they're tested, so they ship only when those tests pass.
+# The test workflow has no macOS: the Mac build is tested below, on this Mac.
 [[ $(gh run list -R $REPO --workflow test.yml --commit $SHA --json conclusion --jq 'map(select(.conclusion == "success")) | length') -gt 0 ]] ||
   fail "the test workflow hasn't passed on $(git rev-parse --short HEAD) yet"
 DRAFT=$(gh api "repos/$REPO/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\") | .draft")
@@ -38,6 +41,12 @@ NOTES=$(awk -v head="## $VERSION" '$0 == head { on = 1; next } /^## / && on { ex
   -n ${APPLE_KEYCHAIN_PROFILE:-} || ( -n ${APPLE_ID:-} && -n ${APPLE_APP_SPECIFIC_PASSWORD:-} && -n ${APPLE_TEAM_ID:-} ) ]] ||
   fail "no Apple credentials for notarizing (APPLE_API_KEY, APPLE_API_KEY_ID and APPLE_API_ISSUER, or APPLE_KEYCHAIN_PROFILE, or APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID)"
 export GH_TOKEN=${GH_TOKEN:-$(gh auth token)}
+
+# The Mac build is made here, so it is tested here, before anything is published.
+echo "release: testing on this Mac"
+npm run setup >/dev/null
+# One jbrow at a time: on the Mac they take the keyboard from each other, which fails tests.
+JBROW_TEST_CONCURRENCY=1 npm test || fail "the tests failed on this Mac"
 
 # The draft comes first: builders that find no release each make one, and two at once make two.
 if [[ -z $DRAFT ]]; then
