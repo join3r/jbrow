@@ -57,8 +57,11 @@ after(async () => {
   if (dir) await removeDir(dir)
 })
 
-// Without the sandbox, workers get Chromium's connectNative, which turns native hosts away.
-const skip = !SANDBOXED && 'no sandbox here (Linux as root, or without user namespaces), so no native messaging in service workers'
+// Without the sandbox, workers get Chromium's connectNative, which turns native hosts away. The
+// test's host is a shell script, and Windows finds hosts in the registry.
+const skip =
+  (process.platform === 'win32' && 'the test host is a shell script') ||
+  (!SANDBOXED && 'no sandbox here (Linux as root, or without user namespaces), so no native messaging in service workers')
 
 test('a service worker that crashed while holding a native host is started again and reconnects', { skip }, async () => {
   await waitFor(() => connections() === 1, 'the extension to open its host', 20_000)

@@ -14,8 +14,9 @@ let dir: string
 const url = (...parts: string[]) => pathToFileURL(path.join(dir, ...parts)).href
 
 before(async () => {
-  // realpath: macOS's /var is a link to /private/var, and Chromium reports the real path.
-  dir = realpathSync(mkdtempSync(path.join(tmpdir(), 'jbrow-files-')))
+  // realpath: macOS's /var is a link to /private/var, and Windows' temp folder can have a short
+  // name (RUNNER~1); Chromium reports the real, long path.
+  dir = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'jbrow-files-')))
   writeFileSync(path.join(dir, 'page.html'), '<title>Local page</title><p>hello')
   writeFileSync(path.join(dir, 'notes.txt'), 'plain text')
   mkdirSync(path.join(dir, 'sub folder'))

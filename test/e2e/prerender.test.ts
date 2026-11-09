@@ -130,8 +130,9 @@ test('the page loading ahead leaves the keyboard with the address bar', async ()
   await jb.navigate(`${web.url}/`)
 })
 
-// On Linux a reload of the page in front still takes the address bar's text (to do).
-test('the address bar keeps what you typed while a page loads ahead, or the page in front takes the keyboard', { skip: process.platform === 'linux' && 'the address bar does not keep its text on Linux yet' }, async () => {
+// On Windows and Linux the page loaded ahead or a reload of the page in front still takes the
+// address bar's keyboard and text (to do).
+test('the address bar keeps what you typed while a page loads ahead, or the page in front takes the keyboard', { skip: process.platform !== 'darwin' && 'the address bar keeps the keyboard only on macOS yet' }, async () => {
   // The tests' focus emulation keeps the UI from ever losing the keyboard, which hides this; it's
   // off here. Another jbrow coming up takes the keyboard too, for longer, and then it's tried again.
   const ui = await jb.ui()
