@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - Security updates: Electron 44.10.2 (Chromium security fixes, and a block on the compromised
   eMudhra intermediate certificates), and adm-zip 0.6.1 for extensions from the Chrome Web Store.
@@ -21,6 +21,18 @@
   a page you've typed into; turn it off under Settings → Address bar.
 - The address bar keeps the keyboard and what you typed when a page navigates on its own, in front
   or in a background tab, or a permission prompt comes up.
+- Tabs from an app are grouped by the conversation, mail thread or project you opened them in (a
+  Slack DM, a Mail thread, a VS Code project). ⌥⇧Space shows all of the app's tabs, the group you
+  came from on top. Drag a tab onto a group to move it. Turn it off under Apps → Conversations.
+- Show a page as a desktop, tablet or phone would, from the extensions menu.
+- With Whimsy on, a firefly circles a loading tab's icon, and a lantern and fireflies show while a
+  page has nothing to show yet.
+- The traffic lights show on the pinned window, and the red one hides jbrow. The panel has none.
+- ⌥Space brings jbrow to the front when it's pinned behind another window, and jbrow no longer
+  hides when you open it from the menu bar and another app takes the focus by itself.
+- An empty tab shows the key that shows and hides jbrow.
+- Extensions that talk to an app on your Mac (native messaging) recover when their worker crashes,
+  and a debugger attached to a sleeping tab follows it when it wakes.
 - The mini player moves to another corner when you switch to a window it covers out of the box.
 - The welcome's Tabs step shows an old YouTube tab filing itself into the YouTube folder instead of
   archiving.
