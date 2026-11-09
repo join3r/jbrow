@@ -530,15 +530,17 @@ function refocusStray() {
 let barRefocusAgainAt = 0
 
 /**
- * Gives the keyboard back to the address bar you're typing in. macOS gives it at once. On Linux a
- * focus asked for while a page takes the keyboard has no effect, so it's asked for again once
- * that's done, and on Windows and Linux the UI is told, as the bar waits for it a little longer
- * then (leftBar in ui.ts).
+ * Gives the keyboard back to the address bar you're typing in. macOS gives it at once. On Windows
+ * and Linux the UI is told, as the bar waits for it a little longer then (leftBar in ui.ts). On
+ * Linux a focus asked for while a page takes the keyboard has no effect, so it's asked for again
+ * once that's done.
  */
 function refocusBar() {
   panel.ui.focus()
   if (process.platform === 'darwin') return
   panel.ui.send('bar-refocus')
+  // On Windows focusing the UI also brings its window forward, from whatever has the keyboard.
+  if (process.platform !== 'linux') return
   // Focusing the UI can pass the keyboard through a page, which would ask again, and again.
   if (Date.now() - barRefocusAgainAt < 500) return
   barRefocusAgainAt = Date.now()
