@@ -117,6 +117,13 @@ export class Panel {
   private uiView: WebContentsView
   visible = false
   pinned = false
+  /**
+   * Shown and in front: jbrow has the keyboard focus, in this window or in one of its others (a
+   * popup, devtools). A pinned window behind another app's window is visible but not in front.
+   */
+  get inFront() {
+    return this.visible && !!BrowserWindow.getFocusedWindow()
+  }
   private animating = false
   private tween: NodeJS.Timeout | null = null
   private endTween: (() => void) | null = null

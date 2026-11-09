@@ -717,21 +717,22 @@ async function summon() {
   focusActive()
 }
 
+/** The hotkey hides jbrow only when it is in front. Behind another window, it comes to the front. */
 async function onHotkey() {
-  if (panel.visible && !scope) return panel.hide()
+  if (panel.inFront && !scope) return panel.hide()
   scope = null
   await summon()
 }
 
 async function onAppHotkey() {
-  const front = panel.visible ? null : await frontmostApp()
+  const front = panel.inFront ? null : await frontmostApp()
   if (front && front.pid !== process.pid) {
     lastFront = front
     apps.note(front.bundleId, front.name)
   }
   if (!lastFront) return onHotkey()
   const key = scopeForApp(settings, lastFront.bundleId)
-  if (panel.visible && scope?.key === key) return panel.hide()
+  if (panel.inFront && scope?.key === key) return panel.hide()
   const context = front ? await contextFor(front) : scope?.key === key ? scope.context : undefined
   scope = { key, name: scopeName(key), context: context ?? undefined }
   filter = 'all'
