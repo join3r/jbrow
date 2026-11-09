@@ -607,7 +607,8 @@ svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-widt
 .side-body { flex: 1; min-height: 0; border-radius: 9px; background: var(--surface); }
 .covering .side-body { background: none; }
 body.resizing, body.resizing * { cursor: col-resize !important; }
-.blank { padding: 56px 48px; max-width: 640px; }
+.blank { padding: calc(56px + var(--lift, 0px)) 48px 56px; max-width: 640px; transition: padding-top 0.18s ease; }
+@media (prefers-reduced-motion: reduce) { .blank { transition: none; } }
 .blank h1 { font-size: 26px; font-weight: 600; margin: 0 0 8px; }
 .blank p { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
 .blank-profile { display: flex; align-items: center; gap: 10px; margin-bottom: 28px; color: var(--muted); }

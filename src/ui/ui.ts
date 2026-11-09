@@ -215,6 +215,7 @@ function render() {
       .map((x) => `<button data-profile="${esc(x.id)}" aria-pressed="${x.id === opensIn}">${dot(x)}${esc(x.name)}</button>`)
       .join('')
     const keys: [string, string][] = [
+      [keyLabel('show'), 'Show or hide jbrow'],
       [keyLabel('newTab'), 'New tab'],
       [keyLabel('newTabNextProfile'), 'New tab in the next profile'],
       ['Tab', 'Switch the profile a typed address opens in'],
@@ -231,6 +232,7 @@ function render() {
       .join('')
   }
   syncCovering()
+  liftBlank()
   renderSidePanel()
   renderPanes()
   settleActivate()
@@ -1474,6 +1476,18 @@ function syncOverlay() {
     send('overlay', { on })
   }
   syncCovering()
+  liftBlank()
+}
+
+/**
+ * The address bar's suggestions open over an empty tab's page. While they show, the page's text
+ * moves down below them, so you can still read it.
+ */
+function liftBlank() {
+  const blank = $('blank')
+  const box = blank.hidden || suggest.hidden ? null : suggest.getBoundingClientRect()
+  const lift = box ? Math.max(0, Math.round(box.bottom + 24 - blank.getBoundingClientRect().top - 56)) : 0
+  blank.style.setProperty('--lift', `${lift}px`)
 }
 
 /** While jbrow's UI is above a live page, the page area turns clear so the page shows through. */
