@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+
+- Windows and Linux: the address bar keeps what you typed when a page takes the keyboard (a page
+  that loads ahead, or a reload of the page in front).
+
 ## 0.3.0
 
 - Security updates: Electron 44.10.2 (Chromium security fixes, and a block on the compromised
