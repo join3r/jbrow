@@ -136,6 +136,11 @@ test('the address bar keeps what you typed while a page loads ahead, or the page
   const ui = await jb.ui()
   await ui.send('Emulation.setFocusEmulationEnabled', { enabled: false })
   const host = new URL(alphaUrl).host
+  const tryAgain = async () => {
+    // A blur while the UI waits for the window's focus doesn't reach the address bar.
+    await waitFor(() => ui.eval<boolean>('document.hasFocus()'), 'the UI to have the keyboard')
+    await ui.eval('omnibox.blur()')
+  }
   try {
     for (let attempt = 1; ; attempt++) {
       await focusOmnibox(ui)
@@ -147,8 +152,18 @@ test('the address bar keeps what you typed while a page loads ahead, or the page
         addEventListener('focus', () => { if (performance.now() - __away.at > 100) __away.long = true })
       })()`)
       await ui.type('alph')
-      await waitFor(async () => (await ui.eval('omnibox.value')) === host, 'the completion')
-      await waitFor(hiddenAlpha, 'a hidden page for alpha.test')
+      // Another jbrow taking the keyboard here closes the bar, and the page loaded ahead goes with it.
+      const ready = await waitFor(async () => (await ui.eval('omnibox.value')) === host && (await hiddenAlpha()), 'the completion and a hidden page for alpha.test', 5_000).then(
+        () => true,
+        (e) => {
+          if (attempt >= 3) throw e
+          return false
+        },
+      )
+      if (!ready) {
+        await tryAgain()
+        continue
+      }
       await sleep(500)
       // Loading ahead never takes the keyboard.
       const ahead = await ui.eval<{ blurs: number; long: boolean }>('__away')
@@ -161,9 +176,7 @@ test('the address bar keeps what you typed while a page loads ahead, or the page
       const away = await ui.eval<{ blurs: number; long: boolean }>('__away')
       const focused = await ui.eval<boolean>('document.hasFocus()')
       if ((away.long || !focused) && attempt < 3) {
-        // A blur while the UI waits for the window's focus doesn't reach the address bar.
-        await waitFor(() => ui.eval<boolean>('document.hasFocus()'), 'the UI to have the keyboard')
-        await ui.eval('omnibox.blur()')
+        await tryAgain()
         continue
       }
       // On Windows the hidden page takes the keyboard for a moment as it starts, and jbrow gives it
