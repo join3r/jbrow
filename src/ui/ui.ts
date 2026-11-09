@@ -1330,9 +1330,7 @@ const withinBar = (to: EventTarget | null) => to instanceof Node && (to === omni
  */
 function leftBar(to: EventTarget | null) {
   if (withinBar(to)) return
-  // The keyboard moved within the UI (Escape, a click elsewhere), even while the UI waits for the
-  // window's focus. A page that takes the keyboard leaves the address bar the UI's focused element.
-  if (document.hasFocus() || !barFocused()) return closeBar()
+  if (document.hasFocus()) return closeBar()
   waitForBar(performance.now() - barRefocusAt < BAR_REFOCUS_MS ? BAR_REFOCUS_MS : BAR_AWAY_MS)
 }
 /** The address bar closes in `ms` unless the keyboard comes back to it first (backInBar). */
