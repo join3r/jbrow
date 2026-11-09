@@ -90,5 +90,5 @@ it first, it can hold addresses you visited).
 
 ## License
 
-[GPL-3.0-only](https://www.gnu.org/licenses/gpl-3.0.html), as electron-chrome-extensions requires.
+[GPL-3.0-only](https://www.gnu.org/licenses/gpl-3.0.html).
 Third-party software and data are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

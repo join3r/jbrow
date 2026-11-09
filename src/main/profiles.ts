@@ -107,7 +107,6 @@ export async function setupProfile(profile: Profile, settings: Settings, { hooks
   sess.registerPreloadScript({ id: 'jbrow-user-scripts', type: 'frame', filePath: path.join(__dirname, 'preload-user-scripts.js') })
 
   const extensions = new ElectronChromeExtensions({
-    license: 'GPL-3.0',
     session: sess,
     ...hooks(profile.id),
   })

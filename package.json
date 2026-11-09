@@ -25,15 +25,15 @@
     "release": "scripts/release.sh"
   },
   "dependencies": {
-    "electron-chrome-extensions": "4.9.0",
+    "electron-chrome-extensions": "4.10.0",
     "electron-chrome-web-store": "0.13.0",
-    "electron-updater": "6.8.10"
+    "electron-updater": "6.8.11"
   },
   "devDependencies": {
-    "@types/chrome": "0.3.4",
+    "@types/chrome": "0.3.7",
     "@types/node": "22.19.0",
-    "electron": "44.7.0",
-    "electron-builder": "26.17.0",
+    "electron": "44.10.2",
+    "electron-builder": "26.18.0",
     "esbuild": "0.28.2",
     "typescript": "7.0.2"
   },
@@ -77,7 +77,7 @@
         "NSLocationUsageDescription": "A site you visit wants your location. jbrow asks you first.",
         "NSLocationWhenInUseUsageDescription": "A site you visit wants your location. jbrow asks you first.",
         "NSBluetoothAlwaysUsageDescription": "A site you visit wants to use a Bluetooth device.",
-      "NSLocalNetworkUsageDescription": "Sites on your local network, such as a router, printer or Home Assistant, open in jbrow."
+        "NSLocalNetworkUsageDescription": "Sites on your local network, such as a router, printer or Home Assistant, open in jbrow."
       }
     },
     "win": {
@@ -154,5 +154,8 @@
     "asarUnpack": [
       "dist/ui/**"
     ]
+  },
+  "overrides": {
+    "adm-zip": "0.6.1"
   }
 }

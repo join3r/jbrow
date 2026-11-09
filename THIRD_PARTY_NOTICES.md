@@ -19,14 +19,14 @@ dependencies.
 
 | Package | License | Copyright |
 |---|---|---|
-| [electron-chrome-extensions](https://github.com/samuelmaddock/electron-browser-shell) 4.9.0 | GPL-3.0 (see below) | Samuel Maddock |
+| [electron-chrome-extensions](https://github.com/samuelmaddock/electron-browser-shell) 4.10.0 | MIT | Copyright (c) 2021 Samuel Maddock |
 | [electron-chrome-web-store](https://github.com/samuelmaddock/electron-browser-shell) 0.13.0 | MIT | Samuel Maddock \<sam@samuelmaddock.com\> |
-| [electron-updater](https://github.com/electron-userland/electron-builder) 6.8.10 | MIT | Copyright (c) 2015 Loopline Systems |
+| [electron-updater](https://github.com/electron-userland/electron-builder) 6.8.11 | MIT | Copyright (c) 2015 Loopline Systems |
 | builder-util-runtime 9.7.0 | MIT | Copyright (c) 2015 Loopline Systems |
 | lazy-val 1.0.5 | MIT | Vladimir Krivosheev |
 | debug 4.4.3 | MIT | Copyright (c) 2014-2017 TJ Holowaychuk; Copyright (c) 2018-2021 Josh Junon |
 | ms 2.1.3 | MIT | Copyright (c) 2020 Vercel, Inc. |
-| adm-zip 0.5.18 | MIT | Copyright (c) 2012 Another-D-Mention Software and other contributors |
+| adm-zip 0.6.1 | MIT | Copyright (c) 2012 Another-D-Mention Software and other contributors |
 | pbf 4.0.2 | BSD-3-Clause | Copyright (c) 2024, Mapbox |
 | resolve-protobuf-schema 2.1.0 | MIT | Copyright (c) 2014 Mathias Buus |
 | protocol-buffers-schema 3.6.1 | MIT | Copyright (c) 2014 Mathias Buus |
@@ -39,7 +39,7 @@ dependencies.
 | argparse 2.0.1 | Python-2.0 | Copyright (c) 2001-2020 Python Software Foundation |
 | lodash.escaperegexp 4.1.2 | MIT | Copyright jQuery Foundation and other contributors; based on Underscore.js, copyright Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors |
 | lodash.isequal 4.5.0 | MIT | Copyright JS Foundation and other contributors; based on Underscore.js, copyright Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors |
-| semver 7.7.4 | ISC | Copyright (c) Isaac Z. Schlueter and Contributors |
+| semver 7.8.5 | ISC | Copyright (c) Isaac Z. Schlueter and Contributors |
 | tiny-typed-emitter 2.1.0 | MIT | Copyright (c) 2020 Zurab Benashvili |
 | @types/chrome 0.0.287, @types/filesystem 0.0.36, @types/filewriter 0.0.33, @types/har-format 1.2.16 | MIT | Copyright (c) Microsoft Corporation |
 
@@ -48,10 +48,9 @@ electron-chrome-web-store and contain no code that runs.
 
 ### electron-chrome-extensions
 
-electron-chrome-extensions is dual licensed: under the GNU General Public License v3.0, or under a
-Patron License for those who sponsor its author. jbrow uses it under the GPL-3.0, which is why jbrow
-itself is GPL-3.0. jbrow patches it at build time (`scripts/patch-deps.mjs`); the patches are part
-of jbrow's source. The license text is at <https://www.gnu.org/licenses/gpl-3.0.txt>.
+electron-chrome-extensions is MIT licensed from version 4.10.0. Earlier versions were dual licensed,
+under GPL-3.0 or a Patron License. jbrow patches it at build time (`scripts/patch-deps.mjs`); the
+patches are part of jbrow's source. Its license text ships with the app, in its package folder.
 
 ### electron-chrome-web-store
 

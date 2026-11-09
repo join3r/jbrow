@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Security updates: Electron 44.10.2 (Chromium security fixes, and a block on the compromised
+  eMudhra intermediate certificates), and adm-zip 0.6.1 for extensions from the Chrome Web Store.
 - A page that fails to load says what went wrong, with Try again, instead of a white tab.
 - Sites on your local network (Home Assistant, a router, a printer) load again: macOS now asks to
   let jbrow reach them. If you turned it off, the error page opens System Settings → Local Network.
